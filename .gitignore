@@ -24,6 +24,9 @@ Thumbs.db
 # Job data (runtime generated)
 data/jobs/
 
+# Database (generated)
+data/aigv.db
+
 # Logs
 *.log
 

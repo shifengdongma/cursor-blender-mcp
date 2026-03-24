@@ -1,0 +1,489 @@
+{
+  "project_metrics": [
+    {
+      "id": "library_capacity",
+      "title": "素材库容量",
+      "value": "2TB",
+      "description": "面向文创场景的多模态 AIGV 创意素材库演示指标"
+    },
+    {
+      "id": "scene_count",
+      "title": "示范场景",
+      "value": "3+",
+      "description": "至少覆盖剧院、画廊、博物馆、音乐厅等典型空间"
+    },
+    {
+      "id": "ip_outputs",
+      "title": "软件成果",
+      "value": "2 项",
+      "description": "形成算力支撑系统与文创素材平台相关软著成果"
+    },
+    {
+      "id": "enterprise_service",
+      "title": "服务企业",
+      "value": "10 家",
+      "description": "面向文创、游戏、演艺机构的申报考核目标"
+    }
+  ],
+  "model_catalog": [
+    {
+      "id": "seedance_pro",
+      "display_model": "Seedance v1.5 Pro",
+      "execution_provider": "seedance",
+      "route_mode": "native",
+      "status": "active",
+      "recommended": true,
+      "description": "当前演示版真实执行主通道，适合文生视频与结构化 Prompt 验证",
+      "style_hint": "cinematic motion consistency, polished lighting transitions"
+    },
+    {
+      "id": "sora2_showcase",
+      "display_model": "OpenAI Sora 2",
+      "execution_provider": "seedance",
+      "route_mode": "demo-route",
+      "status": "showcase",
+      "description": "申报展示模型，当前演示环境由 Seedance 代执行",
+      "style_hint": "director-grade cinematic realism, controlled optical storytelling"
+    },
+    {
+      "id": "veo3_showcase",
+      "display_model": "Google Veo 3",
+      "execution_provider": "seedance",
+      "route_mode": "demo-route",
+      "status": "showcase",
+      "description": "申报展示模型，强调建筑稳定性与大场景运动语义",
+      "style_hint": "stable architectural motion, large-scale spatial coherence"
+    },
+    {
+      "id": "runway_gen3_showcase",
+      "display_model": "Runway Gen-3 Alpha",
+      "execution_provider": "seedance",
+      "route_mode": "demo-route",
+      "status": "showcase",
+      "description": "申报展示模型，当前演示环境由 Seedance 代执行",
+      "style_hint": "camera-control aware motion, elegant frame-to-frame continuity"
+    },
+    {
+      "id": "kling3_showcase",
+      "display_model": "Kling 3.0",
+      "execution_provider": "seedance",
+      "route_mode": "demo-route",
+      "status": "showcase",
+      "description": "申报展示模型，适合长镜头沉浸漫游语义表达",
+      "style_hint": "long-take immersive motion, persistent subject consistency"
+    },
+    {
+      "id": "luma_optional",
+      "display_model": "Luma Dream Machine",
+      "execution_provider": "luma",
+      "route_mode": "optional",
+      "status": "optional",
+      "description": "预留的可选执行通道，可用于后续图生视频试验",
+      "style_hint": "dreamlike atmosphere, image-to-video friendly composition"
+    },
+    {
+      "id": "mcp_remote_placeholder",
+      "display_model": "Remote Blender MCP Pipeline",
+      "execution_provider": "preview_only",
+      "route_mode": "preview-only",
+      "status": "placeholder",
+      "description": "预留的远端 Blender MCP 联调入口，当前演示版仅做占位展示",
+      "style_hint": ""
+    }
+  ],
+  "shot_catalog": [
+    {
+      "id": "orbit",
+      "label": "Slow 360-degree Orbit",
+      "camera_move_type": "orbit",
+      "prompt": "Pristine 360-degree orbiting shot"
+    },
+    {
+      "id": "dolly_in",
+      "label": "Cinematic Slow Push-in",
+      "camera_move_type": "dolly_in",
+      "prompt": "Slow push-in shot"
+    },
+    {
+      "id": "crane_up",
+      "label": "Majestic Crane Shot",
+      "camera_move_type": "crane_up",
+      "prompt": "Majestic crane shot rising slowly"
+    },
+    {
+      "id": "tracking",
+      "label": "Smooth Eye-level Tracking",
+      "camera_move_type": "tracking",
+      "prompt": "Smooth eye-level tracking shot"
+    },
+    {
+      "id": "fpv",
+      "label": "Dynamic FPV Fly-through",
+      "camera_move_type": "fpv",
+      "prompt": "Dynamic FPV fly-through shot"
+    },
+    {
+      "id": "macro_pan",
+      "label": "Macro Slow-motion Pan",
+      "camera_move_type": "macro_pan",
+      "prompt": "Macro slow-motion pan shot"
+    },
+    {
+      "id": "low_angle_glide",
+      "label": "Low Angle Glide",
+      "camera_move_type": "low_angle_glide",
+      "prompt": "Low angle gliding shot"
+    }
+  ],
+  "lexicon_catalog": [
+    {
+      "term": "Rack Focus / Focus Pull",
+      "goal": "焦点切换",
+      "usage": "让焦点从前景观众或展柜玻璃切换到核心展品，增强叙事层次。"
+    },
+    {
+      "term": "Volumetric Lighting",
+      "goal": "体积光",
+      "usage": "在剧院、博物馆或古建空间中制造深度分层和历史沉淀感。"
+    },
+    {
+      "term": "Low Angle Gliding",
+      "goal": "低机位压迫感",
+      "usage": "突出博物馆巨型骨架、雕塑或大体量空间的结构尺度。"
+    },
+    {
+      "term": "Strong Rim Lighting",
+      "goal": "轮廓分离",
+      "usage": "适合人物或器物高光时刻，让主体从暗背景中清晰剥离。"
+    },
+    {
+      "term": "Caustics / Bounce Light",
+      "goal": "折射与反射",
+      "usage": "强化玻璃展柜、大理石地面和抛光木饰面的物理质感。"
+    }
+  ],
+  "venue_catalog": [
+    {
+      "id": "grand_theater",
+      "name": "大剧院",
+      "hero_title": "巴洛克歌剧院 · 开幕前的宏大建立镜头",
+      "description": "面向剧院与演艺空间的奢华、静谧与开演前期待感表达。",
+      "default_subject": "plush crimson velvet seats, ornate gilded balconies, glowing crystal chandelier",
+      "default_dynamics": "dust motes dancing in the light beams, heavy curtains subtly swaying",
+      "default_environment": "historic Baroque opera house interior featuring tiered curved balconies, ornate gilded stucco, and intricate ceiling frescoes",
+      "default_lighting": "atmospheric volumetric spotlight, warm amber rim lighting cutting through theatrical haze, deep chiaroscuro shadows",
+      "default_style": "High-fidelity architectural visualization, warm golden tones, 8k, hyper-realistic texture",
+      "default_shot": "crane_up",
+      "default_camera_move": "crane_up",
+      "workflow_recommendation": "hybrid_image_to_video",
+      "camera_defaults": {
+        "radius_m": 7.0,
+        "height_m": 2.2,
+        "target": [0.0, 0.0, 4.8]
+      },
+      "negative_prompt_parts": [
+        "warped pillars",
+        "melting balconies",
+        "plastic texture"
+      ]
+    },
+    {
+      "id": "modern_gallery",
+      "name": "现代画廊",
+      "hero_title": "白立方画廊 · 沉浸式漫游体验",
+      "description": "强调白立方空间、平静漫游和艺术展陈的秩序感。",
+      "default_subject": "minimalist white sculptures, polished concrete floors, pristine white gallery walls",
+      "default_dynamics": "soft visitor silhouettes drifting in the background, subtle skylight reflections moving across the floor",
+      "default_environment": "minimalist modern art gallery with a white cube layout, polished concrete floors, frosted skylights, and disciplined exhibition spacing",
+      "default_lighting": "soft diffused daylight, natural skylight, high key lighting with no harsh shadows",
+      "default_style": "serene architectural visualization, contemplative mood, muted color palette, refined gallery realism",
+      "default_shot": "tracking",
+      "default_camera_move": "tracking",
+      "workflow_recommendation": "text_to_video",
+      "camera_defaults": {
+        "radius_m": 5.0,
+        "height_m": 1.65,
+        "target": [0.0, 0.0, 1.4]
+      },
+      "negative_prompt_parts": [
+        "crowd",
+        "harsh shadows",
+        "messy layout"
+      ]
+    },
+    {
+      "id": "ancient_museum",
+      "name": "古典博物馆",
+      "hero_title": "古典博物馆 · 巨兽大厅的深夜",
+      "description": "突出历史沉淀、神秘氛围与文物微观纹理细节。",
+      "default_subject": "colossal dinosaur skeletons, oxidized bronze artifacts, translucent Carrara marble sculptures",
+      "default_dynamics": "wisps of museum haze drifting slowly, dust motes dancing in god rays, long shadows stretching across stone floors",
+      "default_environment": "grand Beaux-Arts museum hall with massive Corinthian marble columns, high windows, and curated antiquities",
+      "default_lighting": "cool moonlight blue lighting mixed with warm amber directional spotlight, volumetric fog, dramatic long shadows",
+      "default_style": "National Geographic documentary realism, mysterious atmosphere, ultra-detailed texture fidelity",
+      "default_shot": "low_angle_glide",
+      "default_camera_move": "low_angle_glide",
+      "workflow_recommendation": "hybrid_image_to_video",
+      "camera_defaults": {
+        "radius_m": 6.5,
+        "height_m": 1.1,
+        "target": [0.0, 0.0, 2.4]
+      },
+      "negative_prompt_parts": [
+        "broken anatomy",
+        "warped skeleton",
+        "cartoon look"
+      ]
+    },
+    {
+      "id": "concert_hall",
+      "name": "声学音乐厅",
+      "hero_title": "音乐厅 · 交响乐团的史诗环绕",
+      "description": "用于音乐厅建筑美学、木质声学结构与沉浸式声场表达。",
+      "default_subject": "grand piano, polished mahogany acoustic panels, gleaming brass instruments",
+      "default_dynamics": "floating dust in warm beams, restrained orchestral micro-movements, subtle reflected highlights across wood panels",
+      "default_environment": "vineyard-style concert hall with terraced seating surrounding a central stage, clad in undulating acoustic wood panels",
+      "default_lighting": "warm golden hour lighting, dim ambient house light, warm practical lighting from music stands",
+      "default_style": "immersive concert cinematography, architectural symmetry, epic yet refined acoustic atmosphere",
+      "default_shot": "orbit",
+      "default_camera_move": "orbit",
+      "workflow_recommendation": "hybrid_image_to_video",
+      "camera_defaults": {
+        "radius_m": 6.2,
+        "height_m": 1.8,
+        "target": [0.0, 0.0, 1.8]
+      },
+      "negative_prompt_parts": [
+        "broken perspective",
+        "floating instruments",
+        "flat lighting"
+      ]
+    }
+  ],
+  "asset_catalog": [
+    {
+      "id": "text_only",
+      "name": "纯文生视频",
+      "venue_type": "",
+      "workflow_mode": "text_to_video",
+      "source_type": "Prompt only",
+      "description": "不绑定底层空间资产，直接使用知识增强后的 Prompt 执行生成。",
+      "asset_kind": "prompt_only",
+      "file_format": "N/A",
+      "recommended": false,
+      "showcase": false,
+      "metadata": {
+        "pipeline": "Prompt only",
+        "note": "适合概念验证和快速生成"
+      },
+      "placeholder_geometry": [],
+      "negative_prompt_parts": []
+    },
+    {
+      "id": "opera_house_anchor",
+      "name": "Classical Opera House Blockout",
+      "venue_type": "grand_theater",
+      "workflow_mode": "hybrid_image_to_video",
+      "source_type": "UE5 + 三维扫描",
+      "description": "基于剧院场景扫描和 UE 精修逻辑抽象的空间白模锚点。",
+      "asset_kind": "spatial_anchor",
+      "file_format": "GLB",
+      "recommended": true,
+      "showcase": true,
+      "metadata": {
+        "capture_pipeline": "实景扫描 + UE5 精修",
+        "compliance": "JGJ57-2016",
+        "reflectance_range": "0.3-0.5"
+      },
+      "placeholder_geometry": [
+        {
+          "kind": "plane",
+          "name": "StageFloor",
+          "location": [0, 0, 0],
+          "rotation_euler": [0, 0, 0],
+          "scale": [14, 9, 1]
+        },
+        {
+          "kind": "cube",
+          "name": "MainStage",
+          "location": [0, 1.8, 1.0],
+          "rotation_euler": [0, 0, 0],
+          "scale": [4.5, 2.0, 1.0]
+        },
+        {
+          "kind": "cube",
+          "name": "AudienceBlock",
+          "location": [0, -2.8, 1.2],
+          "rotation_euler": [0, 0, 0],
+          "scale": [6.5, 2.0, 1.2]
+        }
+      ],
+      "negative_prompt_parts": [
+        "collapsed seating"
+      ]
+    },
+    {
+      "id": "white_cube_anchor",
+      "name": "White Cube Gallery Anchor",
+      "venue_type": "modern_gallery",
+      "workflow_mode": "hybrid_image_to_video",
+      "source_type": "UE5 场景搭建",
+      "description": "面向白立方画廊漫游与展陈验证的空间底板资产。",
+      "asset_kind": "spatial_anchor",
+      "file_format": "GLB",
+      "recommended": true,
+      "showcase": true,
+      "metadata": {
+        "capture_pipeline": "UE5 白模搭建",
+        "compliance": "展陈间距校验",
+        "reflectance_range": "0.3-0.4"
+      },
+      "placeholder_geometry": [
+        {
+          "kind": "plane",
+          "name": "GalleryFloor",
+          "location": [0, 0, 0],
+          "rotation_euler": [0, 0, 0],
+          "scale": [10, 10, 1]
+        },
+        {
+          "kind": "cube",
+          "name": "WallMass",
+          "location": [-3.5, 0, 2.0],
+          "rotation_euler": [0, 0, 0],
+          "scale": [0.2, 4.2, 2.0]
+        },
+        {
+          "kind": "cube",
+          "name": "PedestalCore",
+          "location": [1.2, 0.2, 0.8],
+          "rotation_euler": [0, 0, 0],
+          "scale": [0.7, 0.7, 0.8]
+        }
+      ],
+      "negative_prompt_parts": [
+        "crooked wall"
+      ]
+    },
+    {
+      "id": "museum_hall_anchor",
+      "name": "Ancient Museum Hall Anchor",
+      "venue_type": "ancient_museum",
+      "workflow_mode": "hybrid_image_to_video",
+      "source_type": "三维扫描 + 素材复原",
+      "description": "面向博物馆巨型展厅、文物展柜和历史空间约束的混合生成底板。",
+      "asset_kind": "spatial_anchor",
+      "file_format": "GLB",
+      "recommended": true,
+      "showcase": true,
+      "metadata": {
+        "capture_pipeline": "文博空间扫描",
+        "compliance": "空间纵深与视线约束",
+        "reflectance_range": "0.35-0.45"
+      },
+      "placeholder_geometry": [
+        {
+          "kind": "plane",
+          "name": "MuseumFloor",
+          "location": [0, 0, 0],
+          "rotation_euler": [0, 0, 0],
+          "scale": [12, 12, 1]
+        },
+        {
+          "kind": "cube",
+          "name": "ColumnMass",
+          "location": [-2.5, -1.0, 2.2],
+          "rotation_euler": [0, 0, 0],
+          "scale": [0.8, 0.8, 2.2]
+        },
+        {
+          "kind": "cube",
+          "name": "ExhibitMass",
+          "location": [1.0, 1.5, 1.3],
+          "rotation_euler": [0, 0, 0],
+          "scale": [1.4, 0.8, 1.3]
+        }
+      ],
+      "negative_prompt_parts": [
+        "bent column"
+      ]
+    },
+    {
+      "id": "concert_hall_anchor",
+      "name": "Vineyard Concert Hall Anchor",
+      "venue_type": "concert_hall",
+      "workflow_mode": "hybrid_image_to_video",
+      "source_type": "UE5 + 声学空间重建",
+      "description": "用于音乐厅声学结构、舞台环绕关系与木质面板反光校验的白模锚点。",
+      "asset_kind": "spatial_anchor",
+      "file_format": "GLB",
+      "recommended": true,
+      "showcase": true,
+      "metadata": {
+        "capture_pipeline": "UE5 声学空间搭建",
+        "compliance": "观众视线与舞台中心关系",
+        "reflectance_range": "0.32-0.45"
+      },
+      "placeholder_geometry": [
+        {
+          "kind": "plane",
+          "name": "ConcertFloor",
+          "location": [0, 0, 0],
+          "rotation_euler": [0, 0, 0],
+          "scale": [11, 11, 1]
+        },
+        {
+          "kind": "cube",
+          "name": "CenterStage",
+          "location": [0, 0, 0.6],
+          "rotation_euler": [0, 0, 0],
+          "scale": [2.5, 2.5, 0.6]
+        },
+        {
+          "kind": "cube",
+          "name": "SeatTerrace",
+          "location": [0, -3.0, 1.0],
+          "rotation_euler": [0, 0, 0],
+          "scale": [5.5, 1.8, 1.0]
+        }
+      ],
+      "negative_prompt_parts": [
+        "floating seats"
+      ]
+    }
+  ],
+  "workflow_tips": [
+    {
+      "title": "图生视频优先",
+      "description": "对于复杂建筑或剧院纵深场景，优先绑定空间锚点资产，再让视频模型只负责运镜与微动态。"
+    },
+    {
+      "title": "GraphRAG 本地检索",
+      "description": "本轮演示版使用本地 JSON 规则库与标签命中，模拟 GraphRAG 对场景、材质、光影和工作流的增强。"
+    },
+    {
+      "title": "负向提示词治理",
+      "description": "默认排除 warped pillars、melting architecture、plastic texture 等文创场景常见失真。"
+    },
+    {
+      "title": "多模型展示与单通道执行",
+      "description": "前端可展示 Sora、Veo、Runway、Kling 等模型入口，后端以 Seedance 为真实执行主通道。"
+    }
+  ],
+  "knowledge_rules": {
+    "default_negative_prompt_parts": [
+      "blurry",
+      "distorted",
+      "warped architecture",
+      "broken perspective",
+      "low resolution",
+      "watermark",
+      "text",
+      "shaky camera",
+      "flicker",
+      "overexposed",
+      "underexposed",
+      "bad geometry"
+    ]
+  }
+}

@@ -101,24 +101,21 @@ class PromptOrchestrator(object):
 
         return warnings
 
-    def preview(self, payload):
-        payload = copy.deepcopy(payload or {})
-
-        venue = self._resolve_venue(payload)
-        model = self._resolve_model(payload)
-        asset = self._resolve_asset(payload, venue)
-        shot = self._resolve_shot(payload, venue)
-
+    def _resolve_workflow_mode(self, payload, venue, asset):
         explicit_workflow = _to_text(payload.get("workflow_mode"))
         workflow_mode = explicit_workflow or asset.get("workflow_mode") or venue.get("workflow_recommendation") or "text_to_video"
         if asset.get("id") == "text_only" and not explicit_workflow:
             workflow_mode = "text_to_video"
+        return workflow_mode
 
+    def _build_prompt_modules(self, payload, venue, model, asset, shot, workflow_mode):
         subject = _to_text(payload.get("subject_hint")) or venue.get("default_subject") or ""
         dynamics = _to_text(payload.get("dynamics_hint")) or venue.get("default_dynamics") or ""
         environment = _to_text(payload.get("environment_hint")) or venue.get("default_environment") or ""
         lighting = _to_text(payload.get("lighting_hint")) or venue.get("default_lighting") or ""
         style_anchor = _to_text(payload.get("style_anchor")) or venue.get("default_style") or ""
+        engine_target = _to_text(payload.get("engine_target")) or "blender_anchor"
+        render_mode = _to_text(payload.get("render_mode")) or "cinematic"
 
         subject_parts = [subject]
         if workflow_mode == "hybrid_image_to_video" and asset.get("id") != "text_only":
@@ -133,8 +130,10 @@ class PromptOrchestrator(object):
             style_parts.append(model.get("style_hint"))
         if workflow_mode == "hybrid_image_to_video":
             style_parts.append("preserve structural proportions and keep architecture stable across frames")
+        style_parts.append("engine target {0}".format(engine_target))
+        style_parts.append("render mode {0}".format(render_mode))
 
-        prompt_modules = {
+        return {
             "camera": shot.get("prompt") or venue.get("default_camera_prompt") or "Cinematic camera move",
             "subject": _join_fragments(subject_parts),
             "dynamics": dynamics,
@@ -143,21 +142,30 @@ class PromptOrchestrator(object):
             "style": _join_fragments(style_parts),
         }
 
-        prompt = (
-            "{camera}, {subject}, {dynamics}, {environment}, {lighting}, {style}.".format(
-                camera=prompt_modules.get("camera") or "",
-                subject=prompt_modules.get("subject") or "",
-                dynamics=prompt_modules.get("dynamics") or "",
-                environment=prompt_modules.get("environment") or "",
-                lighting=prompt_modules.get("lighting") or "",
-                style=prompt_modules.get("style") or "",
-            )
-        )
+    def _assemble_prompt(self, prompt_modules):
+        ordered_values = [
+            prompt_modules.get("camera"),
+            prompt_modules.get("subject"),
+            prompt_modules.get("dynamics"),
+            prompt_modules.get("environment"),
+            prompt_modules.get("lighting"),
+            prompt_modules.get("style"),
+        ]
+        fragments = [item for item in ordered_values if _to_text(item)]
+        return "{0}.".format(", ".join(fragments)) if fragments else ""
 
-        negative_prompt = self._build_negative_prompt(payload, venue, asset)
-        warnings = self._build_warnings(model, asset, workflow_mode)
+    def _build_execution_plan(self, model):
+        execution_provider = model.get("execution_provider") or "seedance"
+        display_model = model.get("display_model") or model.get("id")
+        route_mode = model.get("route_mode") or "native"
+        return {
+            "execution_provider": execution_provider,
+            "display_model": display_model,
+            "route_mode": route_mode,
+        }
 
-        knowledge_hits = [
+    def _build_knowledge_hits(self, venue, shot, model, asset, workflow_mode):
+        return [
             {
                 "type": "venue",
                 "id": venue.get("id"),
@@ -190,6 +198,22 @@ class PromptOrchestrator(object):
             },
         ]
 
+    def preview(self, payload):
+        payload = copy.deepcopy(payload or {})
+
+        venue = self._resolve_venue(payload)
+        model = self._resolve_model(payload)
+        asset = self._resolve_asset(payload, venue)
+        shot = self._resolve_shot(payload, venue)
+
+        workflow_mode = self._resolve_workflow_mode(payload, venue, asset)
+        prompt_modules = self._build_prompt_modules(payload, venue, model, asset, shot, workflow_mode)
+        prompt = self._assemble_prompt(prompt_modules)
+        negative_prompt = self._build_negative_prompt(payload, venue, asset)
+        execution_plan = self._build_execution_plan(model)
+        warnings = self._build_warnings(model, asset, workflow_mode)
+        knowledge_hits = self._build_knowledge_hits(venue, shot, model, asset, workflow_mode)
+
         return {
             "prompt_bundle": {
                 "title": _to_text(payload.get("title")) or venue.get("hero_title") or "文创 AIGV 任务",
@@ -199,18 +223,18 @@ class PromptOrchestrator(object):
                 "workflow_mode": workflow_mode,
                 "shot_id": shot.get("id"),
                 "camera_move_type": shot.get("camera_move_type") or shot.get("id") or venue.get("default_camera_move") or "orbit",
-                "display_model": model.get("display_model"),
-                "execution_provider": model.get("execution_provider"),
-                "route_mode": model.get("route_mode"),
+                "display_model": execution_plan.get("display_model"),
+                "execution_provider": execution_plan.get("execution_provider"),
+                "route_mode": execution_plan.get("route_mode"),
                 "camera_defaults": copy.deepcopy(venue.get("camera_defaults") or {}),
                 "venue_id": venue.get("id"),
                 "venue_name": venue.get("name"),
             },
             "knowledge_hits": knowledge_hits,
             "workflow_mode": workflow_mode,
-            "execution_provider": model.get("execution_provider") or "seedance",
-            "display_model": model.get("display_model") or model.get("id"),
-            "route_mode": model.get("route_mode") or "native",
+            "execution_provider": execution_plan.get("execution_provider"),
+            "display_model": execution_plan.get("display_model"),
+            "route_mode": execution_plan.get("route_mode"),
             "warnings": warnings,
             "asset_bundle": {
                 "id": asset.get("id"),

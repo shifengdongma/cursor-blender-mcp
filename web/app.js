@@ -1,28 +1,43 @@
 (function () {
-  var state = {
-    bootstrap: null,
-    currentJobId: null,
-    pollTimer: null,
-    autoTitle: true,
-  };
-
   var stageOrder = [
     "queued",
     "knowledge_ready",
+    "rights_validated",
+    "resource_scheduling",
     "blender_exporting",
     "provider_submitted",
     "provider_running",
-    "succeeded",
+    "streaming",
+    "billing_recorded",
+    "succeeded"
   ];
 
   var stageLabels = {
     queued: "已创建任务",
     knowledge_ready: "知识检索与 Prompt 编排",
+    rights_validated: "版权校验",
+    resource_scheduling: "算力调度",
     blender_exporting: "Blender 空间导出",
     provider_submitted: "已提交执行通道",
     provider_running: "视频模型处理中",
+    streaming: "推流会话准备",
+    billing_recorded: "计费快照记录",
     succeeded: "生成完成",
-    error: "执行失败",
+    error: "执行失败"
+  };
+
+  var state = {
+    bootstrap: null,
+    currentJobId: null,
+    pollTimer: null,
+    autoTitle: true,
+    uiStatus: "loading",
+    lastPreview: null,
+    currentJob: null,
+    demoContext: null,
+    previewRequestId: 0,
+    submitRequestId: 0,
+    pollRequestId: 0
   };
 
   var els = {};
@@ -36,344 +51,153 @@
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
+      .replace(/\"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  }
+
+  function apiMessage(payload, fallback) {
+    if (payload && payload.message) return payload.message;
+    if (payload && payload.error) return payload.error;
+    return fallback;
   }
 
   async function api(path, options) {
     var res = await fetch(path, options || {});
     var contentType = res.headers.get("content-type") || "";
-    var payload = null;
-
-    if (contentType.indexOf("application/json") >= 0) {
-      payload = await res.json();
-    } else {
-      payload = await res.text();
+    var payload = contentType.indexOf("application/json") >= 0 ? await res.json() : await res.text();
+    if (!res.ok) throw new Error(apiMessage(payload, "请求失败: " + res.status));
+    if (payload && typeof payload === "object" && payload.success !== undefined) {
+      if (!payload.success) throw new Error(apiMessage(payload, "请求失败"));
+      return payload.data;
     }
-
-    if (!res.ok) {
-      var message = "请求失败: " + res.status;
-      if (payload && payload.error) {
-        message = payload.error;
-      } else if (typeof payload === "string" && payload) {
-        message = payload;
-      }
-      throw new Error(message);
-    }
-
     return payload;
   }
 
-  function getVenueById(venueId) {
-    var list = (state.bootstrap && state.bootstrap.venue_catalog) || [];
-    for (var i = 0; i < list.length; i += 1) {
-      if (list[i].id === venueId) {
-        return list[i];
-      }
-    }
-    return null;
+  function setUiStatus(status, message) {
+    state.uiStatus = status;
+    if (els.workspaceSection) els.workspaceSection.setAttribute("data-ui-status", status);
+    if (els.jobStatus && message) els.jobStatus.textContent = message;
+    syncActionStates();
   }
 
-  function getModelById(modelId) {
-    var list = (state.bootstrap && state.bootstrap.model_catalog) || [];
-    for (var i = 0; i < list.length; i += 1) {
-      if (list[i].id === modelId) {
-        return list[i];
-      }
-    }
-    return null;
+  function syncActionStates() {
+    var busy = state.uiStatus === "loading" || state.uiStatus === "previewing" || state.uiStatus === "submitting";
+    if (els.previewBtn) els.previewBtn.disabled = busy;
+    if (els.submitBtn) els.submitBtn.disabled = busy;
   }
 
-  function getAssetById(assetId) {
-    var list = (state.bootstrap && state.bootstrap.asset_catalog) || [];
-    for (var i = 0; i < list.length; i += 1) {
-      if (list[i].id === assetId) {
-        return list[i];
-      }
-    }
+  function populateSelect(selectEl, items, formatter, selectedValue) {
+    if (!selectEl) return;
+    selectEl.innerHTML = "";
+    (items || []).forEach(function (item) {
+      var option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = formatter(item);
+      if (selectedValue && selectedValue === item.id) option.selected = true;
+      selectEl.appendChild(option);
+    });
+  }
+
+  function getVenueById(id) {
+    var items = (state.bootstrap && state.bootstrap.venue_catalog) || [];
+    for (var i = 0; i < items.length; i += 1) if (items[i].id === id) return items[i];
     return null;
   }
 
   function getAssetsForVenue(venueId) {
     var allAssets = (state.bootstrap && state.bootstrap.asset_catalog) || [];
-    var options = [];
-    var i;
-
-    for (i = 0; i < allAssets.length; i += 1) {
-      if (allAssets[i].id === "text_only") {
-        options.push(allAssets[i]);
-      }
-    }
-
-    for (i = 0; i < allAssets.length; i += 1) {
-      if (allAssets[i].venue_type === venueId) {
-        options.push(allAssets[i]);
-      }
-    }
-
-    return options;
+    return allAssets.filter(function (asset) {
+      return asset.id === "text_only" || asset.venue_type === venueId;
+    });
   }
 
   function getRecommendedAsset(venueId) {
     var assets = getAssetsForVenue(venueId);
-    var i;
-    for (i = 0; i < assets.length; i += 1) {
-      if (assets[i].recommended) {
-        return assets[i];
-      }
-    }
+    for (var i = 0; i < assets.length; i += 1) if (assets[i].recommended) return assets[i];
     return assets[0] || null;
   }
 
-  function setStatus(text) {
-    if (els.jobStatus) {
-      els.jobStatus.textContent = text;
-    }
-  }
-
-  function renderMetrics(metrics) {
-    if (!els.metricsGrid) return;
-    els.metricsGrid.innerHTML = "";
-    metrics.forEach(function (metric) {
-      var card = document.createElement("article");
-      card.className = "metric-card";
-      card.innerHTML =
-        "<strong>" +
-        escapeHtml(metric.value) +
-        "</strong>" +
-        "<span>" +
-        escapeHtml(metric.title) +
-        "</span>" +
-        "<p>" +
-        escapeHtml(metric.description) +
-        "</p>";
-      els.metricsGrid.appendChild(card);
-    });
-  }
-
-  function renderModels(models) {
-    if (!els.modelGrid) return;
-    els.modelGrid.innerHTML = "";
-    models.forEach(function (model) {
-      var routeMode = model.route_mode || "native";
-      var badgeClass = routeMode === "demo-route" ? "demo-route" : routeMode;
-      var card = document.createElement("article");
-      card.className = "model-card";
-      card.innerHTML =
-        "<header>" +
-        "<h3>" +
-        escapeHtml(model.display_model) +
-        "</h3>" +
-        '<span class="route-badge ' +
-        escapeHtml(badgeClass) +
-        '">' +
-        escapeHtml(routeMode) +
-        "</span>" +
-        "</header>" +
-        "<p>" +
-        escapeHtml(model.description || "") +
-        "</p>" +
-        '<div class="model-meta">' +
-        (model.recommended ? '<span class="pill recommended">推荐执行</span>' : "") +
-        '<span class="pill">provider: ' +
-        escapeHtml(model.execution_provider || "") +
-        "</span>" +
-        "</div>";
-      els.modelGrid.appendChild(card);
-    });
-  }
-
-  function renderAssetCards() {
-    if (!els.assetGrid) return;
-    var list = (state.bootstrap && state.bootstrap.asset_catalog) || [];
-    els.assetGrid.innerHTML = "";
-    list.forEach(function (asset) {
-      if (asset.showcase === false) {
-        return;
-      }
-
-      var activeClass = els.assetId && els.assetId.value === asset.id ? " active" : "";
-      var card = document.createElement("article");
-      card.className = "asset-card" + activeClass;
-      card.setAttribute("data-asset-id", asset.id);
-      card.innerHTML =
-        "<header>" +
-        "<h3>" +
-        escapeHtml(asset.name) +
-        "</h3>" +
-        '<span class="asset-badge">' +
-        escapeHtml(asset.source_type || "") +
-        "</span>" +
-        "</header>" +
-        "<p>" +
-        escapeHtml(asset.description || "") +
-        "</p>" +
-        '<div class="asset-meta">' +
-        '<span class="asset-badge">' +
-        escapeHtml(asset.file_format || "") +
-        "</span>" +
-        '<span class="asset-badge">' +
-        escapeHtml((asset.metadata && asset.metadata.capture_pipeline) || "") +
-        "</span>" +
-        "</div>";
-      els.assetGrid.appendChild(card);
-    });
-  }
-
-  function populateSelect(selectEl, items, formatter, selectedValue) {
-    selectEl.innerHTML = "";
-    items.forEach(function (item) {
-      var option = document.createElement("option");
-      option.value = item.id;
-      option.textContent = formatter(item);
-      if (selectedValue && selectedValue === item.id) {
-        option.selected = true;
-      }
-      selectEl.appendChild(option);
-    });
-  }
-
   function populateAssetSelect(venueId, selectedValue) {
-    var items = getAssetsForVenue(venueId);
-    populateSelect(
-      els.assetId,
-      items,
-      function (asset) {
-        return asset.name + " · " + (asset.source_type || asset.asset_kind || "");
-      },
-      selectedValue
-    );
+    populateSelect(els.assetId, getAssetsForVenue(venueId), function (asset) {
+      return asset.name + " · " + (asset.source_type || asset.asset_kind || "");
+    }, selectedValue);
   }
 
   function applyVenueDefaults() {
-    var venue = getVenueById(els.venueType.value);
-    if (!venue) {
-      return;
-    }
-
+    var venue = getVenueById(els.venueType && els.venueType.value);
+    if (!venue) return;
     if (state.autoTitle || !els.title.value) {
       els.title.value = venue.hero_title || "";
       state.autoTitle = true;
     }
-
-    if (els.environmentHint) {
-      els.environmentHint.value = venue.default_environment || "";
-    }
-    if (els.lightingHint) {
-      els.lightingHint.value = venue.default_lighting || "";
-    }
-
-    var defaults = venue.camera_defaults || {};
-    if (els.cameraRadius) {
-      els.cameraRadius.value = defaults.radius_m || 6.0;
-    }
-    if (els.cameraHeight) {
-      els.cameraHeight.value = defaults.height_m || 1.6;
-    }
-
+    if (els.environmentHint) els.environmentHint.value = venue.default_environment || "";
+    if (els.lightingHint) els.lightingHint.value = venue.default_lighting || "";
     populateAssetSelect(venue.id, (getRecommendedAsset(venue.id) || {}).id);
-    renderAssetCards();
   }
 
   function collectPayload() {
-    var shotType = els.shotType ? els.shotType.value : "orbit";
-    var payload = {
+    return {
       title: els.title ? els.title.value : "",
       venue_type: els.venueType ? els.venueType.value : "",
       ai_model: els.aiModel ? els.aiModel.value : "",
       asset_id: els.assetId ? els.assetId.value : "",
-      shot_type: shotType,
-      camera_move_type: shotType,
+      shot_type: els.shotType ? els.shotType.value : "orbit",
+      camera_move_type: els.shotType ? els.shotType.value : "orbit",
       duration_s: els.duration ? els.duration.value : 6,
+      environment_hint: els.environmentHint ? els.environmentHint.value : "",
+      lighting_hint: els.lightingHint ? els.lightingHint.value : "",
+      tenant_id: els.tenantId ? els.tenantId.value : "",
+      user_id: els.userId ? els.userId.value : "",
+      project_id: els.projectId ? els.projectId.value : "",
+      engine_target: els.engineTarget ? els.engineTarget.value : "blender_anchor",
+      render_mode: els.renderMode ? els.renderMode.value : "cinematic",
+      stream_profile: els.streamProfile ? els.streamProfile.value : "balanced",
+      usage_scope: els.usageScope ? els.usageScope.value : "internal_demo"
     };
-
-    if (els.environmentHint) payload.environment_hint = els.environmentHint.value;
-    if (els.lightingHint) payload.lighting_hint = els.lightingHint.value;
-
-    return payload;
   }
 
   function renderWarnings(warnings) {
     if (!els.previewWarnings) return;
-    if (!warnings || !warnings.length) {
-      els.previewWarnings.innerHTML = "";
-      return;
-    }
+    els.previewWarnings.innerHTML = (warnings || []).map(function (warning) {
+      return '<div class="warning-item">' + escapeHtml(warning) + '</div>';
+    }).join("");
+  }
 
-    els.previewWarnings.innerHTML = warnings
-      .map(function (warning) {
-        return '<div class="warning-item">' + escapeHtml(warning) + "</div>";
-      })
-      .join("");
+  function renderModuleCards(modules) {
+    modules = modules || {};
+    return '<div class="module-grid">' +
+      '<div class="module-card"><strong>镜头</strong><p>' + escapeHtml(modules.camera) + '</p></div>' +
+      '<div class="module-card"><strong>主体</strong><p>' + escapeHtml(modules.subject) + '</p></div>' +
+      '<div class="module-card"><strong>动态</strong><p>' + escapeHtml(modules.dynamics) + '</p></div>' +
+      '<div class="module-card"><strong>环境</strong><p>' + escapeHtml(modules.environment) + '</p></div>' +
+      '<div class="module-card"><strong>光影</strong><p>' + escapeHtml(modules.lighting) + '</p></div>' +
+      '<div class="module-card"><strong>风格</strong><p>' + escapeHtml(modules.style) + '</p></div>' +
+      '</div>';
+  }
+
+  function renderKeyValueList(items) {
+    return '<ul class="meta-list">' + (items || []).map(function (item) {
+      return '<li><strong>' + escapeHtml(item.label) + '：</strong>' + escapeHtml(item.value) + '</li>';
+    }).join('') + '</ul>';
   }
 
   function renderPromptPreview(data) {
     if (!els.promptPreview) return;
-
     if (!data || !data.prompt_bundle) {
       els.promptPreview.innerHTML = '<p class="empty-state">选择场馆后自动生成 Prompt 预览</p>';
+      if (els.executionRoute) els.executionRoute.textContent = '未生成';
+      renderWarnings([]);
       return;
     }
-
-    var bundle = data.prompt_bundle;
-    var modules = bundle.modules || {};
-    var asset = data.asset_bundle || {};
-    var provider = data.execution_provider || bundle.execution_provider || "未指定";
-    var displayModel = data.display_model || bundle.display_model || "未指定";
-
+    state.lastPreview = data;
+    var bundle = data.prompt_bundle || {};
     if (els.executionRoute) {
-      els.executionRoute.textContent =
-        displayModel + " -> " + provider + " · " + (data.route_mode || bundle.route_mode || "native");
+      els.executionRoute.textContent = (data.display_model || bundle.display_model || '未指定') + ' → ' + (data.execution_provider || bundle.execution_provider || '未指定') + ' · ' + (data.route_mode || bundle.route_mode || 'native');
     }
-
     renderWarnings(data.warnings || []);
-
     els.promptPreview.innerHTML =
-      '<div class="preview-block">' +
-      "<h4>六模块 Prompt</h4>" +
-      '<div class="module-grid">' +
-      '<div class="module-card"><strong>镜头</strong><p>' +
-      escapeHtml(modules.camera) +
-      "</p></div>" +
-      '<div class="module-card"><strong>主体</strong><p>' +
-      escapeHtml(modules.subject) +
-      "</p></div>" +
-      '<div class="module-card"><strong>动态</strong><p>' +
-      escapeHtml(modules.dynamics) +
-      "</p></div>" +
-      '<div class="module-card"><strong>环境</strong><p>' +
-      escapeHtml(modules.environment) +
-      "</p></div>" +
-      '<div class="module-card"><strong>光影</strong><p>' +
-      escapeHtml(modules.lighting) +
-      "</p></div>" +
-      '<div class="module-card"><strong>风格</strong><p>' +
-      escapeHtml(modules.style) +
-      "</p></div>" +
-      "</div>" +
-      "</div>" +
-      '<div class="preview-block">' +
-      "<h4>编排结果</h4>" +
-      '<p class="text-block">' +
-      escapeHtml(bundle.prompt) +
-      "</p>" +
-      "</div>" +
-      '<div class="preview-block">' +
-      "<h4>知识命中</h4>" +
-      '<ul class="knowledge-list">' +
-      (data.knowledge_hits || [])
-        .map(function (item) {
-          return (
-            "<li><strong>" +
-            escapeHtml(item.label || item.id) +
-            "</strong><br />" +
-            escapeHtml(item.reason || "") +
-            "</li>"
-          );
-        })
-        .join("") +
-      "</ul>" +
-      "</div>";
+      '<section class="preview-block"><h4>六模块 Prompt</h4>' + renderModuleCards(bundle.modules || {}) + '</section>' +
+      '<section class="preview-block"><div class="preview-heading"><h4>最终 Prompt</h4><span class="preview-chip">' + escapeHtml(bundle.workflow_mode || 'text_to_video') + '</span></div><p class="text-block prompt-output">' + escapeHtml(bundle.prompt) + '</p></section>';
   }
 
   function stageIndex(stage) {
@@ -383,159 +207,189 @@
 
   function renderStageList(job) {
     if (!els.stageList) return;
-
-    var currentStage = (job && job.stage) || "queued";
+    var currentStage = (job && job.stage) || 'queued';
     var currentIndex = stageIndex(currentStage);
-    var html = stageOrder
-      .map(function (stage, index) {
-        var className = "";
-        if (job && job.status === "error") {
-          if (index < currentIndex) {
-            className = "done";
-          } else if (stage === currentStage) {
-            className = "error";
-          }
-        } else if (currentStage === "succeeded") {
-          className = "done";
-        } else if (index < currentIndex) {
-          className = "done";
-        } else if (stage === currentStage) {
-          className = "active";
-        }
+    els.stageList.innerHTML = stageOrder.map(function (stage, index) {
+      var className = 'pending';
+      if (job && job.status === 'error') {
+        if (index < currentIndex) className = 'done';
+        else if (stage === currentStage) className = 'error';
+      } else if (currentStage === 'succeeded' || index < currentIndex) className = 'done';
+      else if (stage === currentStage) className = 'active';
+      return '<li class="' + className + '"><span>' + escapeHtml(stageLabels[stage] || stage) + '</span><span>' + escapeHtml(stage) + '</span></li>';
+    }).join('');
+  }
 
-        return (
-          '<li class="' +
-          className +
-          '"><span>' +
-          escapeHtml(stageLabels[stage] || stage) +
-          "</span><span>" +
-          escapeHtml(stage) +
-          "</span></li>"
-        );
-      })
-      .join("");
+  function renderContextPanel() {
+    if (!els.contextSummary) return;
+    var tenantText = els.tenantId && els.tenantId.selectedOptions[0] ? els.tenantId.selectedOptions[0].textContent : '-';
+    var userText = els.userId && els.userId.selectedOptions[0] ? els.userId.selectedOptions[0].textContent : '-';
+    var projectText = els.projectId && els.projectId.selectedOptions[0] ? els.projectId.selectedOptions[0].textContent : '-';
+    els.contextSummary.innerHTML = renderKeyValueList([
+      { label: '当前租户', value: tenantText },
+      { label: '当前用户', value: userText },
+      { label: '当前项目', value: projectText },
+      { label: '引擎目标', value: els.engineTarget && els.engineTarget.selectedOptions[0] ? els.engineTarget.selectedOptions[0].textContent : '-' },
+      { label: '推流配置', value: els.streamProfile && els.streamProfile.selectedOptions[0] ? els.streamProfile.selectedOptions[0].textContent : '-' }
+    ]);
+  }
 
-    if (job && job.status === "error" && currentStage === "error") {
-      html +=
-        '<li class="error"><span>' +
-        escapeHtml(stageLabels.error) +
-        "</span><span>error</span></li>";
+  function renderOpsPanel(job) {
+    if (!els.opsPanel) return;
+    var events = (job && job.result && job.result.ops_events) || [];
+    if (!events.length) {
+      els.opsPanel.innerHTML = '<p class="empty-state">等待任务事件流</p>';
+      return;
     }
+    els.opsPanel.innerHTML = '<ul class="meta-list">' + events.map(function (item) {
+      return '<li><strong>' + escapeHtml(item.event_type || '-') + '</strong><br />' + escapeHtml(item.message || '') + '</li>';
+    }).join('') + '</ul>';
+  }
 
-    els.stageList.innerHTML = html;
+  function renderSchedulePanel(job) {
+    if (!els.schedulePanel) return;
+    var data = job && job.result && job.result.schedule_result;
+    if (!data) {
+      els.schedulePanel.innerHTML = '<p class="empty-state">等待调度结果</p>';
+      return;
+    }
+    var node = data.node || {};
+    els.schedulePanel.innerHTML = renderKeyValueList([
+      { label: '节点', value: node.node_name || '-' },
+      { label: 'GPU', value: node.gpu_type || '-' },
+      { label: '资源池', value: data.pool_type || '-' },
+      { label: '队列深度', value: String(data.queue_depth || 0) },
+      { label: '调度原因', value: data.reason || '-' }
+    ]);
+  }
+
+  function renderMonitorPanel(job) {
+    if (!els.monitorPanel) return;
+    var latest = job && job.result && job.result.monitor_summary && job.result.monitor_summary.latest;
+    if (!latest) {
+      els.monitorPanel.innerHTML = '<p class="empty-state">等待监控快照</p>';
+      return;
+    }
+    els.monitorPanel.innerHTML = renderKeyValueList([
+      { label: 'GPU 使用率', value: latest.gpu_utilization + '%' },
+      { label: '显存', value: latest.gpu_memory_gb + ' GB' },
+      { label: '网络', value: latest.network_mbps + ' Mbps' },
+      { label: '码率', value: latest.bitrate_mbps + ' Mbps' },
+      { label: '延迟', value: latest.latency_ms + ' ms' },
+      { label: 'FPS', value: String(latest.fps || '-') }
+    ]);
+  }
+
+  function renderRightsPanel(job) {
+    if (!els.rightsPanel) return;
+    var rights = job && job.result && job.result.rights_result;
+    if (!rights) {
+      els.rightsPanel.innerHTML = '<p class="empty-state">等待版权校验</p>';
+      return;
+    }
+    var rightsInfo = rights.rights || {};
+    els.rightsPanel.innerHTML = renderKeyValueList([
+      { label: '授权状态', value: rights.status || '-' },
+      { label: '许可类型', value: rightsInfo.license_type || '-' },
+      { label: '来源', value: rightsInfo.source_name || '-' },
+      { label: '用途范围', value: rights.usage_scope || '-' },
+      { label: '审批状态', value: rightsInfo.approval_status || '-' }
+    ]);
+  }
+
+  function renderBillingPanel(job) {
+    if (!els.billingPanel) return;
+    var billing = job && job.result && job.result.billing_result;
+    if (!billing) {
+      els.billingPanel.innerHTML = '<p class="empty-state">等待计费快照</p>';
+      return;
+    }
+    els.billingPanel.innerHTML = renderKeyValueList([
+      { label: '任务费用', value: billing.amount + ' ' + (billing.currency || 'CNY') },
+      { label: 'GPU 时长', value: String(billing.gpu_hours || 0) },
+      { label: '引擎时长', value: String(billing.engine_hours || 0) },
+      { label: '推流时长', value: String(billing.stream_hours || 0) },
+      { label: '资源节点', value: billing.resource_node || '-' }
+    ]);
   }
 
   function renderJobResult(job) {
     if (!els.jobResult) return;
-
     if (!job || !job.result) {
       els.jobResult.innerHTML = '<p class="empty-state">任务完成后在此展示视频结果</p>';
+      renderSchedulePanel(null);
+      renderMonitorPanel(null);
+      renderRightsPanel(null);
+      renderBillingPanel(null);
+      renderOpsPanel(null);
       return;
     }
-
     var result = job.result;
-    var provider = result.provider_result || {};
-    var artifacts = result.artifacts || {};
-    var videoUrl = result.video_url || "";
     var blocks = [];
-
-    blocks.push(
-      '<div class="result-block"><h4>Provider 路由</h4><ul class="meta-list">' +
-        "<li>展示模型：" +
-        escapeHtml(provider.display_model || "未指定") +
-        "</li>" +
-        "<li>执行通道：" +
-        escapeHtml(provider.execution_provider || "未指定") +
-        "</li>" +
-        "<li>状态：" +
-        escapeHtml(provider.status || "not_submitted") +
-        "</li>" +
-        "</ul></div>"
-    );
-
-    blocks.push(
-      '<div class="result-block"><h4>Blender / 资产产物</h4><ul class="meta-list">' +
-        "<li>导出状态：" +
-        escapeHtml(artifacts.status || "skipped") +
-        "</li>" +
-        "<li>说明：" +
-        escapeHtml(artifacts.error || artifacts.reason || artifacts.scene_glb || "无") +
-        "</li>" +
-        "</ul></div>"
-    );
-
-    if (result.warnings && result.warnings.length) {
-      blocks.push(
-        '<div class="result-block"><h4>降级 / 提示</h4><div class="warning-stack">' +
-          result.warnings
-            .map(function (warning) {
-              return '<div class="warning-item">' + escapeHtml(warning) + "</div>";
-            })
-            .join("") +
-          "</div></div>"
-      );
+    var provider = result.provider_result || {};
+    blocks.push('<div class="result-block"><h4>调度结果</h4>' + renderKeyValueList([
+      { label: '资源池', value: ((result.schedule_result || {}).pool_type) || '-' },
+      { label: '节点', value: (((result.schedule_result || {}).node) || {}).node_name || '-' },
+      { label: '原因', value: (result.schedule_result || {}).reason || '-' }
+    ]) + '</div>');
+    blocks.push('<div class="result-block"><h4>引擎会话</h4>' + renderKeyValueList([
+      { label: '引擎', value: ((result.engine_session || {}).display_name) || '-' },
+      { label: '渲染模式', value: ((result.engine_session || {}).render_mode) || '-' },
+      { label: '会话状态', value: ((result.engine_session || {}).session_status) || '-' },
+      { label: '预览链接', value: ((result.engine_session || {}).preview_link) || '-' }
+    ]) + '</div>');
+    blocks.push('<div class="result-block"><h4>推流会话</h4>' + renderKeyValueList([
+      { label: '协议', value: ((result.stream_session || {}).protocol) || '-' },
+      { label: '码率', value: String(((result.stream_session || {}).bitrate_mbps) || '-') },
+      { label: '延迟', value: String(((result.stream_session || {}).latency_ms) || '-') },
+      { label: 'FPS', value: String(((result.stream_session || {}).fps) || '-') }
+    ]) + '</div>');
+    blocks.push('<div class="result-block"><h4>版权快照摘要</h4>' + renderKeyValueList([
+      { label: '状态', value: ((result.rights_result || {}).status) || '-' },
+      { label: '说明', value: ((result.rights_result || {}).message) || '-' }
+    ]) + '</div>');
+    blocks.push('<div class="result-block"><h4>计费明细</h4>' + renderKeyValueList([
+      { label: '总费用', value: result.billing_result ? (result.billing_result.amount + ' ' + result.billing_result.currency) : '-' },
+      { label: '执行通道', value: provider.execution_provider || '-' },
+      { label: '路由模式', value: provider.route_mode || '-' }
+    ]) + '</div>');
+    if (result.video_url) {
+      blocks.push('<div class="result-block result-block-video"><h4>视频结果</h4><video class="result-video" controls preload="metadata"><source src="' + encodeURI(result.video_url) + '" type="video/mp4" /></video></div>');
     }
-
-    if (videoUrl) {
-      blocks.push(
-        '<div class="result-block"><h4>视频结果</h4>' +
-          '<video class="result-video" controls preload="metadata">' +
-          '<source src="' +
-          encodeURI(videoUrl) +
-          '" type="video/mp4" />' +
-          "</video>" +
-          '<p class="text-block">视频直链：<a class="link" target="_blank" rel="noreferrer" href="' +
-          encodeURI(videoUrl) +
-          '">' +
-          escapeHtml(videoUrl) +
-          "</a></p></div>"
-      );
-    } else if (job.status === "error") {
-      blocks.push(
-        '<div class="result-block"><h4>错误信息</h4><p class="text-block">' +
-          escapeHtml(job.error || "未知错误") +
-          "</p></div>"
-      );
-    } else {
-      blocks.push('<div class="result-block"><p class="empty-state">任务尚未返回视频结果。</p></div>');
+    if (job.status === 'error') {
+      blocks.push('<div class="result-block result-block-error"><h4>错误信息</h4><p class="text-block">' + escapeHtml(job.error || '未知错误') + '</p></div>');
     }
-
-    els.jobResult.innerHTML = blocks.join("");
+    els.jobResult.innerHTML = blocks.join('');
+    renderSchedulePanel(job);
+    renderMonitorPanel(job);
+    renderRightsPanel(job);
+    renderBillingPanel(job);
+    renderOpsPanel(job);
   }
 
   function renderJob(job) {
-    if (els.jobId) {
-      els.jobId.textContent = job && job.id ? job.id : "等待提交";
-    }
+    state.currentJob = job || null;
+    if (els.jobId) els.jobId.textContent = job && job.id ? job.id : '等待提交';
     renderStageList(job);
     renderJobResult(job);
-
+    renderContextPanel();
     if (!job) {
-      setStatus("工作台就绪，请配置场景参数后提交任务。");
+      setUiStatus('ready', '工作台就绪，请配置场景参数后提交任务。');
       return;
     }
-
-    var statusText =
-      "状态：" +
-      (job.status || "unknown") +
-      " · 阶段：" +
-      (job.stage || "queued");
-
-    if (job.error) {
-      statusText += " · 错误：" + job.error;
-    }
-    setStatus(statusText);
-
+    var statusText = '状态：' + (job.status || 'unknown') + ' · 阶段：' + (job.stage || 'queued');
+    if (job.error) statusText += ' · 错误：' + job.error;
+    if (job.status === 'succeeded') setUiStatus('success', statusText);
+    else if (job.status === 'error') setUiStatus('error', statusText);
+    else if (state.pollTimer) setUiStatus('polling', statusText);
+    else setUiStatus('ready', statusText);
     if (job.result && job.result.prompt_bundle) {
       renderPromptPreview({
         prompt_bundle: job.result.prompt_bundle,
-        knowledge_hits: job.result.knowledge_hits,
-        asset_bundle: job.result.asset_bundle,
         warnings: job.result.warnings,
         display_model: job.result.provider_result && job.result.provider_result.display_model,
         execution_provider: job.result.provider_result && job.result.provider_result.execution_provider,
-        route_mode: job.result.provider_result && job.result.provider_result.route_mode,
-        workflow_mode: job.result.prompt_bundle.workflow_mode,
+        route_mode: job.result.provider_result && job.result.provider_result.route_mode
       });
     }
   }
@@ -547,225 +401,173 @@
     }
   }
 
+  async function fetchJob(jobId, requestId) {
+    var job = await api('/api/jobs/' + encodeURIComponent(jobId));
+    if (requestId !== state.pollRequestId) return null;
+    return job;
+  }
+
   function startPolling(jobId) {
     clearPoll();
     state.currentJobId = jobId;
-
+    state.pollRequestId += 1;
+    var requestId = state.pollRequestId;
+    setUiStatus('polling', '任务已提交，正在轮询执行状态...');
     state.pollTimer = setInterval(async function () {
       try {
-        var job = await api("/api/jobs/" + encodeURIComponent(jobId));
+        var job = await fetchJob(jobId, requestId);
+        if (!job) return;
         renderJob(job);
-        if (job.status === "succeeded" || job.status === "error") {
-          clearPoll();
-        }
+        if (job.status === 'succeeded' || job.status === 'error') clearPoll();
       } catch (err) {
         clearPoll();
-        setStatus("轮询失败：" + err.message);
+        setUiStatus('error', '轮询失败：' + err.message);
       }
-    }, 4000);
+    }, 5000);
   }
 
-  async function previewPrompt(silent) {
-    var payload = collectPayload();
-    if (!silent) {
-      setStatus("正在生成 Prompt 预览...");
-    }
-    var data = await api("/api/prompt/preview", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
+  async function previewPrompt(options) {
+    options = options || {};
+    var silent = !!options.silent;
+    state.previewRequestId += 1;
+    var requestId = state.previewRequestId;
+    if (!silent) setUiStatus('previewing', '正在生成 Prompt 预览...');
+    var data = await api('/api/prompt/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(collectPayload())
     });
+    if (requestId !== state.previewRequestId) return null;
     renderPromptPreview(data);
-    if (!silent) {
-      setStatus("Prompt 预览已更新。");
-    }
+    if (!silent) setUiStatus('ready', 'Prompt 预览已更新。');
     return data;
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
     clearPoll();
-
-    if (els.submitBtn) els.submitBtn.disabled = true;
-    if (els.previewBtn) els.previewBtn.disabled = true;
-    setStatus("正在创建任务...");
-
+    state.submitRequestId += 1;
+    var requestId = state.submitRequestId;
+    setUiStatus('submitting', '正在创建任务...');
     try {
-      await previewPrompt(true);
-
-      var job = await api("/api/jobs", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(collectPayload()),
+      await previewPrompt({ silent: true });
+      if (requestId !== state.submitRequestId) return;
+      var job = await api('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectPayload())
       });
-
+      if (requestId !== state.submitRequestId) return;
       renderJob(job);
       startPolling(job.id);
     } catch (err) {
-      setStatus("创建任务失败：" + err.message);
-    } finally {
-      if (els.submitBtn) els.submitBtn.disabled = false;
-      if (els.previewBtn) els.previewBtn.disabled = false;
+      setUiStatus('error', '创建任务失败：' + err.message);
     }
+  }
+
+  function queueSilentPreview() {
+    previewPrompt({ silent: true }).catch(function () {});
+    renderContextPanel();
   }
 
   function bindEvents() {
     if (els.title) {
-      els.title.addEventListener("input", function () {
-        state.autoTitle = false;
-      });
+      els.title.addEventListener('input', function () { state.autoTitle = false; });
     }
-
-    if (els.venueType) {
-      els.venueType.addEventListener("change", function () {
-        state.autoTitle = true;
-        applyVenueDefaults();
-        previewPrompt(true).catch(function () {});
-      });
-    }
-
-    if (els.aiModel) {
-      els.aiModel.addEventListener("change", function () {
-        previewPrompt(true).catch(function () {});
-      });
-    }
-
-    if (els.assetId) {
-      els.assetId.addEventListener("change", function () {
-        renderAssetCards();
-        previewPrompt(true).catch(function () {});
-      });
-    }
-
-    if (els.shotType) {
-      els.shotType.addEventListener("change", function () {
-        previewPrompt(true).catch(function () {});
-      });
-    }
-
-    if (els.previewBtn) {
-      els.previewBtn.addEventListener("click", function () {
-        previewPrompt(false).catch(function (err) {
-          setStatus("Prompt 预览失败：" + err.message);
+    ['venueType', 'aiModel', 'assetId', 'shotType', 'tenantId', 'userId', 'projectId', 'engineTarget', 'renderMode', 'streamProfile', 'usageScope'].forEach(function (key) {
+      if (els[key]) {
+        els[key].addEventListener('change', function () {
+          if (key === 'venueType') {
+            state.autoTitle = true;
+            applyVenueDefaults();
+          }
+          queueSilentPreview();
         });
-      });
-    }
-
-    if (els.form) {
-      els.form.addEventListener("submit", handleSubmit);
-    }
-
-    if (els.assetGrid) {
-      els.assetGrid.addEventListener("click", function (event) {
-        var card = event.target.closest("[data-asset-id]");
-        var assetId = card && card.getAttribute("data-asset-id");
-        var asset = getAssetById(assetId);
-        if (!asset) {
-          return;
-        }
-
-        if (asset.venue_type && els.venueType) {
-          els.venueType.value = asset.venue_type;
-          state.autoTitle = true;
-          applyVenueDefaults();
-        }
-        if (els.assetId) {
-          populateAssetSelect(els.venueType ? els.venueType.value : "", asset.id);
-        }
-        renderAssetCards();
-        previewPrompt(true).catch(function () {});
-      });
-    }
+      }
+    });
+    if (els.previewBtn) els.previewBtn.addEventListener('click', function () { previewPrompt({ silent: false }).catch(function (err) { setUiStatus('error', 'Prompt 预览失败：' + err.message); }); });
+    if (els.form) els.form.addEventListener('submit', handleSubmit);
   }
 
   function cacheElements() {
-    els.metricsGrid = $("metrics-grid");
-    els.modelGrid = $("model-grid");
-    els.assetGrid = $("asset-grid");
-    els.form = $("job-form");
-    els.title = $("title");
-    els.venueType = $("venue_type");
-    els.aiModel = $("ai_model");
-    els.assetId = $("asset_id");
-    els.shotType = $("shot_type");
-    els.duration = $("duration_s");
-    els.environmentHint = $("environment_hint");
-    els.lightingHint = $("lighting_hint");
-    els.previewBtn = $("preview-btn");
-    els.submitBtn = $("submit-btn");
-    els.jobId = $("job-id");
-    els.jobStatus = $("job-status");
-    els.stageList = $("stage-list");
-    els.executionRoute = $("execution-route");
-    els.previewWarnings = $("preview-warnings");
-    els.promptPreview = $("prompt-preview");
-    els.jobResult = $("job-result");
+    els.workspaceSection = $('workspace');
+    els.form = $('job-form');
+    els.title = $('title');
+    els.venueType = $('venue_type');
+    els.aiModel = $('ai_model');
+    els.assetId = $('asset_id');
+    els.shotType = $('shot_type');
+    els.duration = $('duration_s');
+    els.environmentHint = $('environment_hint');
+    els.lightingHint = $('lighting_hint');
+    els.tenantId = $('tenant_id');
+    els.userId = $('user_id');
+    els.projectId = $('project_id');
+    els.engineTarget = $('engine_target');
+    els.renderMode = $('render_mode');
+    els.streamProfile = $('stream_profile');
+    els.usageScope = $('usage_scope');
+    els.previewBtn = $('preview-btn');
+    els.submitBtn = $('submit-btn');
+    els.jobId = $('job-id');
+    els.jobStatus = $('job-status');
+    els.stageList = $('stage-list');
+    els.executionRoute = $('execution-route');
+    els.previewWarnings = $('preview-warnings');
+    els.promptPreview = $('prompt-preview');
+    els.jobResult = $('job-result');
+    els.contextSummary = $('context-summary');
+    els.schedulePanel = $('schedule-panel');
+    els.monitorPanel = $('monitor-panel');
+    els.rightsPanel = $('rights-panel');
+    els.billingPanel = $('billing-panel');
+    els.opsPanel = $('ops-panel');
+    els.metricsGrid = $('metrics-grid');
+    els.modelGrid = $('model-grid');
+  }
+
+  function renderMetrics(metrics) {
+    if (!els.metricsGrid) return;
+    els.metricsGrid.innerHTML = (metrics || []).map(function (metric) {
+      return '<article class="metric-card"><strong>' + escapeHtml(metric.value) + '</strong><span>' + escapeHtml(metric.title) + '</span><p>' + escapeHtml(metric.description) + '</p></article>';
+    }).join('');
+  }
+
+  function renderModels(models) {
+    if (!els.modelGrid) return;
+    els.modelGrid.innerHTML = (models || []).map(function (model) {
+      return '<article class="model-card"><header><h3>' + escapeHtml(model.display_model) + '</h3><span class="route-badge">' + escapeHtml(model.route_mode || 'native') + '</span></header><p>' + escapeHtml(model.description || '') + '</p></article>';
+    }).join('');
+  }
+
+  function initializeSelects() {
+    populateSelect(els.venueType, state.bootstrap.venue_catalog || [], function (venue) { return venue.name + ' · ' + (venue.hero_title || ''); }, ((state.bootstrap.venue_catalog || [])[0] || {}).id);
+    populateSelect(els.aiModel, state.bootstrap.model_catalog || [], function (model) { return model.display_model + ' · ' + (model.route_mode || 'native'); }, ((state.bootstrap.model_catalog || [])[0] || {}).id);
+    populateSelect(els.shotType, state.bootstrap.shot_catalog || [], function (shot) { return shot.label; }, ((state.bootstrap.shot_catalog || [])[0] || {}).id);
+    populateSelect(els.engineTarget, state.bootstrap.engine_catalog || [], function (item) { return item.label; }, ((state.bootstrap.engine_catalog || [])[0] || {}).id);
+    populateSelect(els.streamProfile, state.bootstrap.stream_profile_catalog || [], function (item) { return item.label; }, ((state.bootstrap.stream_profile_catalog || [])[1] || (state.bootstrap.stream_profile_catalog || [])[0] || {}).id);
+    populateSelect(els.tenantId, state.demoContext ? [state.demoContext.tenant] : [], function (item) { return item.name; }, state.demoContext && state.demoContext.tenant && state.demoContext.tenant.id);
+    populateSelect(els.userId, (state.demoContext && state.demoContext.available_users) || [], function (item) { return item.name + ' · ' + (item.role || ''); }, state.demoContext && state.demoContext.user && state.demoContext.user.id);
+    populateSelect(els.projectId, (state.demoContext && state.demoContext.available_projects) || [], function (item) { return item.name; }, state.demoContext && state.demoContext.project && state.demoContext.project.id);
   }
 
   async function bootstrap() {
     cacheElements();
     bindEvents();
-
-    setStatus("正在加载项目知识库...");
-    if (els.promptPreview) {
-      els.promptPreview.innerHTML = '<p class="empty-state">加载中...</p>';
-    }
-    if (els.jobResult) {
-      els.jobResult.innerHTML = '<p class="empty-state">任务完成后在此展示视频结果</p>';
-    }
-
+    syncActionStates();
+    setUiStatus('loading', '正在加载项目知识库...');
     try {
-      state.bootstrap = await api("/api/bootstrap");
+      state.bootstrap = await api('/api/bootstrap');
+      state.demoContext = await api('/api/demo/context');
       renderMetrics(state.bootstrap.project_metrics || []);
       renderModels(state.bootstrap.model_catalog || []);
-      renderAssetCards();
-
-      if (els.venueType) {
-        populateSelect(
-          els.venueType,
-          state.bootstrap.venue_catalog || [],
-          function (venue) {
-            return venue.name + " · " + (venue.hero_title || "");
-          },
-          ((state.bootstrap.venue_catalog || [])[0] || {}).id
-        );
-      }
-
-      if (els.aiModel) {
-        populateSelect(
-          els.aiModel,
-          state.bootstrap.model_catalog || [],
-          function (model) {
-            return model.display_model + " · " + (model.route_mode || "native");
-          },
-          ((state.bootstrap.model_catalog || [])[0] || {}).id
-        );
-      }
-
-      if (els.shotType) {
-        populateSelect(
-          els.shotType,
-          state.bootstrap.shot_catalog || [],
-          function (shot) {
-            return shot.label;
-          },
-          ((state.bootstrap.shot_catalog || [])[0] || {}).id
-        );
-      }
-
+      initializeSelects();
       applyVenueDefaults();
       renderJob(null);
-      await previewPrompt(true);
-      setStatus("工作台就绪，请配置场景参数后提交任务。");
+      await previewPrompt({ silent: true });
+      setUiStatus('ready', '工作台就绪，请配置场景参数后提交任务。');
     } catch (err) {
-      setStatus("初始化失败：" + err.message);
-      if (els.promptPreview) {
-        els.promptPreview.innerHTML = '<p class="empty-state">初始化失败，无法加载 Prompt 预览。</p>';
-      }
+      setUiStatus('error', '初始化失败：' + err.message);
     }
   }
 

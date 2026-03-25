@@ -7,339 +7,499 @@
     <link rel="stylesheet" href="/web/styles.css" />
   </head>
   <body>
-    <div class="page-bg"></div>
+    <a class="skip-link" href="#workspace">跳转到创作工作台</a>
+    <div class="page-bg" aria-hidden="true"></div>
 
-    <!-- 导航栏 -->
-    <nav class="navbar">
+    <nav class="navbar" aria-label="主导航">
       <div class="nav-container">
         <div class="nav-brand">
-          <span class="brand-icon"></span>
+          <span class="brand-icon" aria-hidden="true"></span>
           <span class="brand-text">AIGV Studio</span>
         </div>
         <div class="nav-links">
+          <a href="#workspace">创作工作台</a>
           <a href="#features">核心能力</a>
           <a href="#models">模型路由</a>
           <a href="/assets">资产库</a>
-          <a href="#workspace">创作工作台</a>
         </div>
       </div>
     </nav>
 
-    <!-- Hero 区域 - 产品展示 -->
-    <header class="hero">
-      <div class="hero-content">
-        <div class="hero-badge">AI 驱动的视频生产引擎</div>
-        <h1 class="hero-title">
-          文创场景<br />
-          <span class="gradient-text">智能视频生成平台</span>
-        </h1>
-        <p class="hero-desc">
-          融合空间智能、知识增强与多模型路由，为剧院、画廊、博物馆、音乐厅等文创场景提供专业级视频内容生产解决方案。
-        </p>
-        <div class="hero-actions">
-          <a href="#workspace" class="btn-primary">
-            <span>立即体验</span>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </a>
-          <a href="#features" class="btn-secondary">了解更多</a>
+    <main>
+      <header class="hero hero-compact">
+        <div class="hero-content">
+          <div class="hero-badge">AI 驱动的视频生产引擎</div>
+          <h1 class="hero-title">
+            文创场景<br />
+            <span class="gradient-text">智能视频生成平台</span>
+          </h1>
+          <p class="hero-desc">
+            以黄金六模块 Prompt、Blender 空间锚点与多模型路由为核心，让剧院、画廊、博物馆与音乐厅的视觉提案更快进入可执行工作流。
+          </p>
+          <div class="hero-actions">
+            <a href="#workspace" class="btn-primary">
+              <span>进入工作台</span>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </a>
+            <a href="#features" class="btn-secondary">查看能力说明</a>
+          </div>
+          <div class="hero-summary">
+            <div class="summary-chip">知识增强 Prompt 编排</div>
+            <div class="summary-chip">Blender 空间约束</div>
+            <div class="summary-chip">JSON / JobStore 持久化</div>
+          </div>
         </div>
-      </div>
 
-      <!-- 展示区域 - 动态效果 -->
-      <div class="hero-visual">
-        <div class="visual-frame">
-          <div class="visual-header">
-            <div class="visual-dots">
-              <span></span><span></span><span></span>
+        <div class="hero-visual">
+          <div class="visual-frame">
+            <div class="visual-header">
+              <div class="visual-dots" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <span class="visual-title">工作流概览</span>
             </div>
-            <span class="visual-title">实时生成预览</span>
-          </div>
-          <div class="visual-content">
-            <div class="visual-grid">
-              <div class="visual-card venue-card">
-                <div class="card-icon theater"></div>
-                <span>大剧院</span>
-              </div>
-              <div class="visual-card venue-card">
-                <div class="card-icon gallery"></div>
-                <span>现代画廊</span>
-              </div>
-              <div class="visual-card venue-card">
-                <div class="card-icon museum"></div>
-                <span>古典博物馆</span>
-              </div>
-              <div class="visual-card venue-card">
-                <div class="card-icon concert"></div>
-                <span>音乐厅</span>
-              </div>
-            </div>
-            <div class="visual-flow">
-              <div class="flow-node">
-                <span class="node-icon prompt"></span>
-                <span class="node-label">Prompt 编排</span>
-              </div>
-              <div class="flow-arrow"></div>
-              <div class="flow-node">
-                <span class="node-icon blender"></span>
-                <span class="node-label">空间锚点</span>
-              </div>
-              <div class="flow-arrow"></div>
-              <div class="flow-node">
-                <span class="node-icon ai"></span>
-                <span class="node-label">视频生成</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
-
-    <!-- 核心能力区域 -->
-    <section id="features" class="section features-section">
-      <div class="section-header">
-        <span class="section-label">Core Capabilities</span>
-        <h2 class="section-title">三大核心能力</h2>
-      </div>
-
-      <div class="features-grid">
-        <article class="feature-card">
-          <div class="feature-icon knowledge"></div>
-          <h3>知识增强引擎</h3>
-          <p>结构化 Prompt 六格公式，融合场馆环境、光影词库、材质语义与风格锚点，自动补全专业级视频生成参数。</p>
-          <ul class="feature-tags">
-            <li>场馆预设</li>
-            <li>镜头词库</li>
-            <li>材质语义</li>
-          </ul>
-        </article>
-
-        <article class="feature-card featured">
-          <div class="feature-icon spatial"></div>
-          <div class="featured-badge">核心技术</div>
-          <h3>空间智能锚点</h3>
-          <p>基于 Blender 的三维空间约束系统，提供白模场景、相机轨迹与 GLB 资产导出，确保视频内容的物理一致性。</p>
-          <ul class="feature-tags">
-            <li>相机轨迹</li>
-            <li>空间约束</li>
-            <li>资产导出</li>
-          </ul>
-        </article>
-
-        <article class="feature-card">
-          <div class="feature-icon router"></div>
-          <h3>多模型路由</h3>
-          <p>统一接入 Seedance、Luma、Sora、Veo、Runway、Kling 等主流视频生成模型，智能路由最优执行通道。</p>
-          <ul class="feature-tags">
-            <li>多模型接入</li>
-            <li>智能路由</li>
-            <li>降级容错</li>
-          </ul>
-        </article>
-      </div>
-    </section>
-
-    <!-- 模型展示区域 -->
-    <section id="models" class="section models-section">
-      <div class="section-header">
-        <span class="section-label">Model Router</span>
-        <h2 class="section-title">支持的视频生成模型</h2>
-        <p class="section-desc">前端展示多种模型入口，后端智能路由最优执行通道</p>
-      </div>
-
-      <div class="models-grid" id="model-grid"></div>
-    </section>
-
-    <!-- Prompt 公式区域 -->
-    <section class="section formula-section">
-      <div class="section-header">
-        <span class="section-label">Prompt Formula</span>
-        <h2 class="section-title">黄金六格 Prompt 公式</h2>
-        <p class="section-desc">结构化的专业视频生成指令编排体系</p>
-      </div>
-
-      <div class="formula-showcase">
-        <div class="formula-item">
-          <div class="formula-number">01</div>
-          <div class="formula-content">
-            <h4>镜头语言</h4>
-            <p>先锁定三维坐标系与观众视角，避免画面退化为静帧或透视失真</p>
-          </div>
-        </div>
-        <div class="formula-item">
-          <div class="formula-number">02</div>
-          <div class="formula-content">
-            <h4>主体材质</h4>
-            <p>用 velvet、patina、mahogany 等物理词汇描述核心对象与触感</p>
-          </div>
-        </div>
-        <div class="formula-item">
-          <div class="formula-number">03</div>
-          <div class="formula-content">
-            <h4>动态行为</h4>
-            <p>通过尘埃、烟雾、反射锚定时间流逝，增强场景生命感</p>
-          </div>
-        </div>
-        <div class="formula-item">
-          <div class="formula-number">04</div>
-          <div class="formula-content">
-            <h4>环境空间</h4>
-            <p>定义大剧院、白立方画廊、古典博物馆等物理容器与建筑逻辑</p>
-          </div>
-        </div>
-        <div class="formula-item">
-          <div class="formula-number">05</div>
-          <div class="formula-content">
-            <h4>光影氛围</h4>
-            <p>通过体积光、明暗对照、月光蓝建立情绪和空间深度</p>
-          </div>
-        </div>
-        <div class="formula-item">
-          <div class="formula-number">06</div>
-          <div class="formula-content">
-            <h4>风格锚点</h4>
-            <p>用电影级风格与负向词控制整体完成度和稳定性</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 创作工作台 -->
-    <section id="workspace" class="section workspace-section">
-      <div class="section-header">
-        <span class="section-label">Creative Workspace</span>
-        <h2 class="section-title">视频创作工作台</h2>
-      </div>
-
-      <div class="workspace-container">
-        <!-- 左侧控制面板 -->
-        <div class="workspace-controls">
-          <div class="control-panel">
-            <div class="panel-header">
-              <h3>场景配置</h3>
-            </div>
-            <form id="job-form" class="control-form">
-              <div class="form-group">
-                <label for="title">任务标题</label>
-                <input id="title" name="title" type="text" placeholder="例如：巴洛克歌剧院开幕镜头" />
-              </div>
-
-              <div class="form-row">
-                <div class="form-group">
-                  <label for="venue_type">场馆类型</label>
-                  <select id="venue_type" name="venue_type"></select>
+            <div class="visual-content">
+              <div class="visual-grid">
+                <div class="visual-card venue-card">
+                  <div class="card-icon theater" aria-hidden="true"></div>
+                  <span>大剧院</span>
                 </div>
-                <div class="form-group">
-                  <label for="ai_model">生成模型</label>
-                  <select id="ai_model" name="ai_model"></select>
+                <div class="visual-card venue-card">
+                  <div class="card-icon gallery" aria-hidden="true"></div>
+                  <span>现代画廊</span>
+                </div>
+                <div class="visual-card venue-card">
+                  <div class="card-icon museum" aria-hidden="true"></div>
+                  <span>古典博物馆</span>
+                </div>
+                <div class="visual-card venue-card">
+                  <div class="card-icon concert" aria-hidden="true"></div>
+                  <span>音乐厅</span>
                 </div>
               </div>
-
-              <div class="form-row">
-                <div class="form-group">
-                  <label for="shot_type">镜头语言</label>
-                  <select id="shot_type" name="shot_type"></select>
+              <div class="visual-flow" aria-label="工作流流程">
+                <div class="flow-node">
+                  <span class="node-icon prompt" aria-hidden="true"></span>
+                  <span class="node-label">Prompt 编排</span>
                 </div>
-                <div class="form-group">
-                  <label for="duration_s">时长（秒）</label>
-                  <input id="duration_s" name="duration_s" type="number" min="1" value="6" />
+                <div class="flow-arrow" aria-hidden="true"></div>
+                <div class="flow-node">
+                  <span class="node-icon blender" aria-hidden="true"></span>
+                  <span class="node-label">空间锚点</span>
+                </div>
+                <div class="flow-arrow" aria-hidden="true"></div>
+                <div class="flow-node">
+                  <span class="node-icon ai" aria-hidden="true"></span>
+                  <span class="node-label">视频生成</span>
                 </div>
               </div>
-
-              <div class="form-group">
-                <label for="asset_id">空间锚点</label>
-                <select id="asset_id" name="asset_id"></select>
-              </div>
-
-              <div class="form-group">
-                <label for="environment_hint">环境描述</label>
-                <textarea id="environment_hint" name="environment_hint" rows="2" placeholder="描述场景环境..."></textarea>
-              </div>
-
-              <div class="form-group">
-                <label for="lighting_hint">光影氛围</label>
-                <textarea id="lighting_hint" name="lighting_hint" rows="2" placeholder="描述光影效果..."></textarea>
-              </div>
-
-              <div class="form-actions">
-                <button type="button" class="btn-outline" id="preview-btn">预览 Prompt</button>
-                <button type="submit" class="btn-primary" id="submit-btn">
-                  <span>生成视频</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-
-        <!-- 右侧状态面板 -->
-        <div class="workspace-status">
-          <!-- 任务状态 -->
-          <div class="status-panel">
-            <div class="panel-header">
-              <h3>任务状态</h3>
-              <span id="job-id" class="job-id">等待提交</span>
-            </div>
-            <div id="job-status" class="status-message">工作台就绪，请配置场景参数后提交任务。</div>
-            <ul id="stage-list" class="stage-list"></ul>
-          </div>
-
-          <!-- Prompt 预览 -->
-          <div class="preview-panel">
-            <div class="panel-header">
-              <h3>Prompt 预览</h3>
-              <span id="execution-route" class="route-tag">未生成</span>
-            </div>
-            <div id="preview-warnings" class="warning-stack"></div>
-            <div id="prompt-preview" class="preview-content">
-              <p class="empty-state">选择场馆后自动生成 Prompt 预览</p>
-            </div>
-          </div>
-
-          <!-- 生成结果 -->
-          <div class="result-panel">
-            <div class="panel-header">
-              <h3>生成结果</h3>
-            </div>
-            <div id="job-result" class="result-content">
-              <p class="empty-state">任务完成后在此展示视频结果</p>
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      </header>
 
-    <!-- 资产目录 -->
-    <section class="section assets-section">
-      <div class="section-header">
-        <span class="section-label">Asset Library</span>
-        <h2 class="section-title">空间资产库</h2>
-        <p class="section-desc">基于三维扫描与 UE 精修的空间白模锚点</p>
-      </div>
-      <div class="assets-grid" id="asset-grid"></div>
-    </section>
+      <section id="workspace" class="section workspace-section" data-ui-status="loading">
+        <div class="section-header section-header-split">
+          <div>
+            <span class="section-label">Creative Workspace</span>
+            <h2 class="section-title">视频创作工作台</h2>
+            <p class="section-desc workspace-desc">
+              左侧完成场馆、模型、镜头与环境配置，右侧查看任务阶段、Prompt 预览和最终结果。
+            </p>
+          </div>
+          <div class="workspace-header-note">
+            <span class="summary-chip summary-chip-strong">平衡型布局</span>
+            <span class="summary-chip">桌面双栏 / 移动任务流</span>
+          </div>
+        </div>
 
-    <!-- 项目指标 - 放在后面 -->
-    <section class="section metrics-section">
-      <div class="section-header">
-        <span class="section-label">Project Metrics</span>
-        <h2 class="section-title">项目指标</h2>
-      </div>
-      <div class="metrics-grid" id="metrics-grid"></div>
-    </section>
+        <div class="workspace-container workspace-shell">
+          <div class="workspace-controls">
+            <div class="control-panel workspace-panel-emphasis">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">配置面板</p>
+                  <h3>场景配置</h3>
+                </div>
+                <span class="panel-tag">创作输入</span>
+              </div>
+              <form id="job-form" class="control-form">
+                <section class="form-section">
+                  <div class="form-section-heading">
+                    <h4>基础信息</h4>
+                    <p>先确定任务标题和视频时长。</p>
+                  </div>
+                  <div class="form-group">
+                    <label for="title">任务标题</label>
+                    <input id="title" name="title" type="text" placeholder="例如：巴洛克歌剧院开幕镜头" />
+                  </div>
+                  <div class="form-row form-row-tight">
+                    <div class="form-group">
+                      <label for="duration_s">时长（秒）</label>
+                      <input id="duration_s" name="duration_s" type="number" min="1" value="6" />
+                    </div>
+                  </div>
+                </section>
 
-    <!-- 页脚 -->
+                <section class="form-section">
+                  <div class="form-section-heading">
+                    <h4>演示上下文</h4>
+                    <p>选择当前租户、用户、项目以及目标引擎与推流模式。</p>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="tenant_id">当前租户</label>
+                      <select id="tenant_id" name="tenant_id"></select>
+                    </div>
+                    <div class="form-group">
+                      <label for="user_id">当前用户</label>
+                      <select id="user_id" name="user_id"></select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="project_id">当前项目</label>
+                      <select id="project_id" name="project_id"></select>
+                    </div>
+                    <div class="form-group">
+                      <label for="engine_target">引擎目标</label>
+                      <select id="engine_target" name="engine_target"></select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="render_mode">渲染模式</label>
+                      <select id="render_mode" name="render_mode">
+                        <option value="cinematic">cinematic</option>
+                        <option value="interactive">interactive</option>
+                        <option value="vr_walkthrough">vr_walkthrough</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label for="stream_profile">推流配置</label>
+                      <select id="stream_profile" name="stream_profile"></select>
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label for="usage_scope">用途范围</label>
+                    <select id="usage_scope" name="usage_scope">
+                      <option value="internal_demo">internal_demo</option>
+                      <option value="client_review">client_review</option>
+                      <option value="public_showcase">public_showcase</option>
+                    </select>
+                  </div>
+                </section>
+
+                <section class="form-section">
+                  <div class="form-section-heading">
+                    <h4>场馆与模型</h4>
+                    <p>选择展示场馆、目标模型及可选空间锚点。</p>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="venue_type">场馆类型</label>
+                      <select id="venue_type" name="venue_type"></select>
+                    </div>
+                    <div class="form-group">
+                      <label for="ai_model">生成模型</label>
+                      <select id="ai_model" name="ai_model"></select>
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label for="asset_id">空间锚点</label>
+                    <select id="asset_id" name="asset_id"></select>
+                    <p class="field-hint">支持 Blender 空间锚点、扫描白模与纯文本模式。</p>
+                  </div>
+                </section>
+
+                <section class="form-section">
+                  <div class="form-section-heading">
+                    <h4>镜头控制</h4>
+                    <p>配置镜头运动语言，驱动六模块 Prompt 的 camera 模块。</p>
+                  </div>
+                  <div class="form-group">
+                    <label for="shot_type">镜头语言</label>
+                    <select id="shot_type" name="shot_type"></select>
+                  </div>
+                </section>
+
+                <section class="form-section">
+                  <div class="form-section-heading">
+                    <h4>环境与光影</h4>
+                    <p>补充场景环境、氛围与视觉质感描述。</p>
+                  </div>
+                  <div class="form-group">
+                    <label for="environment_hint">环境描述</label>
+                    <textarea id="environment_hint" name="environment_hint" rows="3" placeholder="描述场景环境..."></textarea>
+                  </div>
+                  <div class="form-group">
+                    <label for="lighting_hint">光影氛围</label>
+                    <textarea id="lighting_hint" name="lighting_hint" rows="3" placeholder="描述光影效果..."></textarea>
+                  </div>
+                </section>
+
+                <div class="form-actions form-actions-sticky">
+                  <button type="button" class="btn-outline" id="preview-btn">预览 Prompt</button>
+                  <button type="submit" class="btn-primary" id="submit-btn">
+                    <span>生成视频</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div class="workspace-status">
+            <div class="status-panel workspace-panel-emphasis">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">演示上下文</p>
+                  <h3>租户 / 项目 / 引擎</h3>
+                </div>
+              </div>
+              <div id="context-summary" class="result-content" aria-live="polite">
+                <p class="empty-state">等待上下文加载</p>
+              </div>
+            </div>
+
+            <div class="status-panel workspace-panel-emphasis">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">任务阶段</p>
+                  <h3>任务状态</h3>
+                </div>
+                <span id="job-id" class="job-id">等待提交</span>
+              </div>
+              <div id="job-status" class="status-message" aria-live="polite">工作台就绪，请配置场景参数后提交任务。</div>
+              <ul id="stage-list" class="stage-list" aria-live="polite"></ul>
+            </div>
+
+            <div class="preview-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">调度与监控</p>
+                  <h3>算力调度</h3>
+                </div>
+              </div>
+              <div id="schedule-panel" class="result-content" aria-live="polite">
+                <p class="empty-state">等待调度结果</p>
+              </div>
+            </div>
+
+            <div class="preview-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">实时监控</p>
+                  <h3>监控快照</h3>
+                </div>
+              </div>
+              <div id="monitor-panel" class="result-content" aria-live="polite">
+                <p class="empty-state">等待监控快照</p>
+              </div>
+            </div>
+
+            <div class="preview-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">版权确权</p>
+                  <h3>版权状态</h3>
+                </div>
+              </div>
+              <div id="rights-panel" class="result-content" aria-live="polite">
+                <p class="empty-state">等待版权校验</p>
+              </div>
+            </div>
+
+            <div class="preview-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">计费与套餐</p>
+                  <h3>计费面板</h3>
+                </div>
+              </div>
+              <div id="billing-panel" class="result-content" aria-live="polite">
+                <p class="empty-state">等待计费快照</p>
+              </div>
+            </div>
+
+            <div class="preview-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">运维事件流</p>
+                  <h3>活动日志</h3>
+                </div>
+              </div>
+              <div id="ops-panel" class="result-content" aria-live="polite">
+                <p class="empty-state">等待任务事件流</p>
+              </div>
+            </div>
+
+            <div class="preview-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">黄金六模块</p>
+                  <h3>Prompt 预览</h3>
+                </div>
+                <span id="execution-route" class="route-tag">未生成</span>
+              </div>
+              <div id="preview-warnings" class="warning-stack" aria-live="polite"></div>
+              <div id="prompt-preview" class="preview-content" aria-live="polite">
+                <p class="empty-state">选择场馆后自动生成 Prompt 预览</p>
+              </div>
+            </div>
+
+            <div class="result-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">执行结果</p>
+                  <h3>生成结果</h3>
+                </div>
+              </div>
+              <div id="job-result" class="result-content" aria-live="polite">
+                <p class="empty-state">任务完成后在此展示视频结果</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section features-section section-muted">
+        <div class="section-header">
+          <span class="section-label">Core Capabilities</span>
+          <h2 class="section-title">三大核心能力</h2>
+          <p class="section-desc">将知识库、空间锚点与模型路由收敛为一个更稳定的创作链路。</p>
+        </div>
+
+        <div class="features-grid">
+          <article class="feature-card">
+            <div class="feature-icon knowledge" aria-hidden="true"></div>
+            <h3>知识增强引擎</h3>
+            <p>结构化 Prompt 六格公式，融合场馆环境、光影词库、材质语义与风格锚点，自动补全专业级视频生成参数。</p>
+            <ul class="feature-tags">
+              <li>场馆预设</li>
+              <li>镜头词库</li>
+              <li>材质语义</li>
+            </ul>
+          </article>
+
+          <article class="feature-card featured">
+            <div class="feature-icon spatial" aria-hidden="true"></div>
+            <div class="featured-badge">核心技术</div>
+            <h3>空间智能锚点</h3>
+            <p>基于 Blender 的三维空间约束系统，提供白模场景、相机轨迹与 GLB 资产导出，确保视频内容的物理一致性。</p>
+            <ul class="feature-tags">
+              <li>相机轨迹</li>
+              <li>空间约束</li>
+              <li>资产导出</li>
+            </ul>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon router" aria-hidden="true"></div>
+            <h3>多模型路由</h3>
+            <p>统一接入多类视频模型入口，支持 native、demo-route 与 preview-only 行为边界，便于演示与执行隔离。</p>
+            <ul class="feature-tags">
+              <li>多模型接入</li>
+              <li>智能路由</li>
+              <li>降级容错</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="models" class="section models-section">
+        <div class="section-header">
+          <span class="section-label">Model Router</span>
+          <h2 class="section-title">支持的视频生成模型</h2>
+          <p class="section-desc">前端展示多种模型入口，后端按 route mode 与执行通道完成分发。</p>
+        </div>
+        <div class="models-grid" id="model-grid"></div>
+      </section>
+
+      <section class="section formula-section section-muted">
+        <div class="section-header">
+          <span class="section-label">Prompt Formula</span>
+          <h2 class="section-title">黄金六格 Prompt 公式</h2>
+          <p class="section-desc">用更清晰的六模块结构组织镜头、主体、动态、环境、光影与风格。</p>
+        </div>
+
+        <div class="formula-showcase">
+          <div class="formula-item">
+            <div class="formula-number">01</div>
+            <div class="formula-content">
+              <h4>镜头语言</h4>
+              <p>先锁定三维坐标系与观众视角，避免画面退化为静帧或透视失真。</p>
+            </div>
+          </div>
+          <div class="formula-item">
+            <div class="formula-number">02</div>
+            <div class="formula-content">
+              <h4>主体材质</h4>
+              <p>用 velvet、patina、mahogany 等物理词汇描述核心对象与触感。</p>
+            </div>
+          </div>
+          <div class="formula-item">
+            <div class="formula-number">03</div>
+            <div class="formula-content">
+              <h4>动态行为</h4>
+              <p>通过尘埃、烟雾、反射锚定时间流逝，增强场景生命感。</p>
+            </div>
+          </div>
+          <div class="formula-item">
+            <div class="formula-number">04</div>
+            <div class="formula-content">
+              <h4>环境空间</h4>
+              <p>定义大剧院、白立方画廊、古典博物馆等物理容器与建筑逻辑。</p>
+            </div>
+          </div>
+          <div class="formula-item">
+            <div class="formula-number">05</div>
+            <div class="formula-content">
+              <h4>光影氛围</h4>
+              <p>通过体积光、明暗对照、月光蓝建立情绪和空间深度。</p>
+            </div>
+          </div>
+          <div class="formula-item">
+            <div class="formula-number">06</div>
+            <div class="formula-content">
+              <h4>风格锚点</h4>
+              <p>用电影级风格与负向词控制整体完成度和稳定性。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section assets-section">
+        <div class="section-header">
+          <span class="section-label">Asset Library</span>
+          <h2 class="section-title">空间资产库</h2>
+          <p class="section-desc">基于三维扫描与 UE 精修的空间白模锚点，可与工作台联动选择。</p>
+        </div>
+        <div class="assets-grid" id="asset-grid"></div>
+      </section>
+
+      <section class="section metrics-section section-muted">
+        <div class="section-header">
+          <span class="section-label">Project Metrics</span>
+          <h2 class="section-title">项目指标</h2>
+          <p class="section-desc">用于展示知识库规模、资产沉淀与工作流能力边界。</p>
+        </div>
+        <div class="metrics-grid" id="metrics-grid"></div>
+      </section>
+    </main>
+
     <footer class="app-footer">
       <div class="footer-content">
         <div class="footer-brand">
-          <span class="brand-icon"></span>
+          <span class="brand-icon" aria-hidden="true"></span>
           <span>AIGV Studio</span>
         </div>
         <p class="footer-desc">
           Flask + Blender + MCP + 多模型路由的文创视频智能生成平台
         </p>
         <p class="footer-copyright">
-          基于空间智能与知识增强的视频生产引擎
+          当前持久化方案为 JSON / JobStore，支持可选 Blender 导出与 preview-only 演示路径。
         </p>
       </div>
     </footer>

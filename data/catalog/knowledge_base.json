@@ -2,27 +2,27 @@
   "project_metrics": [
     {
       "id": "library_capacity",
-      "title": "素材库容量",
+      "title": "素材库容量 (Library Capacity)",
       "value": "2TB",
-      "description": "面向文创场景的多模态 AIGV 创意素材库演示指标"
+      "description": "面向文创场景的多模态 AIGV 创意素材库演示指标 (Demonstration metrics for multi-modal AIGV creative asset library in cultural contexts)"
     },
     {
       "id": "scene_count",
-      "title": "示范场景",
-      "value": "3+",
-      "description": "至少覆盖剧院、画廊、博物馆、音乐厅等典型空间"
+      "title": "示范场景 (Demonstration Scenes)",
+      "value": "4+",
+      "description": "深度覆盖剧院、画廊、古典博物馆、声学音乐厅等典型艺术空间 (Extensively covers typical art spaces including theaters, galleries, classical museums, and acoustic concert halls)"
     },
     {
       "id": "ip_outputs",
-      "title": "软件成果",
+      "title": "软件成果 (Software IP Outputs)",
       "value": "2 项",
-      "description": "形成算力支撑系统与文创素材平台相关软著成果"
+      "description": "形成算力支撑系统与文创素材平台相关软著成果 (Generates software copyright achievements related to computing power support systems and cultural creative asset platforms)"
     },
     {
       "id": "enterprise_service",
-      "title": "服务企业",
+      "title": "服务企业 (Served Enterprises)",
       "value": "10 家",
-      "description": "面向文创、游戏、演艺机构的申报考核目标"
+      "description": "面向文创、游戏、演艺机构的申报考核目标 (Assessment targets for cultural, gaming, and performance art institutions)"
     }
   ],
   "model_catalog": [
@@ -42,8 +42,8 @@
       "execution_provider": "seedance",
       "route_mode": "demo-route",
       "status": "showcase",
-      "description": "申报展示模型，当前演示环境由 Seedance 代执行",
-      "style_hint": "director-grade cinematic realism, controlled optical storytelling"
+      "description": "申报展示模型，当前演示环境由 Seedance 代执行。擅长处理复杂的光影变化和多角色的叙事逻辑。",
+      "style_hint": "director-grade cinematic realism, controlled optical storytelling, complex semantic understanding"
     },
     {
       "id": "veo3_showcase",
@@ -51,8 +51,8 @@
       "execution_provider": "seedance",
       "route_mode": "demo-route",
       "status": "showcase",
-      "description": "申报展示模型，强调建筑稳定性与大场景运动语义",
-      "style_hint": "stable architectural motion, large-scale spatial coherence"
+      "description": "申报展示模型，强调建筑稳定性与大场景运动语义。",
+      "style_hint": "stable architectural motion, large-scale spatial coherence, 4k high-fidelity"
     },
     {
       "id": "runway_gen3_showcase",
@@ -60,8 +60,8 @@
       "execution_provider": "seedance",
       "route_mode": "demo-route",
       "status": "showcase",
-      "description": "申报展示模型，当前演示环境由 Seedance 代执行",
-      "style_hint": "camera-control aware motion, elegant frame-to-frame continuity"
+      "description": "申报展示模型，当前演示环境由 Seedance 代执行。擅长颗粒度运动控制。",
+      "style_hint": "camera-control aware motion, elegant frame-to-frame continuity, precise local dynamics"
     },
     {
       "id": "kling3_showcase",
@@ -69,8 +69,8 @@
       "execution_provider": "seedance",
       "route_mode": "demo-route",
       "status": "showcase",
-      "description": "申报展示模型，适合长镜头沉浸漫游语义表达",
-      "style_hint": "long-take immersive motion, persistent subject consistency"
+      "description": "申报展示模型，适合长镜头沉浸漫游语义表达与人物展品物理交互。",
+      "style_hint": "long-take immersive motion, persistent subject consistency, complex physical interactions"
     },
     {
       "id": "luma_optional",
@@ -78,8 +78,8 @@
       "execution_provider": "luma",
       "route_mode": "optional",
       "status": "optional",
-      "description": "预留的可选执行通道，可用于后续图生视频试验",
-      "style_hint": "dreamlike atmosphere, image-to-video friendly composition"
+      "description": "预留的可选执行通道，可用于后续图生视频首尾帧插值试验。",
+      "style_hint": "dreamlike atmosphere, image-to-video friendly composition, first-last frame interpolation"
     },
     {
       "id": "mcp_remote_placeholder",
@@ -88,88 +88,117 @@
       "route_mode": "preview-only",
       "status": "placeholder",
       "description": "预留的远端 Blender MCP 联调入口，当前演示版仅做占位展示",
-      "style_hint": ""
+      "style_hint": "3D-native blockout integration, real-time spatial sync"
     }
   ],
   "shot_catalog": [
     {
       "id": "orbit",
-      "label": "Slow 360-degree Orbit",
+      "label": "Slow 360-degree Orbit (缓慢环绕拍摄)",
       "camera_move_type": "orbit",
-      "prompt": "Pristine 360-degree orbiting shot"
+      "prompt": "Pristine 360-degree orbiting shot around the subject, revealing intricate details from all angles (围绕主体进行完美无瑕的360度环绕拍摄，从各个角度展现复杂细节)",
+      "visual_effect": "史诗感与全知视角，强调主体的立体感和三维几何结构"
     },
     {
       "id": "dolly_in",
-      "label": "Cinematic Slow Push-in",
+      "label": "Cinematic Slow Push-in (电影感缓慢推进)",
       "camera_move_type": "dolly_in",
-      "prompt": "Slow push-in shot"
+      "prompt": "Cinematic slow push-in shot towards the subject, building a sense of mystery (电影感缓慢推镜头移向主体，营造神秘感与紧张感)",
+      "visual_effect": "建立心理紧张感，聚焦情感并隔绝周围环境"
     },
     {
       "id": "crane_up",
-      "label": "Majestic Crane Shot",
+      "label": "Majestic Crane Shot (宏伟摇臂镜头)",
       "camera_move_type": "crane_up",
-      "prompt": "Majestic crane shot rising slowly"
+      "prompt": "Majestic crane shot rising slowly to reveal the grand architecture and vertical scale (宏伟的摇臂镜头缓缓升起，揭示宏大的建筑结构与垂直尺度)",
+      "visual_effect": "宏大壮阔，展示垂直空间结构，极度适合大剧院与博物馆"
     },
     {
       "id": "tracking",
-      "label": "Smooth Eye-level Tracking",
+      "label": "Smooth Eye-level Tracking (平滑等人高跟拍)",
       "camera_move_type": "tracking",
-      "prompt": "Smooth eye-level tracking shot"
+      "prompt": "Smooth eye-level tracking shot moving right alongside the gallery wall (平滑的等人高跟拍镜头向右移动，沿着画廊墙壁掠过)",
+      "visual_effect": "极强的沉浸感，完美模拟人类步速的画廊浏览漫游体验"
     },
     {
       "id": "fpv",
-      "label": "Dynamic FPV Fly-through",
+      "label": "Dynamic FPV Fly-through (动态第一人称穿梭)",
       "camera_move_type": "fpv",
-      "prompt": "Dynamic FPV fly-through shot"
+      "prompt": "Dynamic FPV drone fly-through shot navigating swiftly inside the massive structure (动感的第一人称无人机镜头，在巨大结构内部快速穿梭飞行)",
+      "visual_effect": "强烈的速度感与动态模糊，有效测试大模型的三维连贯性"
     },
     {
       "id": "macro_pan",
-      "label": "Macro Slow-motion Pan",
+      "label": "Macro Slow-motion Pan (微距慢动作平移)",
       "camera_move_type": "macro_pan",
-      "prompt": "Macro slow-motion pan shot"
+      "prompt": "Macro slow-motion pan shot moving across the intricate surface texture (微距慢动作平移镜头，拂过复杂的表面纹理)",
+      "visual_effect": "凸显极致材质细节，如油画厚涂笔触或青铜器氧化斑纹"
     },
     {
       "id": "low_angle_glide",
-      "label": "Low Angle Glide",
+      "label": "Low Angle Glide (低角度滑行)",
       "camera_move_type": "low_angle_glide",
-      "prompt": "Low angle gliding shot"
+      "prompt": "Low angle gliding shot skimming inches above the floor, moving through colossal pillars (低角度滑行镜头贴着地板几英寸移动，穿过巨大的石柱)",
+      "visual_effect": "强调建筑的高耸、压迫感与历史厚重感"
+    },
+    {
+      "id": "rack_focus",
+      "label": "Rack Focus / Focus Pull (焦点切换)",
+      "camera_move_type": "rack_focus",
+      "prompt": "Rack focus from a blurred silhouette in the foreground to a sharply detailed object in the background (焦点从前景模糊的轮廓平滑切换到背景中细节清晰的物体上)",
+      "visual_effect": "引导注意力，制造揭示感和强烈的情绪叙事惊喜"
     }
   ],
   "lexicon_catalog": [
     {
-      "term": "Rack Focus / Focus Pull",
-      "goal": "焦点切换",
-      "usage": "让焦点从前景观众或展柜玻璃切换到核心展品，增强叙事层次。"
+      "term": "Rack Focus / Focus Pull (焦点切换)",
+      "goal": "焦点切换，视觉引导",
+      "usage": "让焦点从前景观众或展柜玻璃切换到核心展品，增强叙事层次与揭示感。"
     },
     {
-      "term": "Volumetric Lighting",
-      "goal": "体积光",
-      "usage": "在剧院、博物馆或古建空间中制造深度分层和历史沉淀感。"
+      "term": "Volumetric Lighting / God Rays (体积光/丁达尔效应)",
+      "goal": "体积光，空间深度",
+      "usage": "在剧院、博物馆或古建空间中制造深度分层。配合 'dust motes dancing' (尘埃飞舞) 营造极强的历史沉淀与神圣感。"
     },
     {
-      "term": "Low Angle Gliding",
+      "term": "Low Angle Gliding (低角度滑行)",
       "goal": "低机位压迫感",
-      "usage": "突出博物馆巨型骨架、雕塑或大体量空间的结构尺度。"
+      "usage": "突出博物馆巨型骨架、古典雕塑或大体量哥特式空间的结构尺度与历史压迫感。"
     },
     {
-      "term": "Strong Rim Lighting",
-      "goal": "轮廓分离",
-      "usage": "适合人物或器物高光时刻，让主体从暗背景中清晰剥离。"
+      "term": "Strong Rim Lighting / Backlighting (强轮廓光/逆光)",
+      "goal": "轮廓分离，主体凸显",
+      "usage": "适合人物（如交响乐指挥）或器物高光时刻。配合 'theatrical haze' (戏剧烟雾) 让主体从暗背景中清晰剥离。"
     },
     {
-      "term": "Caustics / Bounce Light",
-      "goal": "折射与反射",
-      "usage": "强化玻璃展柜、大理石地面和抛光木饰面的物理质感。"
+      "term": "Caustics / Bounce Light (焦散/反射光照)",
+      "goal": "折射与反射物理学",
+      "usage": "强制激活模型内部光线追踪计算，强化玻璃展柜、水景、大理石地面和抛光木饰面的真实物理质感。"
+    },
+    {
+      "term": "Chiaroscuro (明暗对照法)",
+      "goal": "戏剧性明暗对比",
+      "usage": "源自文艺复兴绘画，通过强烈的明暗对比和 'pitch-black void' (漆黑虚无) 极致强调剧院舞台的戏剧冲突。"
+    },
+    {
+      "term": "Translucent Carrara Marble with Subsurface Scattering (带有次表面散射的半透明卡拉拉大理石)",
+      "goal": "顶级CG石材约束",
+      "usage": "让古典长廊中的雕像拥有皮肤般的温润通透感，告别劣质石膏的廉价塑料感。"
+    },
+    {
+      "term": "Cinematic Teal and Orange (电影级青橙色调)",
+      "goal": "科幻/先锋色调控制",
+      "usage": "利用冷暖色彩对比建立视觉焦点，非常适合沉浸式数字艺术空间，营造强烈现代感与数字迷幻感。"
     }
   ],
   "venue_catalog": [
     {
       "id": "grand_theater",
-      "name": "大剧院",
+      "name": "大剧院 (The Grand Theater)",
       "hero_title": "巴洛克歌剧院 · 开幕前的宏大建立镜头",
-      "description": "面向剧院与演艺空间的奢华、静谧与开演前期待感表达。",
+      "description": "面向剧院与演艺空间的奢华、静谧与开演前期待感表达。重点表现厚重的材质（天鹅绒、木材）与极具戏剧性的聚光灯效果。",
       "default_subject": "plush crimson velvet seats, ornate gilded balconies, glowing crystal chandelier",
-      "default_dynamics": "dust motes dancing in the light beams, heavy curtains subtly swaying",
+      "default_dynamics": "dust motes dancing in the light beams, heavy curtains subtly swaying with realistic weight",
       "default_environment": "historic Baroque opera house interior featuring tiered curved balconies, ornate gilded stucco, and intricate ceiling frescoes",
       "default_lighting": "atmospheric volumetric spotlight, warm amber rim lighting cutting through theatrical haze, deep chiaroscuro shadows",
       "default_style": "High-fidelity architectural visualization, warm golden tones, 8k, hyper-realistic texture",
@@ -184,19 +213,32 @@
       "negative_prompt_parts": [
         "warped pillars",
         "melting balconies",
-        "plastic texture"
+        "plastic texture",
+        "empty seats"
+      ],
+      "prompt_cases": [
+        {
+          "title": "开幕前的宏大建立镜头",
+          "prompt_en": "A Cinematic Still of a majestic crane shot rising slowly from the plush crimson velvet seats towards the grand ornate ceiling and glowing crystal chandelier in a historic Baroque opera house. Atmospheric volumetric lighting creating shafts of light through the dusty air. Warm golden tones, intricate gold leaf details, high contrast, 8k resolution.",
+          "prompt_zh": "电影画面截图：雄伟的摇臂镜头缓缓从柔软的深红色天鹅绒座椅上升起，朝着宏伟华丽的天花板和闪耀的水晶吊灯飞去，画面背景是一座历史悠久的巴洛克歌剧院。立体光在尘埃弥漫的空气中形成光柱。"
+        },
+        {
+          "title": "舞台上的独角戏情绪特写",
+          "prompt_en": "Cinematic slow push-in towards a dramatic stage actor standing center stage. Illuminated by a single harsh spotlight (Rim lighting) against a pitch black void background. Chiaroscuro lighting style, deep shadows, dust motes dancing in the spotlight beam. Cinematic film grain.",
+          "prompt_zh": "电影感镜头缓缓推进，聚焦于舞台中央神情凝重的演员。背景漆黑一片，仅有一束强烈的聚光灯照亮他。采用明暗对照风格，深沉的阴影，光束中飞舞的尘埃。电影胶片颗粒质感。"
+        }
       ]
     },
     {
       "id": "modern_gallery",
-      "name": "现代画廊",
+      "name": "现代画廊 (Modern Art Gallery)",
       "hero_title": "白立方画廊 · 沉浸式漫游体验",
-      "description": "强调白立方空间、平静漫游和艺术展陈的秩序感。",
-      "default_subject": "minimalist white sculptures, polished concrete floors, pristine white gallery walls",
+      "description": "强调白立方空间、平静漫游和艺术展陈的秩序感。空间纯净客观，不喧宾夺主。",
+      "default_subject": "minimalist white sculptures, polished concrete floors, pristine white gallery walls, thick impasto oil paintings",
       "default_dynamics": "soft visitor silhouettes drifting in the background, subtle skylight reflections moving across the floor",
       "default_environment": "minimalist modern art gallery with a white cube layout, polished concrete floors, frosted skylights, and disciplined exhibition spacing",
-      "default_lighting": "soft diffused daylight, natural skylight, high key lighting with no harsh shadows",
-      "default_style": "serene architectural visualization, contemplative mood, muted color palette, refined gallery realism",
+      "default_lighting": "soft diffused daylight, natural skylight, high key lighting with evenly distributed track lights, no harsh shadows",
+      "default_style": "serene architectural visualization, contemplative mood, muted color palette, refined gallery realism, 4k",
       "default_shot": "tracking",
       "default_camera_move": "tracking",
       "workflow_recommendation": "text_to_video",
@@ -208,17 +250,27 @@
       "negative_prompt_parts": [
         "crowd",
         "harsh shadows",
-        "messy layout"
+        "messy layout",
+        "people",
+        "tourists",
+        "flash photography"
+      ],
+      "prompt_cases": [
+        {
+          "title": "现代画廊平滑漫游体验",
+          "prompt_en": "Eye-level tracking shot moving smoothly through a minimalist modern art gallery with polished concrete floors. Passing by abstract white sculptures on white pedestals. Soft diffused daylight streaming through frosted skylights, creating subtle reflections on the floor. Symmetrical composition, serene and contemplative atmosphere, 4k.",
+          "prompt_zh": "平视跟拍镜头在简约现代风格画廊中流畅移动。经过白色底座上的抽象白色雕塑。柔和的漫射日光透过磨砂天窗照射进来，在地板上形成微妙反光。对称构图，宁静令人沉思的氛围。"
+        }
       ]
     },
     {
       "id": "ancient_museum",
-      "name": "古典博物馆",
+      "name": "古典博物馆 (Ancient Museum)",
       "hero_title": "古典博物馆 · 巨兽大厅的深夜",
-      "description": "突出历史沉淀、神秘氛围与文物微观纹理细节。",
+      "description": "突出历史沉淀、神秘氛围与文物微观纹理细节，强调空间的宏大纵深感。",
       "default_subject": "colossal dinosaur skeletons, oxidized bronze artifacts, translucent Carrara marble sculptures",
-      "default_dynamics": "wisps of museum haze drifting slowly, dust motes dancing in god rays, long shadows stretching across stone floors",
-      "default_environment": "grand Beaux-Arts museum hall with massive Corinthian marble columns, high windows, and curated antiquities",
+      "default_dynamics": "wisps of museum haze drifting slowly, dust motes dancing in god rays, long shadows stretching across stone floors dynamically",
+      "default_environment": "grand Beaux-Arts museum hall with massive Corinthian marble columns, high vaulted ceilings, and curated antiquities",
       "default_lighting": "cool moonlight blue lighting mixed with warm amber directional spotlight, volumetric fog, dramatic long shadows",
       "default_style": "National Geographic documentary realism, mysterious atmosphere, ultra-detailed texture fidelity",
       "default_shot": "low_angle_glide",
@@ -232,16 +284,29 @@
       "negative_prompt_parts": [
         "broken anatomy",
         "warped skeleton",
-        "cartoon look"
+        "cartoon look",
+        "modern artifacts"
+      ],
+      "prompt_cases": [
+        {
+          "title": "古代文物的微距写实展示",
+          "prompt_en": "Macro slow-motion pan shot moving across the surface of an ancient bronze artifact inside a glass display case. Showcasing the oxidized patina texture and intricate engravings. Professional museum studio lighting, black background, shallow depth of field blurring the reflection on the glass. Ultra-detailed, 8k, National Geographic style.",
+          "prompt_zh": "微距慢动作推摄镜头，沿着置于玻璃展柜内的古老青铜器表面移动。展示其氧化铜锈纹理和精美雕刻。专业博物馆工作室布光，黑色背景，浅景深虚化玻璃反光。国家地理风格。"
+        },
+        {
+          "title": "巨兽大厅的深夜压迫感",
+          "prompt_en": "Low angle gliding shot moving through a grand dim museum hall filled with colossal dinosaur skeletons. Cool moonlight blue lighting filtering from high windows, casting long dramatic shadows of the ribcages onto the marble floor. Mysterious atmosphere, volumetric fog, cinematic mystery movie look.",
+          "prompt_zh": "低角度滑行镜头穿梭于一间昏暗的宏伟博物馆大厅，摆放着巨大的恐龙骨架。冷月光蓝色光线投射出巨大的戏剧性骨架阴影在大理石地板上。神秘氛围，体积雾，电影质感。"
+        }
       ]
     },
     {
       "id": "concert_hall",
-      "name": "声学音乐厅",
+      "name": "声学音乐厅 (Concert Hall)",
       "hero_title": "音乐厅 · 交响乐团的史诗环绕",
-      "description": "用于音乐厅建筑美学、木质声学结构与沉浸式声场表达。",
+      "description": "用于表现音乐厅特有的建筑声学美学、木质声学结构的反光与沉浸式演出的史诗感。",
       "default_subject": "grand piano, polished mahogany acoustic panels, gleaming brass instruments",
-      "default_dynamics": "floating dust in warm beams, restrained orchestral micro-movements, subtle reflected highlights across wood panels",
+      "default_dynamics": "floating dust in warm beams, abstract fluid simulation of sound waves, conductor's baton slicing through the air in slow motion",
       "default_environment": "vineyard-style concert hall with terraced seating surrounding a central stage, clad in undulating acoustic wood panels",
       "default_lighting": "warm golden hour lighting, dim ambient house light, warm practical lighting from music stands",
       "default_style": "immersive concert cinematography, architectural symmetry, epic yet refined acoustic atmosphere",
@@ -256,20 +321,34 @@
       "negative_prompt_parts": [
         "broken perspective",
         "floating instruments",
-        "flat lighting"
+        "flat lighting",
+        "plastic panels"
+      ],
+      "prompt_cases": [
+        {
+          "title": "交响乐团的史诗环绕长镜头",
+          "prompt_en": "Pristine 360-degree orbiting shot around a grand piano on the stage of a magnificent wooden concert hall. In the background, a blurred symphony orchestra is seated. Warm golden hour lighting hitting the curved acoustic wood panels and brass instruments. Glimmering reflections, epic scale.",
+          "prompt_zh": "在宏伟的木质音乐厅舞台上，围绕一架三角钢琴进行完美的 360 度环绕拍摄。背景中是虚化的交响乐团。温暖黄金时刻光线打在声学木板和黄铜乐器上，闪烁光斑反射，史诗级尺度。"
+        },
+        {
+          "title": "声音共鸣的抽象流体渲染",
+          "prompt_en": "Abstract fluid simulation of glowing golden sound waves flowing through the air of a darkened concert hall. The particles dance and swirl around the massive organ pipes in hypnotic movement, visualizing the reverberation. Mesmerizing, 8k render, Octane render, sparkling particles.",
+          "prompt_zh": "抽象流体模拟展现昏暗音乐厅中流动的发光金色声波。粒子在巨大管风琴周围翩翩起舞，以催眠般的运动将混响视觉化。令人着迷的8K渲染，Octane渲染器质感。"
+        }
       ]
     }
   ],
   "asset_catalog": [
     {
       "id": "text_only",
-      "name": "纯文生视频",
+      "name": "纯文生视频 (Text to Video)",
       "venue_type": "",
       "workflow_mode": "text_to_video",
       "source_type": "Prompt only",
-      "description": "不绑定底层空间资产，直接使用知识增强后的 Prompt 执行生成。",
+      "description": "不绑定底层空间资产，直接使用知识增强后的 Prompt 执行生成。极易产生结构幻觉，仅适合概念验证。",
       "asset_kind": "prompt_only",
       "file_format": "N/A",
+      "file_path": null,
       "recommended": false,
       "showcase": false,
       "metadata": {
@@ -285,9 +364,10 @@
       "venue_type": "grand_theater",
       "workflow_mode": "hybrid_image_to_video",
       "source_type": "UE5 + 三维扫描",
-      "description": "基于剧院场景扫描和 UE 精修逻辑抽象的空间白模锚点。",
+      "description": "基于剧院场景扫描和 UE 精修逻辑抽象的空间白模锚点。为视频引擎提供绝对精确的初始帧透视参考。",
       "asset_kind": "spatial_anchor",
       "file_format": "GLB",
+      "file_path": "data/assets/models/theater/opera_house_anchor.glb",
       "recommended": true,
       "showcase": true,
       "metadata": {
@@ -328,9 +408,10 @@
       "venue_type": "modern_gallery",
       "workflow_mode": "hybrid_image_to_video",
       "source_type": "UE5 场景搭建",
-      "description": "面向白立方画廊漫游与展陈验证的空间底板资产。",
+      "description": "面向白立方画廊漫游与展陈验证的空间底板资产。提供精确的展陈间距校验基础。",
       "asset_kind": "spatial_anchor",
       "file_format": "GLB",
+      "file_path": "data/assets/models/gallery/white_cube_anchor.glb",
       "recommended": true,
       "showcase": true,
       "metadata": {
@@ -371,9 +452,10 @@
       "venue_type": "ancient_museum",
       "workflow_mode": "hybrid_image_to_video",
       "source_type": "三维扫描 + 素材复原",
-      "description": "面向博物馆巨型展厅、文物展柜和历史空间约束的混合生成底板。",
+      "description": "面向博物馆巨型展厅、文物展柜和历史空间约束的混合生成底板。防止科林斯石柱等复杂几何在视频中扭曲。",
       "asset_kind": "spatial_anchor",
       "file_format": "GLB",
+      "file_path": "data/assets/models/museum/museum_hall_anchor.glb",
       "recommended": true,
       "showcase": true,
       "metadata": {
@@ -417,6 +499,7 @@
       "description": "用于音乐厅声学结构、舞台环绕关系与木质面板反光校验的白模锚点。",
       "asset_kind": "spatial_anchor",
       "file_format": "GLB",
+      "file_path": "data/assets/models/concert/concert_hall_anchor.glb",
       "recommended": true,
       "showcase": true,
       "metadata": {
@@ -452,38 +535,156 @@
       ]
     }
   ],
+  "engine_catalog": [
+    {
+      "id": "blender_anchor",
+      "label": "Blender Anchor",
+      "render_mode": "cinematic",
+      "description": "以 Blender 空间锚点为主的演示路径，用于结构约束与镜头预演"
+    },
+    {
+      "id": "ue5_cloud",
+      "label": "UE5 Cloud",
+      "render_mode": "cinematic",
+      "description": "模拟云端 UE5 渲染会话，突出高保真场景表现"
+    },
+    {
+      "id": "unity_cloud",
+      "label": "Unity Cloud",
+      "render_mode": "interactive",
+      "description": "模拟 Unity 云交互渲染路径，突出实时互动能力"
+    },
+    {
+      "id": "steamvr_stream",
+      "label": "SteamVR Stream",
+      "render_mode": "vr_walkthrough",
+      "description": "模拟 SteamVR 低时延推流会话，适合沉浸式漫游演示"
+    }
+  ],
+  "resource_pool_catalog": [
+    {
+      "id": "local_gpu_pool",
+      "label": "本地 GPU 节点池",
+      "pool_type": "local_gpu",
+      "gpu_type": "A10",
+      "description": "用于日常样片生成与 Prompt 结构验证"
+    },
+    {
+      "id": "public_cloud_pool",
+      "label": "公有云节点池",
+      "pool_type": "public_cloud",
+      "gpu_type": "A100",
+      "description": "用于云渲染与高质量展示型任务调度"
+    },
+    {
+      "id": "edge_gpu_pool",
+      "label": "边缘低时延节点池",
+      "pool_type": "edge_gpu",
+      "gpu_type": "L40",
+      "description": "用于低时延推流与 VR 漫游演示"
+    }
+  ],
+  "stream_profile_catalog": [
+    {
+      "id": "low_latency",
+      "label": "低时延",
+      "description": "偏向 WebRTC 与互动体验"
+    },
+    {
+      "id": "balanced",
+      "label": "均衡",
+      "description": "在画质、延迟与稳定性之间折中"
+    },
+    {
+      "id": "showcase",
+      "label": "展示",
+      "description": "偏向大屏展示与高码率输出"
+    }
+  ],
+  "rights_template_catalog": [
+    {
+      "id": "exclusive_demo",
+      "label": "独家演示授权",
+      "approval_status": "approved"
+    },
+    {
+      "id": "partner_demo",
+      "label": "合作方演示授权",
+      "approval_status": "approved_with_notice"
+    },
+    {
+      "id": "pending_clearance",
+      "label": "待补齐授权",
+      "approval_status": "pending"
+    }
+  ],
+  "demo_tenant_catalog": [
+    {
+      "id": "tenant_museum_group",
+      "name": "华中文博演示集团",
+      "project_id": "project_mid_demo",
+      "default_user_id": "user_curator_01"
+    }
+  ],
   "workflow_tips": [
     {
-      "title": "图生视频优先",
-      "description": "对于复杂建筑或剧院纵深场景，优先绑定空间锚点资产，再让视频模型只负责运镜与微动态。"
+      "title": "图生视频优先 (Image-to-Video Workflow)",
+      "description": "对于复杂建筑或剧院纵深场景，直接文生视频极易产生透视崩溃。优先绑定空间锚点资产或通过 Midjourney 生成精准首帧，再将其输入视频模型，并强制要求在 Prompt 中『只描述运动，绝对不描述画面已有的静态内容』，避免画面发生 Morphing (变形)。"
     },
     {
-      "title": "GraphRAG 本地检索",
-      "description": "本轮演示版使用本地 JSON 规则库与标签命中，模拟 GraphRAG 对场景、材质、光影和工作流的增强。"
+      "title": "跨镜头的连贯性控制 (Consistency Strategies)",
+      "description": "若要生成完整的漫游视频，必须在每一个分镜 Prompt 末尾加上相同的风格描述后缀，锁定相同的光照色温（如 '5600K daylight'），并在模型支持时锁定随机种子 (Seed Control)。"
     },
     {
-      "title": "负向提示词治理",
-      "description": "默认排除 warped pillars、melting architecture、plastic texture 等文创场景常见失真。"
+      "title": "后期增强与画质提升 (Post-Processing & Upscaling)",
+      "description": "原生 AI 视频分辨率不足以直接用于大型展馆 LED 屏幕。建议使用 Topaz Video AI 将生成内容超分放大至 4K/8K，并使用光流法插帧至 60fps 增强流体和尘埃动态的丝滑感。"
+    },
+    {
+      "title": "GraphRAG 本地检索与结构化封装",
+      "description": "本轮演示版使用本地 JSON 规则库与标签命中，模拟 GraphRAG 对场景材质、专属负面词和黄金 Prompt 公式的结构化组装与增强封装。"
+    },
+    {
+      "title": "负向提示词治理 (Negative Prompting)",
+      "description": "默认排除 warped pillars、melting architecture、plastic texture 等文创场景常见失真。同时根据场景附加条件负面词，例如无人画廊需排除 'crowd, tourists'。"
     },
     {
       "title": "多模型展示与单通道执行",
-      "description": "前端可展示 Sora、Veo、Runway、Kling 等模型入口，后端以 Seedance 为真实执行主通道。"
+      "description": "前端可展示 Sora、Veo、Runway、Kling 等模型入口，后端以 Seedance 为真实执行主通道验证工作流。"
     }
   ],
   "knowledge_rules": {
+    "prompt_engineering": {
+      "golden_formula_structure": "[镜头语言与运镜] + [主体描述与材质] + [动态与行为] + [环境与空间构建] + [光影与氛围] + [风格与美学参数]",
+      "golden_formula_principle": "顺序即权重。大模型的注意力机制优先解析序列前端。首位锚定效应要求必须先将运镜（Camera Movement）置于句首以建立三维物理坐标系，最后再放置光影和风格参数。"
+    },
     "default_negative_prompt_parts": [
       "blurry",
       "distorted",
       "warped architecture",
+      "melting architecture",
+      "non-Euclidean geometry",
       "broken perspective",
+      "impossible perspective",
       "low resolution",
       "watermark",
       "text",
       "shaky camera",
       "flicker",
+      "noise",
+      "artifacts",
       "overexposed",
       "underexposed",
-      "bad geometry"
-    ]
+      "flat lighting",
+      "plastic texture",
+      "cheap 3D render",
+      "cartoon",
+      "bad geometry",
+      "floating objects"
+    ],
+    "conditional_negative_prompts": {
+      "empty_gallery_walkthrough": ["people", "crowd", "tourists", "flash photography"],
+      "full_theater_performance": ["empty seats"],
+      "quiet_rehearsal": ["audience", "cheering", "clapping"]
+    }
   }
 }

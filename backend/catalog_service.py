@@ -43,6 +43,11 @@ class CatalogService(object):
             "workflow_tips": copy.deepcopy(data.get("workflow_tips") or []),
             "shot_catalog": copy.deepcopy(data.get("shot_catalog") or []),
             "lexicon_catalog": copy.deepcopy(data.get("lexicon_catalog") or []),
+            "engine_catalog": copy.deepcopy(data.get("engine_catalog") or []),
+            "resource_pool_catalog": copy.deepcopy(data.get("resource_pool_catalog") or []),
+            "stream_profile_catalog": copy.deepcopy(data.get("stream_profile_catalog") or []),
+            "rights_template_catalog": copy.deepcopy(data.get("rights_template_catalog") or []),
+            "demo_tenant_catalog": copy.deepcopy(data.get("demo_tenant_catalog") or []),
         }
 
     def get_rules(self):

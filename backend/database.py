@@ -145,11 +145,234 @@ class Database(object):
             )
         ''')
 
+        # Demo control plane tables
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tenants (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                code TEXT,
+                tier TEXT,
+                status TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                name TEXT NOT NULL,
+                role TEXT,
+                title TEXT,
+                status TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                name TEXT NOT NULL,
+                code TEXT,
+                status TEXT,
+                render_mode TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS project_memberships (
+                id TEXT PRIMARY KEY,
+                project_id TEXT,
+                user_id TEXT,
+                tenant_id TEXT,
+                role TEXT,
+                permissions TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS resources (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                node_name TEXT NOT NULL,
+                pool_type TEXT,
+                region TEXT,
+                gpu_type TEXT,
+                capacity_units INTEGER,
+                queue_depth INTEGER,
+                status TEXT,
+                utilization_hint REAL,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS resource_allocations (
+                id TEXT PRIMARY KEY,
+                job_id TEXT,
+                resource_id TEXT,
+                tenant_id TEXT,
+                project_id TEXT,
+                decision_reason TEXT,
+                allocation_status TEXT,
+                snapshot TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (resource_id) REFERENCES resources(id),
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS engine_profiles (
+                id TEXT PRIMARY KEY,
+                engine_type TEXT NOT NULL,
+                display_name TEXT,
+                render_mode TEXT,
+                stream_mode TEXT,
+                status TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS stream_sessions (
+                id TEXT PRIMARY KEY,
+                job_id TEXT,
+                project_id TEXT,
+                engine_profile_id TEXT,
+                protocol TEXT,
+                bitrate_mbps REAL,
+                latency_ms INTEGER,
+                fps INTEGER,
+                preview_url TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                FOREIGN KEY (engine_profile_id) REFERENCES engine_profiles(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS asset_rights (
+                id TEXT PRIMARY KEY,
+                asset_id TEXT,
+                tenant_id TEXT,
+                license_type TEXT,
+                source_name TEXT,
+                approval_status TEXT,
+                usage_scope TEXT,
+                expires_at INTEGER,
+                restrictions TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS asset_provenance_events (
+                id TEXT PRIMARY KEY,
+                asset_id TEXT,
+                tenant_id TEXT,
+                event_type TEXT,
+                event_summary TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS billing_accounts (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                project_id TEXT,
+                plan_name TEXT,
+                balance REAL,
+                currency TEXT,
+                status TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS billing_usage_records (
+                id TEXT PRIMARY KEY,
+                job_id TEXT,
+                tenant_id TEXT,
+                project_id TEXT,
+                amount REAL,
+                currency TEXT,
+                usage_type TEXT,
+                usage_units REAL,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ops_events (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                project_id TEXT,
+                job_id TEXT,
+                event_type TEXT,
+                severity TEXT,
+                message TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+
         # Create indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(asset_type)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_assets_venue ON assets(venue_type)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_prompts_category ON prompt_documents(category)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_jobs_status ON job_history(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_tenant ON projects(tenant_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_resources_status ON resources(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_allocations_job ON resource_allocations(job_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_stream_job ON stream_sessions(job_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_rights_asset ON asset_rights(asset_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_provenance_asset ON asset_provenance_events(asset_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_billing_project ON billing_usage_records(project_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_ops_project ON ops_events(project_id)')
 
         conn.commit()
         logger.info("Database schema initialized at %s", self.db_path)

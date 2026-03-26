@@ -234,6 +234,16 @@
     }
   }
 
+  function getResponseData(payload) {
+    if (payload && payload.success === false) {
+      throw new Error(payload.message || payload.error || '请求失败');
+    }
+    if (payload && typeof payload === 'object' && payload.data !== undefined) {
+      return payload.data;
+    }
+    return payload;
+  }
+
   function loadAssets() {
     if (!assetGrid || isLoading) return;
 
@@ -264,14 +274,16 @@
       })
       .then(function(data) {
         isLoading = false;
-        var responseData = getResponseData(data, currentTab === 'prompts' ? 'documents' : 'assets');
-        var filteredItems = filterItems(responseData || []);
+        var responseData = getResponseData(data) || {};
+        var items = responseData.items || [];
+        var filteredItems = filterItems(items);
         if (currentTab === 'prompts') {
           renderPromptDocuments(filteredItems);
         } else {
           renderAssets(filteredItems);
         }
-        totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+        var totalItems = typeof responseData.total === 'number' ? responseData.total : items.length;
+        totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
         if (currentPage > totalPages) {
           currentPage = totalPages;
         }
@@ -618,14 +630,10 @@
         return response.json();
       })
       .then(function(data) {
-        var responseData = getResponseData(data);
-        if (data.error || (data.success === false)) {
-          showToast('上传失败: ' + ((data && data.message) || data.error), 'error');
-        } else {
-          showToast(((data && data.message) || '上传成功!'), 'success');
-          closeModal();
-          loadAssets();
-        }
+        getResponseData(data);
+        showToast(((data && data.message) || '上传成功!'), 'success');
+        closeModal();
+        loadAssets();
       })
       .catch(function(error) {
         console.error('Upload error:', error);

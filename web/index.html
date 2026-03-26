@@ -30,8 +30,7 @@
         <div class="hero-content">
           <div class="hero-badge">AI 驱动的视频生产引擎</div>
           <h1 class="hero-title">
-            为剧院、画廊与博物馆打造的<br />
-            <span class="gradient-text">智能视频创作工作台</span>
+            <span class="gradient-text">面向文创类AIGV的素材库与算力服务平台</span>
           </h1>
           <p class="hero-desc hero-desc-compact">
             将黄金六模块 Prompt、Blender 空间锚点与多模型路由收敛进同一条创作链路，让视觉提案从概念展示自然进入执行流程。
@@ -119,9 +118,9 @@
         </div>
 
         <div class="workspace-container workspace-shell">
-          <div class="workspace-controls">
-            <div class="control-panel workspace-panel-emphasis">
-              <div class="panel-header">
+          <aside class="workspace-controls" aria-label="创作配置区域">
+            <div class="control-panel workspace-panel-emphasis workspace-panel-primary">
+              <div class="panel-header panel-header-rich">
                 <div>
                   <p class="panel-kicker">配置面板</p>
                   <h3>场景配置</h3>
@@ -129,240 +128,303 @@
                 <span class="panel-tag">创作输入</span>
               </div>
               <form id="job-form" class="control-form">
-                <section class="form-section">
-                  <div class="form-section-heading">
-                    <h4>基础信息</h4>
-                    <p>先确定任务标题和视频时长。</p>
-                  </div>
-                  <div class="form-group">
-                    <label for="title">任务标题</label>
-                    <input id="title" name="title" type="text" placeholder="例如：巴洛克歌剧院开幕镜头" />
-                  </div>
-                  <div class="form-row form-row-tight">
-                    <div class="form-group">
-                      <label for="duration_s">时长（秒）</label>
-                      <input id="duration_s" name="duration_s" type="number" min="1" value="6" />
+                <div class="form-stack">
+                  <section class="form-section form-cluster form-cluster-intro" aria-labelledby="task-setup-heading">
+                    <div class="form-section-heading">
+                      <span class="form-step">01</span>
+                      <div>
+                        <h4 id="task-setup-heading">基础任务设置</h4>
+                        <p>先确定任务标题和视频时长，为当前创作建立主线。</p>
+                      </div>
                     </div>
-                  </div>
-                </section>
+                    <div class="form-group">
+                      <label for="title">任务标题</label>
+                      <input id="title" name="title" type="text" placeholder="例如：巴洛克歌剧院开幕镜头" />
+                    </div>
+                    <div class="form-row form-row-tight">
+                      <div class="form-group">
+                        <label for="duration_s">时长（秒）</label>
+                        <input id="duration_s" name="duration_s" type="number" min="1" value="6" />
+                      </div>
+                    </div>
+                  </section>
 
-                <section class="form-section">
-                  <div class="form-section-heading">
-                    <h4>演示上下文</h4>
-                    <p>选择当前租户、用户、项目以及目标引擎与推流模式。</p>
-                  </div>
-                  <div class="form-row">
-                    <div class="form-group">
-                      <label for="tenant_id">当前租户</label>
-                      <select id="tenant_id" name="tenant_id"></select>
+                  <section class="form-section form-cluster" aria-labelledby="execution-context-heading">
+                    <div class="form-section-heading">
+                      <span class="form-step">02</span>
+                      <div>
+                        <h4 id="execution-context-heading">演示与执行上下文</h4>
+                        <p>选择当前租户、用户、项目以及目标引擎与推流模式。</p>
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="tenant_id">当前租户</label>
+                        <select id="tenant_id" name="tenant_id"></select>
+                      </div>
+                      <div class="form-group">
+                        <label for="user_id">当前用户</label>
+                        <select id="user_id" name="user_id"></select>
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="project_id">当前项目</label>
+                        <select id="project_id" name="project_id"></select>
+                      </div>
+                      <div class="form-group">
+                        <label for="engine_target">引擎目标</label>
+                        <select id="engine_target" name="engine_target"></select>
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="render_mode">渲染模式</label>
+                        <select id="render_mode" name="render_mode">
+                          <option value="cinematic">cinematic</option>
+                          <option value="interactive">interactive</option>
+                          <option value="vr_walkthrough">vr_walkthrough</option>
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label for="stream_profile">推流配置</label>
+                        <select id="stream_profile" name="stream_profile"></select>
+                      </div>
                     </div>
                     <div class="form-group">
-                      <label for="user_id">当前用户</label>
-                      <select id="user_id" name="user_id"></select>
-                    </div>
-                  </div>
-                  <div class="form-row">
-                    <div class="form-group">
-                      <label for="project_id">当前项目</label>
-                      <select id="project_id" name="project_id"></select>
-                    </div>
-                    <div class="form-group">
-                      <label for="engine_target">引擎目标</label>
-                      <select id="engine_target" name="engine_target"></select>
-                    </div>
-                  </div>
-                  <div class="form-row">
-                    <div class="form-group">
-                      <label for="render_mode">渲染模式</label>
-                      <select id="render_mode" name="render_mode">
-                        <option value="cinematic">cinematic</option>
-                        <option value="interactive">interactive</option>
-                        <option value="vr_walkthrough">vr_walkthrough</option>
+                      <label for="usage_scope">用途范围</label>
+                      <select id="usage_scope" name="usage_scope">
+                        <option value="internal_demo">internal_demo</option>
+                        <option value="client_review">client_review</option>
+                        <option value="public_showcase">public_showcase</option>
                       </select>
                     </div>
-                    <div class="form-group">
-                      <label for="stream_profile">推流配置</label>
-                      <select id="stream_profile" name="stream_profile"></select>
-                    </div>
-                  </div>
-                  <div class="form-group">
-                    <label for="usage_scope">用途范围</label>
-                    <select id="usage_scope" name="usage_scope">
-                      <option value="internal_demo">internal_demo</option>
-                      <option value="client_review">client_review</option>
-                      <option value="public_showcase">public_showcase</option>
-                    </select>
-                  </div>
-                </section>
+                  </section>
 
-                <section class="form-section">
-                  <div class="form-section-heading">
-                    <h4>场馆与模型</h4>
-                    <p>选择展示场馆、目标模型及可选空间锚点。</p>
-                  </div>
-                  <div class="form-row">
-                    <div class="form-group">
-                      <label for="venue_type">场馆类型</label>
-                      <select id="venue_type" name="venue_type"></select>
+                  <section class="form-section form-cluster" aria-labelledby="venue-model-heading">
+                    <div class="form-section-heading">
+                      <span class="form-step">03</span>
+                      <div>
+                        <h4 id="venue-model-heading">场馆与模型选择</h4>
+                        <p>选择展示场馆、目标模型及可选空间锚点。</p>
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="venue_type">场馆类型</label>
+                        <select id="venue_type" name="venue_type"></select>
+                      </div>
+                      <div class="form-group">
+                        <label for="ai_model">生成模型</label>
+                        <select id="ai_model" name="ai_model"></select>
+                      </div>
                     </div>
                     <div class="form-group">
-                      <label for="ai_model">生成模型</label>
-                      <select id="ai_model" name="ai_model"></select>
+                      <label for="asset_id">空间锚点</label>
+                      <select id="asset_id" name="asset_id"></select>
+                      <p class="field-hint">支持 Blender 空间锚点、扫描白模与纯文本模式。</p>
                     </div>
-                  </div>
-                  <div class="form-group">
-                    <label for="asset_id">空间锚点</label>
-                    <select id="asset_id" name="asset_id"></select>
-                    <p class="field-hint">支持 Blender 空间锚点、扫描白模与纯文本模式。</p>
-                  </div>
-                </section>
+                  </section>
 
-                <section class="form-section">
-                  <div class="form-section-heading">
-                    <h4>镜头控制</h4>
-                    <p>配置镜头运动语言，驱动六模块 Prompt 的 camera 模块。</p>
-                  </div>
-                  <div class="form-group">
-                    <label for="shot_type">镜头语言</label>
-                    <select id="shot_type" name="shot_type"></select>
-                  </div>
-                </section>
+                  <section class="form-section form-cluster" aria-labelledby="camera-control-heading">
+                    <div class="form-section-heading">
+                      <span class="form-step">04</span>
+                      <div>
+                        <h4 id="camera-control-heading">镜头与视角控制</h4>
+                        <p>配置镜头运动语言，驱动六模块 Prompt 的 camera 模块。</p>
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <label for="shot_type">镜头语言</label>
+                      <select id="shot_type" name="shot_type"></select>
+                    </div>
+                  </section>
 
-                <section class="form-section">
-                  <div class="form-section-heading">
-                    <h4>环境与光影</h4>
-                    <p>补充场景环境、氛围与视觉质感描述。</p>
-                  </div>
-                  <div class="form-group">
-                    <label for="environment_hint">环境描述</label>
-                    <textarea id="environment_hint" name="environment_hint" rows="3" placeholder="描述场景环境..."></textarea>
-                  </div>
-                  <div class="form-group">
-                    <label for="lighting_hint">光影氛围</label>
-                    <textarea id="lighting_hint" name="lighting_hint" rows="3" placeholder="描述光影效果..."></textarea>
-                  </div>
-                </section>
+                  <section class="form-section form-cluster" aria-labelledby="environment-lighting-heading">
+                    <div class="form-section-heading">
+                      <span class="form-step">05</span>
+                      <div>
+                        <h4 id="environment-lighting-heading">环境与光影</h4>
+                        <p>补充场景环境、氛围与视觉质感描述。</p>
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <label for="environment_hint">环境描述</label>
+                      <textarea id="environment_hint" name="environment_hint" rows="3" placeholder="描述场景环境..."></textarea>
+                    </div>
+                    <div class="form-group">
+                      <label for="lighting_hint">光影氛围</label>
+                      <textarea id="lighting_hint" name="lighting_hint" rows="3" placeholder="描述光影效果..."></textarea>
+                    </div>
+                  </section>
+                </div>
 
-                <div class="form-actions form-actions-sticky">
-                  <button type="button" class="btn-outline" id="preview-btn">预览 Prompt</button>
-                  <button type="submit" class="btn-primary" id="submit-btn">
-                    <span>生成视频</span>
-                  </button>
+                <div class="form-actions form-actions-sticky form-actions-shell" role="group" aria-label="创作操作">
+                  <div class="action-meta">
+                    <span class="action-kicker">Live composer</span>
+                    <p>预览 Prompt 或直接发起生成任务。</p>
+                  </div>
+                  <div class="action-buttons">
+                    <button type="button" class="btn-outline" id="preview-btn">预览 Prompt</button>
+                    <button type="submit" class="btn-primary" id="submit-btn">
+                      <span>生成视频</span>
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
-          </div>
+          </aside>
 
-          <div class="workspace-status">
-            <div class="status-panel workspace-panel-emphasis">
-              <div class="panel-header">
+          <div class="workspace-status" aria-label="任务反馈区域">
+            <section class="workspace-zone workspace-zone-status" aria-labelledby="status-zone-heading">
+              <div class="workspace-zone-header">
                 <div>
-                  <p class="panel-kicker">演示上下文</p>
-                  <h3>租户 / 项目 / 引擎</h3>
+                  <span class="section-label">Status Center</span>
+                  <h3 id="status-zone-heading" class="workspace-zone-title">状态与进度</h3>
                 </div>
               </div>
-              <div id="context-summary" class="result-content" aria-live="polite">
-                <p class="empty-state">等待上下文加载</p>
-              </div>
-            </div>
-
-            <div class="status-panel workspace-panel-emphasis">
-              <div class="panel-header">
-                <div>
-                  <p class="panel-kicker">任务阶段</p>
-                  <h3>任务状态</h3>
+              <div class="workspace-zone-grid workspace-zone-grid-status">
+                <div class="status-panel workspace-panel-emphasis workspace-panel-span-2">
+                  <div class="panel-header panel-header-rich">
+                    <div>
+                      <p class="panel-kicker">演示上下文</p>
+                      <h3>租户 / 项目 / 引擎</h3>
+                    </div>
+                  </div>
+                  <div id="context-summary" class="result-content" aria-live="polite">
+                    <p class="empty-state">等待上下文加载</p>
+                  </div>
                 </div>
-                <span id="job-id" class="job-id">等待提交</span>
-              </div>
-              <div id="job-status" class="status-message" aria-live="polite">工作台就绪，请配置场景参数后提交任务。</div>
-              <ul id="stage-list" class="stage-list" aria-live="polite"></ul>
-            </div>
 
-            <div class="preview-panel">
-              <div class="panel-header">
-                <div>
-                  <p class="panel-kicker">调度与监控</p>
-                  <h3>算力调度</h3>
-                </div>
-              </div>
-              <div id="schedule-panel" class="result-content" aria-live="polite">
-                <p class="empty-state">等待调度结果</p>
-              </div>
-            </div>
-
-            <div class="preview-panel">
-              <div class="panel-header">
-                <div>
-                  <p class="panel-kicker">实时监控</p>
-                  <h3>监控快照</h3>
+                <div class="status-panel workspace-panel-emphasis workspace-panel-span-2">
+                  <div class="panel-header panel-header-rich">
+                    <div>
+                      <p class="panel-kicker">任务阶段</p>
+                      <h3>任务状态</h3>
+                    </div>
+                    <span id="job-id" class="job-id">等待提交</span>
+                  </div>
+                  <div id="job-status" class="status-message" aria-live="polite">工作台就绪，请配置场景参数后提交任务。</div>
+                  <ul id="stage-list" class="stage-list" aria-live="polite"></ul>
                 </div>
               </div>
-              <div id="monitor-panel" class="result-content" aria-live="polite">
-                <p class="empty-state">等待监控快照</p>
-              </div>
-            </div>
+            </section>
 
-            <div class="preview-panel">
-              <div class="panel-header">
+            <section class="workspace-zone workspace-zone-preview" aria-labelledby="preview-zone-heading">
+              <div class="workspace-zone-header">
                 <div>
-                  <p class="panel-kicker">版权确权</p>
-                  <h3>版权状态</h3>
+                  <span class="section-label">Prompt Review</span>
+                  <h3 id="preview-zone-heading" class="workspace-zone-title">Prompt 预览</h3>
                 </div>
               </div>
-              <div id="rights-panel" class="result-content" aria-live="polite">
-                <p class="empty-state">等待版权校验</p>
-              </div>
-            </div>
-
-            <div class="preview-panel">
-              <div class="panel-header">
-                <div>
-                  <p class="panel-kicker">计费与套餐</p>
-                  <h3>计费面板</h3>
+              <div class="workspace-zone-grid workspace-zone-grid-preview">
+                <div class="preview-panel workspace-panel-span-2 preview-panel-priority">
+                  <div class="panel-header panel-header-rich">
+                    <div>
+                      <p class="panel-kicker">黄金六模块</p>
+                      <h3>Prompt 预览</h3>
+                    </div>
+                    <span id="execution-route" class="route-tag">未生成</span>
+                  </div>
+                  <div id="preview-warnings" class="warning-stack" aria-live="polite"></div>
+                  <div id="prompt-preview" class="preview-content" aria-live="polite">
+                    <p class="empty-state">选择场馆后自动生成 Prompt 预览</p>
+                  </div>
                 </div>
               </div>
-              <div id="billing-panel" class="result-content" aria-live="polite">
-                <p class="empty-state">等待计费快照</p>
-              </div>
-            </div>
+            </section>
 
-            <div class="preview-panel">
-              <div class="panel-header">
+            <section class="workspace-zone workspace-zone-result" aria-labelledby="result-zone-heading">
+              <div class="workspace-zone-header">
                 <div>
-                  <p class="panel-kicker">运维事件流</p>
-                  <h3>活动日志</h3>
+                  <span class="section-label">Output</span>
+                  <h3 id="result-zone-heading" class="workspace-zone-title">结果输出</h3>
                 </div>
               </div>
-              <div id="ops-panel" class="result-content" aria-live="polite">
-                <p class="empty-state">等待任务事件流</p>
-              </div>
-            </div>
-
-            <div class="preview-panel">
-              <div class="panel-header">
-                <div>
-                  <p class="panel-kicker">黄金六模块</p>
-                  <h3>Prompt 预览</h3>
-                </div>
-                <span id="execution-route" class="route-tag">未生成</span>
-              </div>
-              <div id="preview-warnings" class="warning-stack" aria-live="polite"></div>
-              <div id="prompt-preview" class="preview-content" aria-live="polite">
-                <p class="empty-state">选择场馆后自动生成 Prompt 预览</p>
-              </div>
-            </div>
-
-            <div class="result-panel">
-              <div class="panel-header">
-                <div>
-                  <p class="panel-kicker">执行结果</p>
-                  <h3>生成结果</h3>
+              <div class="workspace-zone-grid workspace-zone-grid-result">
+                <div class="result-panel workspace-panel-span-2">
+                  <div class="panel-header panel-header-rich">
+                    <div>
+                      <p class="panel-kicker">执行结果</p>
+                      <h3>生成结果</h3>
+                    </div>
+                  </div>
+                  <div id="job-result" class="result-content" aria-live="polite">
+                    <p class="empty-state">任务完成后在此展示视频结果</p>
+                  </div>
                 </div>
               </div>
-              <div id="job-result" class="result-content" aria-live="polite">
-                <p class="empty-state">任务完成后在此展示视频结果</p>
+            </section>
+
+            <section class="workspace-zone workspace-zone-ops" aria-labelledby="ops-zone-heading">
+              <div class="workspace-zone-header">
+                <div>
+                  <span class="section-label">Telemetry</span>
+                  <h3 id="ops-zone-heading" class="workspace-zone-title">监控与运维面板</h3>
+                </div>
               </div>
-            </div>
+              <div class="workspace-zone-grid workspace-zone-grid-ops">
+                <div class="preview-panel">
+                  <div class="panel-header panel-header-rich">
+                    <div>
+                      <p class="panel-kicker">调度与监控</p>
+                      <h3>算力调度</h3>
+                    </div>
+                  </div>
+                  <div id="schedule-panel" class="result-content" aria-live="polite">
+                    <p class="empty-state">等待调度结果</p>
+                  </div>
+                </div>
+
+                <div class="preview-panel">
+                  <div class="panel-header panel-header-rich">
+                    <div>
+                      <p class="panel-kicker">实时监控</p>
+                      <h3>监控快照</h3>
+                    </div>
+                  </div>
+                  <div id="monitor-panel" class="result-content" aria-live="polite">
+                    <p class="empty-state">等待监控快照</p>
+                  </div>
+                </div>
+
+                <div class="preview-panel">
+                  <div class="panel-header panel-header-rich">
+                    <div>
+                      <p class="panel-kicker">版权确权</p>
+                      <h3>版权状态</h3>
+                    </div>
+                  </div>
+                  <div id="rights-panel" class="result-content" aria-live="polite">
+                    <p class="empty-state">等待版权校验</p>
+                  </div>
+                </div>
+
+                <div class="preview-panel">
+                  <div class="panel-header panel-header-rich">
+                    <div>
+                      <p class="panel-kicker">计费与套餐</p>
+                      <h3>计费面板</h3>
+                    </div>
+                  </div>
+                  <div id="billing-panel" class="result-content" aria-live="polite">
+                    <p class="empty-state">等待计费快照</p>
+                  </div>
+                </div>
+
+                <div class="preview-panel workspace-panel-span-2">
+                  <div class="panel-header panel-header-rich">
+                    <div>
+                      <p class="panel-kicker">运维事件流</p>
+                      <h3>活动日志</h3>
+                    </div>
+                  </div>
+                  <div id="ops-panel" class="result-content" aria-live="polite">
+                    <p class="empty-state">等待任务事件流</p>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </section>

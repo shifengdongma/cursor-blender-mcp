@@ -26,15 +26,15 @@
     </nav>
 
     <main>
-      <header class="hero hero-compact">
+      <header class="hero hero-curated hero-compact">
         <div class="hero-content">
           <div class="hero-badge">AI 驱动的视频生产引擎</div>
           <h1 class="hero-title">
-            文创场景<br />
-            <span class="gradient-text">智能视频生成平台</span>
+            为剧院、画廊与博物馆打造的<br />
+            <span class="gradient-text">智能视频创作工作台</span>
           </h1>
-          <p class="hero-desc">
-            以黄金六模块 Prompt、Blender 空间锚点与多模型路由为核心，让剧院、画廊、博物馆与音乐厅的视觉提案更快进入可执行工作流。
+          <p class="hero-desc hero-desc-compact">
+            将黄金六模块 Prompt、Blender 空间锚点与多模型路由收敛进同一条创作链路，让视觉提案从概念展示自然进入执行流程。
           </p>
           <div class="hero-actions">
             <a href="#workspace" class="btn-primary">
@@ -43,56 +43,59 @@
                 <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </a>
-            <a href="#features" class="btn-secondary">查看能力说明</a>
+            <a href="/assets" class="btn-secondary">浏览资产库</a>
           </div>
-          <div class="hero-summary">
-            <div class="summary-chip">知识增强 Prompt 编排</div>
-            <div class="summary-chip">Blender 空间约束</div>
-            <div class="summary-chip">JSON / JobStore 持久化</div>
+          <div class="hero-summary hero-summary-minimal">
+            <div class="summary-chip summary-chip-strong">Prompt × 空间 × 模型</div>
+            <div class="summary-chip">展示与操作并重</div>
           </div>
         </div>
 
-        <div class="hero-visual">
-          <div class="visual-frame">
+        <div class="hero-visual hero-visual-curated">
+          <div class="visual-frame visual-frame-curated">
             <div class="visual-header">
               <div class="visual-dots" aria-hidden="true">
                 <span></span><span></span><span></span>
               </div>
-              <span class="visual-title">工作流概览</span>
+              <span class="visual-title">创作工作流概览</span>
             </div>
             <div class="visual-content">
-              <div class="visual-grid">
-                <div class="visual-card venue-card">
+              <div class="visual-grid visual-grid-curated">
+                <div class="visual-card venue-card visual-card-highlight">
                   <div class="card-icon theater" aria-hidden="true"></div>
-                  <span>大剧院</span>
+                  <strong>场馆语境</strong>
+                  <span>大剧院 / 画廊 / 博物馆 / 音乐厅</span>
                 </div>
                 <div class="visual-card venue-card">
                   <div class="card-icon gallery" aria-hidden="true"></div>
-                  <span>现代画廊</span>
+                  <strong>镜头编排</strong>
+                  <span>镜头语言与空间锚点协同</span>
                 </div>
                 <div class="visual-card venue-card">
                   <div class="card-icon museum" aria-hidden="true"></div>
-                  <span>古典博物馆</span>
+                  <strong>执行路由</strong>
+                  <span>按 provider 与 route mode 分发</span>
                 </div>
                 <div class="visual-card venue-card">
                   <div class="card-icon concert" aria-hidden="true"></div>
-                  <span>音乐厅</span>
+                  <strong>状态反馈</strong>
+                  <span>预览、轮询、结果一体化监控</span>
                 </div>
               </div>
               <div class="visual-flow" aria-label="工作流流程">
                 <div class="flow-node">
                   <span class="node-icon prompt" aria-hidden="true"></span>
-                  <span class="node-label">Prompt 编排</span>
+                  <span class="node-label">策划输入</span>
                 </div>
                 <div class="flow-arrow" aria-hidden="true"></div>
                 <div class="flow-node">
                   <span class="node-icon blender" aria-hidden="true"></span>
-                  <span class="node-label">空间锚点</span>
+                  <span class="node-label">空间约束</span>
                 </div>
                 <div class="flow-arrow" aria-hidden="true"></div>
                 <div class="flow-node">
                   <span class="node-icon ai" aria-hidden="true"></span>
-                  <span class="node-label">视频生成</span>
+                  <span class="node-label">生成交付</span>
                 </div>
               </div>
             </div>
@@ -100,17 +103,17 @@
         </div>
       </header>
 
-      <section id="workspace" class="section workspace-section" data-ui-status="loading">
+      <section id="workspace" class="section workspace-section workspace-section-priority" data-ui-status="loading">
         <div class="section-header section-header-split">
           <div>
             <span class="section-label">Creative Workspace</span>
             <h2 class="section-title">视频创作工作台</h2>
             <p class="section-desc workspace-desc">
-              左侧完成场馆、模型、镜头与环境配置，右侧查看任务阶段、Prompt 预览和最终结果。
+              以稳定的双栏工作台组织输入、Prompt 预览、阶段反馈与结果输出，让首页既能展示能力，也能直接开始创作。
             </p>
           </div>
           <div class="workspace-header-note">
-            <span class="summary-chip summary-chip-strong">平衡型布局</span>
+            <span class="summary-chip summary-chip-strong">首页核心入口</span>
             <span class="summary-chip">桌面双栏 / 移动任务流</span>
           </div>
         </div>

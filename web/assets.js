@@ -58,6 +58,7 @@
   var uploadForm = document.getElementById('upload-form');
   var uploadZone = document.getElementById('upload-zone');
   var fileInput = document.getElementById('file-input');
+  var uploadFileMeta = document.getElementById('upload-file-meta');
 
   // Tab buttons
   var tabBtns = document.querySelectorAll('.tab-btn');
@@ -263,12 +264,16 @@
       })
       .then(function(data) {
         isLoading = false;
+        var responseData = getResponseData(data, currentTab === 'prompts' ? 'documents' : 'assets');
+        var filteredItems = filterItems(responseData || []);
         if (currentTab === 'prompts') {
-          renderPromptDocuments(data.documents || []);
-          totalPages = Math.ceil((data.total || 0) / pageSize);
+          renderPromptDocuments(filteredItems);
         } else {
-          renderAssets(data.assets || []);
-          totalPages = Math.ceil((data.total || 0) / pageSize);
+          renderAssets(filteredItems);
+        }
+        totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+        if (currentPage > totalPages) {
+          currentPage = totalPages;
         }
         renderPagination();
       })
@@ -278,6 +283,26 @@
         assetGrid.innerHTML = '<div class="empty-state-container"><p class="empty-desc">加载失败，请重试</p></div>';
         showToast('加载失败，请检查网络连接', 'error');
       });
+  }
+
+  function getSearchableText(item) {
+    return [
+      item && item.name,
+      item && item.title,
+      item && item.description,
+      item && item.content,
+      item && item.keywords,
+      item && getVenueLabel(item.venue_type),
+      item && getCategoryLabel(item.category)
+    ].join(' ').toLowerCase();
+  }
+
+  function filterItems(items) {
+    var keyword = (searchQuery || '').toLowerCase();
+    if (!keyword) return items;
+    return (items || []).filter(function(item) {
+      return getSearchableText(item).indexOf(keyword) !== -1;
+    });
   }
 
   function renderSkeletons() {
@@ -364,16 +389,17 @@
         <h3>' + escapeHtml(asset.name) + '</h3>\
         <p>' + escapeHtml(asset.description || '暂无描述') + '</p>\
         <div class="asset-meta-info">\
-          ' + (venueLabel ? '<span class="meta-tag">' + venueLabel + '</span>' : '') + '\
+          ' + (venueLabel ? '<span class="meta-tag meta-tag-venue">' + venueLabel + '</span>' : '') + '\
           ' + (asset.file_size ? '<span class="meta-tag">' + formatFileSize(asset.file_size) + '</span>' : '') + '\
+          ' + (asset.asset_kind ? '<span class="meta-tag">' + escapeHtml(asset.asset_kind) + '</span>' : '') + '\
         </div>\
         <div class="asset-actions">\
-          <button class="asset-btn download" data-id="' + asset.id + '" data-tooltip="下载资产">\
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
+          <button class="asset-btn primary download" data-id="' + asset.id + '" data-tooltip="下载资产">\
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
             下载\
           </button>\
           <button class="asset-btn delete" data-id="' + asset.id + '" data-tooltip="删除资产">\
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>\
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>\
             删除\
           </button>\
         </div>\
@@ -432,7 +458,7 @@
     if (!keywords) return '';
     var keywordList = keywords.split(',').map(function(k) { return k.trim(); }).filter(function(k) { return k; });
     return keywordList.map(function(k) {
-      return '<span class="meta-tag" style="background: rgba(242, 179, 61, 0.1); border-color: rgba(242, 179, 61, 0.2); color: var(--primary);">' + escapeHtml(k) + '</span>';
+      return '<span class="meta-tag meta-tag-keyword">' + escapeHtml(k) + '</span>';
     }).join('');
   }
 
@@ -488,8 +514,8 @@
   function openModal() {
     if (uploadModal) {
       uploadModal.classList.add('active');
+      uploadModal.setAttribute('aria-hidden', 'false');
       document.body.style.overflow = 'hidden';
-      // Focus first input
       setTimeout(function() {
         var nameInput = document.getElementById('asset-name');
         if (nameInput) nameInput.focus();
@@ -500,11 +526,30 @@
   function closeModal() {
     if (uploadModal) {
       uploadModal.classList.remove('active');
+      uploadModal.setAttribute('aria-hidden', 'true');
       document.body.style.overflow = '';
+    }
+    if (uploadZone) {
+      uploadZone.classList.remove('dragover', 'has-file', 'is-uploading');
+    }
+    if (uploadFileMeta) {
+      uploadFileMeta.hidden = true;
+      uploadFileMeta.textContent = '';
     }
     if (uploadForm) {
       uploadForm.reset();
     }
+  }
+
+  function renderUploadFileMeta(file) {
+    if (!uploadFileMeta) return;
+    if (!file) {
+      uploadFileMeta.hidden = true;
+      uploadFileMeta.textContent = '';
+      return;
+    }
+    uploadFileMeta.hidden = false;
+    uploadFileMeta.innerHTML = '<strong>' + escapeHtml(file.name) + '</strong><br />' + formatFileSize(file.size || 0);
   }
 
   function updateFileName() {
@@ -514,6 +559,11 @@
       if (nameInput && !nameInput.value) {
         nameInput.value = file.name.replace(/\.[^/.]+$/, '');
       }
+
+      if (uploadZone) {
+        uploadZone.classList.add('has-file');
+      }
+      renderUploadFileMeta(file);
 
       // Auto-detect asset type
       var typeSelect = document.getElementById('asset-type');
@@ -526,8 +576,12 @@
         }
       }
 
-      // Show file info
       showToast('已选择文件: ' + file.name, 'info');
+    } else {
+      if (uploadZone) {
+        uploadZone.classList.remove('has-file');
+      }
+      renderUploadFileMeta(null);
     }
   }
 
@@ -552,6 +606,10 @@
     submitBtn.textContent = '上传中...';
     submitBtn.disabled = true;
 
+    if (uploadZone) {
+      uploadZone.classList.add('is-uploading');
+    }
+
     fetch('/api/assets/upload', {
       method: 'POST',
       body: formData
@@ -560,10 +618,11 @@
         return response.json();
       })
       .then(function(data) {
-        if (data.error) {
-          showToast('上传失败: ' + data.error, 'error');
+        var responseData = getResponseData(data);
+        if (data.error || (data.success === false)) {
+          showToast('上传失败: ' + ((data && data.message) || data.error), 'error');
         } else {
-          showToast('上传成功!', 'success');
+          showToast(((data && data.message) || '上传成功!'), 'success');
           closeModal();
           loadAssets();
         }
@@ -575,6 +634,9 @@
       .finally(function() {
         submitBtn.textContent = originalText;
         submitBtn.disabled = false;
+        if (uploadZone) {
+          uploadZone.classList.remove('is-uploading');
+        }
       });
   }
 
@@ -590,11 +652,11 @@
         return response.json();
       })
       .then(function(data) {
-        if (data.success) {
-          showToast('删除成功', 'success');
+        if (data.success || (data.data && data.data.deleted)) {
+          showToast(((data && data.message) || '删除成功'), 'success');
           loadAssets();
         } else {
-          showToast('删除失败: ' + (data.error || '未知错误'), 'error');
+          showToast('删除失败: ' + (((data && data.message) || data.error) || '未知错误'), 'error');
         }
       })
       .catch(function(error) {

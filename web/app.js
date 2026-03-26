@@ -76,7 +76,10 @@
   function setUiStatus(status, message) {
     state.uiStatus = status;
     if (els.workspaceSection) els.workspaceSection.setAttribute("data-ui-status", status);
-    if (els.jobStatus && message) els.jobStatus.textContent = message;
+    if (els.jobStatus) {
+      els.jobStatus.textContent = message || "";
+      els.jobStatus.setAttribute("data-status-tone", status);
+    }
     syncActionStates();
   }
 
@@ -158,9 +161,15 @@
 
   function renderWarnings(warnings) {
     if (!els.previewWarnings) return;
+    if (!warnings || !warnings.length) {
+      els.previewWarnings.className = 'warning-stack warning-stack-inline';
+      els.previewWarnings.innerHTML = '';
+      return;
+    }
+    els.previewWarnings.className = 'warning-stack';
     els.previewWarnings.innerHTML = (warnings || []).map(function (warning) {
       return '<div class="warning-item">' + escapeHtml(warning) + '</div>';
-    }).join("");
+    }).join('');
   }
 
   function renderModuleCards(modules) {
@@ -225,13 +234,14 @@
     var tenantText = els.tenantId && els.tenantId.selectedOptions[0] ? els.tenantId.selectedOptions[0].textContent : '-';
     var userText = els.userId && els.userId.selectedOptions[0] ? els.userId.selectedOptions[0].textContent : '-';
     var projectText = els.projectId && els.projectId.selectedOptions[0] ? els.projectId.selectedOptions[0].textContent : '-';
-    els.contextSummary.innerHTML = renderKeyValueList([
-      { label: '当前租户', value: tenantText },
-      { label: '当前用户', value: userText },
-      { label: '当前项目', value: projectText },
-      { label: '引擎目标', value: els.engineTarget && els.engineTarget.selectedOptions[0] ? els.engineTarget.selectedOptions[0].textContent : '-' },
-      { label: '推流配置', value: els.streamProfile && els.streamProfile.selectedOptions[0] ? els.streamProfile.selectedOptions[0].textContent : '-' }
-    ]);
+    els.contextSummary.innerHTML =
+      '<div class="context-grid">' +
+      '<div class="context-card"><span class="overview-label">当前租户</span><strong class="overview-value">' + escapeHtml(tenantText) + '</strong></div>' +
+      '<div class="context-card"><span class="overview-label">当前用户</span><strong class="overview-value">' + escapeHtml(userText) + '</strong></div>' +
+      '<div class="context-card"><span class="overview-label">当前项目</span><strong class="overview-value">' + escapeHtml(projectText) + '</strong></div>' +
+      '<div class="context-card"><span class="overview-label">引擎目标</span><strong class="overview-value">' + escapeHtml(els.engineTarget && els.engineTarget.selectedOptions[0] ? els.engineTarget.selectedOptions[0].textContent : '-') + '</strong></div>' +
+      '<div class="context-card"><span class="overview-label">推流配置</span><strong class="overview-value">' + escapeHtml(els.streamProfile && els.streamProfile.selectedOptions[0] ? els.streamProfile.selectedOptions[0].textContent : '-') + '</strong></div>' +
+      '</div>';
   }
 
   function renderOpsPanel(job) {

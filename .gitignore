@@ -24,8 +24,14 @@ Thumbs.db
 # Job data (runtime generated)
 data/jobs/
 
+# Local asset files (runtime/user generated)
+data/assets/
+
 # Database (generated)
 data/aigv.db
+
+# Claude Code local files
+.claude/skills/
 
 # Logs
 *.log

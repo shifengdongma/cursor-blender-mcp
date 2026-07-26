@@ -41,6 +41,100 @@
     }, 3000);
   }
 
+  // ── API helper ──
+  function api(path, opts) {
+    opts = opts || {};
+    return fetch(path, {
+      method: opts.method || 'GET',
+      headers: Object.assign({'Accept': 'application/json'}, opts.headers || {}),
+      body: opts.body || undefined
+    }).then(function(resp) {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.json();
+    }).then(function(data) {
+      if (data && data.success === false) throw new Error(data.error || 'API error');
+      return data && data.data !== undefined ? data.data : data;
+    });
+  }
+  function apiSuppress() {
+    return null; // fallback for optional data
+  }
+
+  // ── Monitoring API helpers ──
+
+  var monitoringPollInterval = null;
+
+  function fetchMonitoringNodes() {
+    return api('/api/monitoring/nodes').catch(function(err) {
+      console.error('fetchMonitoringNodes error:', err);
+      return { nodes: [], total: 0 };
+    });
+  }
+
+  function fetchNetworkLinks() {
+    return api('/api/monitoring/links').catch(function(err) {
+      console.error('fetchNetworkLinks error:', err);
+      return { links: [], stats: {} };
+    });
+  }
+
+  function fetchMonitoringSamples(limit) {
+    return api('/api/monitoring/samples?limit=' + (limit || 20)).catch(function(err) {
+      console.error('fetchMonitoringSamples error:', err);
+      return { samples: [], total: 0 };
+    });
+  }
+
+  function fetchStorageData() {
+    return api('/api/monitoring/storage').catch(function(err) {
+      console.error('fetchStorageData error:', err);
+      return { targets: [], summary: {} };
+    });
+  }
+
+  function fetchAlerts(status, limit) {
+    return api('/api/alerts?status=' + (status || 'open') + '&limit=' + (limit || 20)).catch(function(err) {
+      console.error('fetchAlerts error:', err);
+      return { items: [], total: 0 };
+    });
+  }
+
+  function acknowledgeAlert(alertId) {
+    return api('/api/alerts/' + alertId + '/acknowledge', { method: 'POST' });
+  }
+
+  function closeAlert(alertId, notes) {
+    return api('/api/alerts/' + alertId + '/close', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes: notes || '' })
+    });
+  }
+
+  // ── Loading/error state helpers ──
+
+  function showLoading(containerId) {
+    var el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = '<div class="loading-indicator" style="text-align:center;padding:40px;color:var(--text-soft)"><div class="spinner" style="width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px"></div><p>加载中...</p></div>';
+  }
+
+  function hideLoading(containerId) {
+    var el = document.getElementById(containerId);
+    if (el) {
+      var indicator = el.querySelector('.loading-indicator');
+      if (indicator) indicator.remove();
+    }
+  }
+
+  // Add slideIn and spin animations
+  var platformStyle = document.createElement('style');
+  platformStyle.textContent = '@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}';
+  if (!document.getElementById('cp-platform-ext-style')) {
+    platformStyle.id = 'cp-platform-ext-style';
+    document.head.appendChild(platformStyle);
+  }
+
   // ── State ──
   var state = {
     activeTab: 'overview',
@@ -105,7 +199,6 @@
     try {
       var payload = {
         version: LS_VERSION,
-        rolePermissions: state.rolePermissions,
         alerts: state.alerts,
         opsEvents: state.opsEvents
       };
@@ -119,7 +212,6 @@
       if (!raw) return false;
       var parsed = JSON.parse(raw);
       if (!parsed || parsed.version !== LS_VERSION) return false;
-      if (parsed.rolePermissions) state.rolePermissions = parsed.rolePermissions;
       if (parsed.alerts && parsed.alerts.length) state.alerts = parsed.alerts;
       if (parsed.opsEvents && parsed.opsEvents.length) state.opsEvents = parsed.opsEvents;
       return true;
@@ -180,9 +272,24 @@
       stopMonitoring();
       cancelFaultSimulation();
       if (state.clockTimer) { clearInterval(state.clockTimer); state.clockTimer = null; }
+      // Clear monitoring poll interval
+      if (monitoringPollInterval) {
+        clearInterval(monitoringPollInterval);
+        monitoringPollInterval = null;
+      }
     } else {
       startClockTimer();
       if (state.isNetworkAutoRefresh) { state.networkRefreshCountdown = 5; startMonitoring(); }
+      // 5-second auto-refresh for monitoring
+      if (monitoringPollInterval) clearInterval(monitoringPollInterval);
+      monitoringPollInterval = setInterval(function() {
+        if (state.activeTab !== 'network') {
+          clearInterval(monitoringPollInterval);
+          monitoringPollInterval = null;
+          return;
+        }
+        refreshMonitoringData();
+      }, 5000);
     }
 
     // Cleanup Three.js scenes when leaving cloud rendering tab
@@ -404,61 +511,50 @@
   // ══════════════════════════════════════════════════
   function renderOverview() {
     var d = state.demoData;
-    if (!d) return;
+    var s = state.apiSummary || {};
+    var rj = state.apiRenderJobs || {};
+    var b = state.apiBilling || {};
 
-    // Compute metrics
-    var gpuNodes = d.gpuNodes;
-    var pools = d.resourcePools;
-    var sessions = d.renderSessions;
-    var links = d.networkLinks;
-    var billing = d.billingRecords[0];
-    var alerts = state.alerts;
+    // Use real API data with demo data fallback
+    var totalNodes = s.total_nodes || 0;
+    var onlineNodes = s.online_nodes || 0;
+    var queueDepth = s.queue_depth || 0;
 
-    var totalNodes = gpuNodes.length;
-    var onlineNodes = 0;
-    for (var i = 0; i < gpuNodes.length; i++) {
-      if (gpuNodes[i].status === 'online') onlineNodes++;
-    }
-    var availGpu = 0;
-    for (var j = 0; j < pools.length; j++) {
-      availGpu += pools[j].availGpu || 0;
-    }
-    var avgUtil = 0;
-    for (var k = 0; k < pools.length; k++) {
-      avgUtil += pools[k].avgUtil || 0;
-    }
-    avgUtil = (pools.length > 0) ? (avgUtil / pools.length) : 0;
-
-    var queuedTasks = 0, runningTasks = 0, avgLatency = 0;
-    for (var s = 0; s < sessions.length; s++) {
-      if (sessions[s].status === 'queued') queuedTasks++;
-      if (sessions[s].status === 'rendering') runningTasks++;
-      avgLatency += sessions[s].latency || 0;
-    }
-    avgLatency = (sessions.length > 0) ? (avgLatency / sessions.length) : 0;
+    // Render counts from API
+    var runningTasks = (s.running_render_jobs || 0);
+    var queuedTasks = (s.queued_render_jobs || 0);
+    var avgLatency = 0;
 
     var avgNetLatency = 0;
-    for (var l = 0; l < links.length; l++) {
-      avgNetLatency += links[l].latency || 0;
+    if (d && d.networkLinks) {
+      for (var l = 0; l < d.networkLinks.length; l++) {
+        avgNetLatency += d.networkLinks[l].latency || 0;
+      }
+      avgNetLatency = d.networkLinks.length > 0 ? (avgNetLatency / d.networkLinks.length) : 0;
     }
-    avgNetLatency = (links.length > 0) ? (avgNetLatency / links.length) : 0;
 
-    var dailyCost = billing ? billing.dailyCost : 0;
+    var dailyCost = (b.total_amount || 0).toFixed(2);
     var activeAlerts = 0;
-    for (var a = 0; a < alerts.length; a++) {
-      if (alerts[a].status === 'active') activeAlerts++;
+    if (state.alerts) {
+      for (var a = 0; a < state.alerts.length; a++) {
+        if (state.alerts[a].status === 'active') activeAlerts++;
+      }
     }
+
+    // GPU types
+    var availGpu = totalNodes;
+    var avgUtil = 0;
 
     var metrics = [
-      { value: totalNodes, label: 'GPU 节点', unit: '台' },
+      { value: totalNodes, label: '算力节点', unit: '台' },
       { value: onlineNodes, label: '在线节点', unit: '台' },
-      { value: availGpu, label: '空闲 GPU', unit: '卡' },
-      { value: avgUtil.toFixed(1), label: '平均利用率', unit: '%' },
+      { value: availGpu, label: '可调度节点', unit: '台' },
+      { value: queueDepth, label: '排队深度', unit: '个' },
       { value: queuedTasks, label: '排队任务', unit: '个' },
       { value: runningTasks, label: '运行任务', unit: '个' },
       { value: avgLatency.toFixed(0), label: '平均渲染时延', unit: 'ms' },
       { value: avgNetLatency.toFixed(0), label: '平均网络时延', unit: 'ms' },
-      { value: dailyCost.toFixed(2), label: '今日费用', unit: '元' },
+      { value: dailyCost, label: '累计费用', unit: '元' },
       { value: activeAlerts, label: '当前告警', unit: '条' }
     ];
 
@@ -1152,7 +1248,7 @@
       if (info) info.textContent = s.info;
       if (label) label.textContent = s.pct + '%';
       stepIndex++;
-      setTimeout(runStep, 800 + Math.random() * 1200);
+      setTimeout(runStep, 1000);
     }
     runStep();
   }
@@ -1506,16 +1602,12 @@
   function renderGameMetrics() {
     var container = document.getElementById('cp-game-metrics');
     if (!container) return;
-    var latency = Math.floor(45 + Math.random() * 35);
-    var fps = Math.floor(50 + Math.random() * 10);
-    var bitrate = (8 + Math.random() * 4).toFixed(1);
-    var loss = (Math.random() * 0.1).toFixed(2);
 
     container.innerHTML =
-      '<div class="cp-game-metric"><div class="cp-game-metric-value">' + latency + '</div><div class="cp-game-metric-label">延迟 (ms)</div></div>' +
-      '<div class="cp-game-metric"><div class="cp-game-metric-value">' + fps + '</div><div class="cp-game-metric-label">FPS</div></div>' +
-      '<div class="cp-game-metric"><div class="cp-game-metric-value">' + bitrate + '</div><div class="cp-game-metric-label">码率 (Mbps)</div></div>' +
-      '<div class="cp-game-metric"><div class="cp-game-metric-value">' + loss + '</div><div class="cp-game-metric-label">丢包率 (%)</div></div>';
+      '<div class="cp-game-metric"><div class="cp-game-metric-value">--</div><div class="cp-game-metric-label">延迟 (ms)</div></div>' +
+      '<div class="cp-game-metric"><div class="cp-game-metric-value">--</div><div class="cp-game-metric-label">FPS</div></div>' +
+      '<div class="cp-game-metric"><div class="cp-game-metric-value">--</div><div class="cp-game-metric-label">码率 (Mbps)</div></div>' +
+      '<div class="cp-game-metric"><div class="cp-game-metric-value">--</div><div class="cp-game-metric-label">数据不可用</div></div>';
   }
 
   function startGameNetworkSimulation() {
@@ -1563,10 +1655,10 @@
 
   function simulateGameNetworkMetrics() {
     return {
-      latency: 45 + Math.floor(Math.random() * 35),
-      fps: 55 + Math.floor(Math.random() * 5),
-      bitrate: 8 + Math.random() * 4,
-      packetLoss: Math.random() * 0.1
+      latency: 0,
+      fps: 0,
+      bitrate: 0,
+      packetLoss: 0
     };
   }
 
@@ -2119,24 +2211,45 @@
     return yyyy + '-' + mm + '-' + dd + ' ' + hh + ':' + mi + ':' + ss;
   }
 
-  // ── Retained helpers ──
+  // ── Retained helpers (fetch from API when available) ──
+  function refreshMonitoringData() {
+    fetchMonitoringNodes().then(function(data) {
+      if (data.nodes && data.nodes.length > 0) {
+        state.sensingNodesCopy = data.nodes;
+        renderSensingNodes();
+        renderBottomMetrics();
+      }
+    });
+    fetchNetworkLinks().then(function(data) {
+      if (data.links && data.links.length > 0) {
+        state.networkLinksCopy = data.links;
+        renderSensingLinks();
+        renderBottomMetrics();
+      }
+    });
+    fetchMonitoringSamples(20).then(function(data) {
+      if (data.samples && data.samples.length > 0) {
+        state.networkSamplesCopy = data.samples;
+        renderSensingCharts();
+      }
+    });
+    fetchStorageData().then(function(data) {
+      if (data.targets && data.targets.length > 0) {
+        state.storageNodesCopy = data.targets;
+      }
+      renderStorageNodes();
+      renderStorageSummary();
+    });
+    fetchAlerts('open', 20).then(function(data) {
+      if (data.items && data.items.length > 0) {
+        state.faultAlertsCopy = data.items;
+      }
+      renderFaultAlerts();
+    });
+  }
+
   function randomizeNetworkMetrics() {
-    var links = state.networkLinksCopy;
-    for (var i = 0; i < links.length; i++) {
-      var factor = 0.95 + Math.random() * 0.1; // +/-5%
-      links[i].latency = parseFloat((links[i].latency * factor).toFixed(1));
-      links[i].jitter = parseFloat((links[i].jitter * factor).toFixed(2));
-      links[i].packetLoss = parseFloat((links[i].packetLoss * factor).toFixed(3));
-      links[i].bandwidth = Math.round(links[i].bandwidth * factor);
-    }
-    // Also bump sensing node metrics slightly
-    var nodes = state.sensingNodesCopy;
-    for (var j = 0; j < nodes.length; j++) {
-      var f = 0.97 + Math.random() * 0.06;
-      nodes[j].gpuUtil = Math.min(100, Math.round(nodes[j].gpuUtil * f));
-      nodes[j].vramUtil = Math.min(100, Math.round(nodes[j].vramUtil * f));
-      nodes[j].temp = Math.round(nodes[j].temp * (0.99 + Math.random() * 0.02));
-    }
+    // Replaced by refreshMonitoringData() -- kept as no-op for backward compat
   }
 
   function addNetworkSample() {
@@ -2147,14 +2260,10 @@
       avgLat += links[i].latency;
       avgLoss += links[i].packetLoss;
     }
-    avgBw = avgBw / links.length;
-    avgLat = avgLat / links.length;
-    avgLoss = avgLoss / links.length;
-    // Add slight noise
-    avgBw = parseFloat((avgBw * (0.97 + Math.random() * 0.06)).toFixed(2));
-    avgLat = parseFloat((avgLat * (0.97 + Math.random() * 0.06)).toFixed(1));
-    avgLoss = parseFloat((avgLoss * (0.97 + Math.random() * 0.06)).toFixed(2));
-    state.networkSamplesCopy.push({ bandwidth: avgBw, latency: avgLat, packetLoss: avgLoss });
+    avgBw = avgBw / (links.length || 1);
+    avgLat = avgLat / (links.length || 1);
+    avgLoss = avgLoss / (links.length || 1);
+    state.networkSamplesCopy.push({ bandwidth: parseFloat(avgBw.toFixed(2)), latency: parseFloat(avgLat.toFixed(1)), packetLoss: parseFloat(avgLoss.toFixed(2)) });
     // Keep max 20
     while (state.networkSamplesCopy.length > 20) { state.networkSamplesCopy.shift(); }
   }
@@ -2189,16 +2298,8 @@
   }
 
   function refreshAllData() {
-    randomizeNetworkMetrics();
-    addNetworkSample();
-    renderSensingNodes();
-    renderSensingLinks();
-    renderFaultAlerts();
-    renderSensingCharts();
-    renderStorageNodes();
-    renderStorageSummary();
-    renderSwitchHistory();
-    renderBottomMetrics();
+    // Delegate to API-based refresh
+    refreshMonitoringData();
   }
 
   function refreshAllDisplay() {
@@ -2406,13 +2507,13 @@
       totalWrite += s.writeMBps;
       totalConn += s.connections;
     }
-    var cacheHit = Math.round(85 + Math.random() * 12);
+    var cacheHit = '--';
     sum.innerHTML =
       '<div class="sd-storage-stat"><strong>' + totalCap.toFixed(0) + ' TB</strong>总容量</div>' +
       '<div class="sd-storage-stat"><strong>' + totalUsed.toFixed(1) + ' TB</strong>已使用</div>' +
       '<div class="sd-storage-stat"><strong>' + totalRead + ' MB/s</strong>总读吞吐</div>' +
       '<div class="sd-storage-stat"><strong>' + totalWrite + ' MB/s</strong>总写吞吐</div>' +
-      '<div class="sd-storage-stat"><strong>' + cacheHit + '%</strong>缓存命中率</div>' +
+      '<div class="sd-storage-stat"><strong>' + cacheHit + '</strong>缓存命中率</div>' +
       '<div class="sd-storage-stat"><strong>' + totalConn + '</strong>总连接数</div>';
   }
 
@@ -2472,7 +2573,7 @@
     state.monitoringTimer = setInterval(function() {
       state.networkRefreshCountdown--;
       if (state.networkRefreshCountdown <= 0) {
-        refreshAllData();
+        refreshMonitoringData();
         state.networkRefreshCountdown = 5;
       }
     }, 1000);
@@ -2487,28 +2588,64 @@
 
   // ── Entry ──
   function renderNetwork() {
-    // Deep copy data
-    var data = state.demoData;
-    state.sensingNodesCopy = JSON.parse(JSON.stringify(data.sensingNodes || []));
-    state.storageNodesCopy = JSON.parse(JSON.stringify(data.storageNodes || []));
-    state.networkSamplesCopy = JSON.parse(JSON.stringify(data.networkSamples || []));
-    state.networkLinksCopy = JSON.parse(JSON.stringify(data.networkLinks || []));
-    state.faultAlertsCopy = JSON.parse(JSON.stringify(data.faultAlerts || []));
-    state.switchRecordsCopy = JSON.parse(JSON.stringify(data.switchRecords || []));
-
     // Load from localStorage (overrides switch records)
     loadSensingFromLocalStorage();
 
-    // Render all components
+    // Show loading states
+    showLoading('sd-nodes-grid');
+    showLoading('sd-links-list');
+    showLoading('sd-storage-grid');
+    showLoading('sd-alerts-panel');
+
+    // Fetch real data from API
+    fetchMonitoringNodes().then(function(data) {
+      if (data.nodes && data.nodes.length > 0) {
+        state.sensingNodesCopy = data.nodes;
+      }
+      hideLoading('sd-nodes-grid');
+      renderSensingNodes();
+      renderBottomMetrics();
+    });
+
+    fetchNetworkLinks().then(function(data) {
+      var links = data.links || [];
+      var stats = data.stats || {};
+      if (links.length === 0) {
+        state.networkLinksCopy = [];
+      } else {
+        state.networkLinksCopy = links;
+      }
+      hideLoading('sd-links-list');
+      renderSensingLinks();
+      renderBottomMetrics();
+    });
+
+    fetchMonitoringSamples(20).then(function(data) {
+      if (data.samples && data.samples.length > 0) {
+        state.networkSamplesCopy = data.samples;
+      }
+      renderSensingCharts();
+    });
+
+    fetchStorageData().then(function(data) {
+      if (data.targets && data.targets.length > 0) {
+        state.storageNodesCopy = data.targets;
+      }
+      hideLoading('sd-storage-grid');
+      renderStorageNodes();
+      renderStorageSummary();
+    });
+
+    fetchAlerts('open', 20).then(function(data) {
+      if (data.items && data.items.length > 0) {
+        state.faultAlertsCopy = data.items;
+      }
+      hideLoading('sd-alerts-panel');
+      renderFaultAlerts();
+    });
+
     renderSensingHeader();
-    renderSensingNodes();
-    renderSensingLinks();
-    renderFaultAlerts();
-    renderSensingCharts();
-    renderStorageNodes();
-    renderStorageSummary();
     renderSwitchHistory();
-    renderBottomMetrics();
 
     // Start/stop monitoring
     if (state.activeTab === 'network' && state.isNetworkAutoRefresh) {
@@ -2533,7 +2670,7 @@
   }
 
   function manualNetworkRefresh() {
-    refreshAllData();
+    refreshMonitoringData();
     state.networkRefreshCountdown = 5;
     showToast('感知数据已刷新', 'info');
   }
@@ -2787,7 +2924,7 @@
       source: sourcetext,
       target: faultType === 'storage_corrupt' ? 'SSD存储阵列-04' : '备用节点',
       reason: faultType === 'gpu_overheat' ? 'GPU温度超过阈值' : (faultType === 'link_degrade' ? '丢包率超阈值' : (faultType === 'storage_corrupt' ? '磁盘I/O错误' : '节点心跳丢失')),
-      duration: parseFloat((2 + Math.random() * 5).toFixed(1)),
+      duration: parseFloat((3.5).toFixed(1)),
       result: '成功',
       isDemo: false
     };
@@ -2853,14 +2990,34 @@
   // Tab 6: Permissions & Security
   // ══════════════════════════════════════════════════
   function renderPermissions() {
-    renderPermsTable();
-    renderSecurityCards();
+    // Load from API
+    loadPermissions().then(function(members) {
+      renderPermsTable(members);
+      renderSecurityCards();
+    });
   }
 
-  function renderPermsTable() {
-    var d = state.demoData;
-    if (!d || !d.roles) return;
-    var roles = d.roles;
+  function loadPermissions() {
+    return api('/api/projects/' + (state.demoProjectId || 'demo-proj-001') + '/members')
+      .then(function(data) {
+        return data.members || data || [];
+      }).catch(function(err) {
+        console.error('权限数据加载失败:', err);
+        showToast('权限数据加载失败', 'warning');
+        // Fallback to demo data
+        var d = state.demoData;
+        if (d && d.roles) return d.roles;
+        return [];
+      });
+  }
+
+  function renderPermsTable(members) {
+    var roles = members;
+    if (!roles || roles.length === 0) {
+      var d = state.demoData;
+      if (d && d.roles) roles = d.roles;
+    }
+    if (!roles || roles.length === 0) return;
 
     // All possible permissions
     var allPerms = ['manageUsers', 'manageNodes', 'viewAll', 'manageBilling', 'configureSystem', 'manageAssets', 'editProjects', 'approveOutput'];
@@ -2869,26 +3026,6 @@
       manageBilling: '费用管理', configureSystem: '系统配置', manageAssets: '素材管理',
       editProjects: '项目编辑', approveOutput: '成果审核'
     };
-
-    // Merge rolePermissions into roles
-    var mergedRoles = [];
-    for (var i = 0; i < roles.length; i++) {
-      var r = { id: roles[i].id, name: roles[i].name };
-      var perms = {};
-      for (var j = 0; j < allPerms.length; j++) {
-        var pk = allPerms[j];
-        // Check persisted perms first
-        if (state.rolePermissions[r.id] && state.rolePermissions[r.id][pk] !== undefined) {
-          perms[pk] = state.rolePermissions[r.id][pk];
-        } else if (roles[i].permissions[pk] !== undefined) {
-          perms[pk] = roles[i].permissions[pk];
-        } else {
-          perms[pk] = false;
-        }
-      }
-      r.permissions = perms;
-      mergedRoles.push(r);
-    }
 
     var h = '<table class="cp-table cp-perms-table"><thead><tr><th>角色</th>';
     for (var k = 0; k < allPerms.length; k++) {
@@ -2914,27 +3051,17 @@
   }
 
   function handleTogglePermission(roleId, permKey) {
-    if (!state.rolePermissions[roleId]) {
-      state.rolePermissions[roleId] = {};
-    }
-    // Toggle
-    if (state.rolePermissions[roleId][permKey] === undefined) {
-      // Get default from demo data
-      var d = state.demoData;
-      var defaultVal = false;
-      if (d && d.roles) {
-        for (var i = 0; i < d.roles.length; i++) {
-          if (d.roles[i].id === roleId && d.roles[i].permissions[permKey] !== undefined) {
-            defaultVal = d.roles[i].permissions[permKey];
-            break;
-          }
-        }
-      }
-      state.rolePermissions[roleId][permKey] = !defaultVal;
-    } else {
-      state.rolePermissions[roleId][permKey] = !state.rolePermissions[roleId][permKey];
-    }
-    saveToLocalStorage();
+    // Send permission toggle to API
+    api('/api/projects/' + (state.demoProjectId || 'demo-proj-001') + '/permissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role_id: roleId, permission: permKey, action: 'toggle' })
+    }).then(function() {
+      showToast('权限已更新', 'success');
+    }).catch(function(err) {
+      console.error('权限更新失败:', err);
+      showToast('权限更新失败: ' + (err.message || '未知错误'), 'warning');
+    });
   }
 
   function renderSecurityCards() {
@@ -2974,23 +3101,28 @@
 
   function renderCostSummary() {
     var d = state.demoData;
-    if (!d || !d.billingRecords || d.billingRecords.length === 0) return;
-    var rec = d.billingRecords[0];
+    var b = state.apiBilling || {};
+    var total = b.total_amount || (d && d.billingRecords && d.billingRecords.length > 0 ? d.billingRecords[0].dailyCost : 0);
+    var accounts = b.accounts || [];
 
     var grid = $('cp-cost-grid');
     if (!grid) return;
 
+    var accountBalances = '';
+    for (var i = 0; i < accounts.length; i++) {
+      var acct = accounts[i];
+      accountBalances += '<div class="cp-cost-breakdown-item"><div class="cp-cost-bd-label">' + escapeHtml(acct.plan_name || '账户') + '</div><div class="cp-cost-bd-value">¥' + (acct.balance || 0).toFixed(0) + '</div></div>';
+    }
+    if (!accountBalances) {
+      accountBalances = '<div class="cp-cost-breakdown-item"><div class="cp-cost-bd-label">未配置</div><div class="cp-cost-bd-value">-</div></div>';
+    }
+
     var html =
-      '<div class="cp-cost-card"><div class="cp-cost-label">今日费用</div><div class="cp-cost-value">' + rec.dailyCost.toFixed(2) + '<span class="cp-cost-unit"> 元</span></div></div>' +
-      '<div class="cp-cost-card"><div class="cp-cost-label">本周费用</div><div class="cp-cost-value">' + rec.weeklyCost.toFixed(2) + '<span class="cp-cost-unit"> 元</span></div></div>' +
-      '<div class="cp-cost-card"><div class="cp-cost-label">本月费用</div><div class="cp-cost-value">' + rec.monthlyCost.toFixed(2) + '<span class="cp-cost-unit"> 元</span></div></div>' +
-      '<div class="cp-cost-card"><div class="cp-cost-label">费用构成</div>' +
-      '<div class="cp-cost-breakdown">' +
-      '<div class="cp-cost-breakdown-item"><div class="cp-cost-bd-label">GPU</div><div class="cp-cost-bd-value">¥' + rec.gpuCost.toFixed(0) + '</div></div>' +
-      '<div class="cp-cost-breakdown-item"><div class="cp-cost-bd-label">渲染</div><div class="cp-cost-bd-value">¥' + rec.renderCost.toFixed(0) + '</div></div>' +
-      '<div class="cp-cost-breakdown-item"><div class="cp-cost-bd-label">存储</div><div class="cp-cost-bd-value">¥' + rec.storageCost.toFixed(0) + '</div></div>' +
-      '<div class="cp-cost-breakdown-item"><div class="cp-cost-bd-label">网络</div><div class="cp-cost-bd-value">¥' + rec.networkCost.toFixed(0) + '</div></div>' +
-      '</div></div>';
+      '<div class="cp-cost-card"><div class="cp-cost-label">累计费用</div><div class="cp-cost-value">' + ((typeof total === 'number') ? total.toFixed(2) : total) + '<span class="cp-cost-unit"> 元</span></div></div>' +
+      '<div class="cp-cost-card"><div class="cp-cost-label">活跃渲染任务</div><div class="cp-cost-value">' + (b.render_stats ? b.render_stats.active_render_jobs || 0 : 0) + '<span class="cp-cost-unit"> 个</span></div></div>' +
+      '<div class="cp-cost-card"><div class="cp-cost-label">总渲染任务</div><div class="cp-cost-value">' + (b.render_stats ? b.render_stats.total_render_jobs || 0 : 0) + '<span class="cp-cost-unit"> 个</span></div></div>' +
+      '<div class="cp-cost-card"><div class="cp-cost-label">账户余额</div>' +
+      '<div class="cp-cost-breakdown">' + accountBalances + '</div></div>';
 
     grid.innerHTML = html;
   }
@@ -3037,20 +3169,37 @@
   }
 
   function renderOpsTable() {
-    var events = state.opsEvents;
+    // Prefer API ops events, fall back to local state
+    var apiEvents = state.apiOpsEvents || [];
+    var localEvents = state.opsEvents || [];
+    var events = apiEvents.length > 0 ? apiEvents : localEvents;
 
     var h = '<table class="cp-table"><thead><tr>' +
-      '<th>操作</th><th>关联告警</th><th>时间</th><th>描述</th>' +
+      '<th>事件类型</th><th>严重级别</th><th>时间</th><th>消息</th>' +
       '</tr></thead><tbody>';
 
-    for (var i = 0; i < events.length; i++) {
-      var ev = events[i];
-      h += '<tr>' +
-        '<td>' + escapeHtml(ev.action) + '</td>' +
-        '<td>' + escapeHtml(ev.alertId || '--') + '</td>' +
-        '<td>' + escapeHtml(ev.timestamp) + '</td>' +
-        '<td>' + escapeHtml(ev.description) + '</td>' +
-        '</tr>';
+    if (apiEvents.length > 0) {
+      for (var i = 0; i < events.length; i++) {
+        var ev = events[i];
+        var ts = ev.created_at ? new Date(ev.created_at * 1000).toISOString().slice(0, 19).replace('T', ' ') : '--';
+        var severityBadge = '<span class="ch-badge-' + (ev.severity === 'error' ? 'error' : ev.severity === 'warning' ? 'maintenance' : 'running') + '">' + escapeHtml(ev.severity || 'info') + '</span>';
+        h += '<tr>' +
+          '<td>' + escapeHtml(ev.event_type || '--') + '</td>' +
+          '<td>' + severityBadge + '</td>' +
+          '<td>' + escapeHtml(ts) + '</td>' +
+          '<td>' + escapeHtml(ev.message || '') + '</td>' +
+          '</tr>';
+      }
+    } else {
+      for (var j = 0; j < events.length; j++) {
+        var ev2 = events[j];
+        h += '<tr>' +
+          '<td>' + escapeHtml(ev2.action || ev2.event_type || '--') + '</td>' +
+          '<td>' + escapeHtml(ev2.severity || 'info') + '</td>' +
+          '<td>' + escapeHtml(ev2.timestamp || ev2.created_at || '--') + '</td>' +
+          '<td>' + escapeHtml(ev2.description || ev2.message || '') + '</td>' +
+          '</tr>';
+      }
     }
     h += '</tbody></table>';
 
@@ -3104,18 +3253,73 @@
   }
 
   // ══════════════════════════════════════════════════
+  // Real Data Loading
+  // ══════════════════════════════════════════════════
+  function loadRealData() {
+    // Load resource summary
+    api('/api/resources/summary').then(function(summary) {
+      state.apiSummary = summary || {};
+      updateStatusBar();
+      renderOverviewIfActive();
+    }).catch(function(err) {
+      console.error('资源摘要加载失败:', err);
+      showToast('资源摘要加载失败', 'warning');
+    });
+
+    // Load hosts (GPU scheduling tab)
+    api('/api/cloud/hosts?limit=200').then(function(hostsData) {
+      state.apiHosts = hostsData || {};
+      if (state.activeTab === 'gpu') renderGPU();
+    }).catch(function(err) {
+      console.error('GPU主机数据加载失败:', err);
+    });
+
+    // Load billing summary
+    api('/api/billing/summary').then(function(billing) {
+      state.apiBilling = billing || {};
+      if (state.activeTab === 'billing') renderBilling();
+    }).catch(function(err) {
+      console.error('账单摘要加载失败:', err);
+    });
+
+    // Load ops events
+    api('/api/ops/events?limit=50').then(function(events) {
+      state.apiOpsEvents = events || [];
+      if (state.activeTab === 'billing') renderBilling();
+    }).catch(function(err) {
+      console.error('运维事件加载失败:', err);
+    });
+
+    // Load render jobs
+    api('/api/render/jobs?limit=50').then(function(render) {
+      state.apiRenderJobs = render || {};
+      if (state.activeTab === 'overview') renderOverview();
+    }).catch(function(err) {
+      console.error('渲染任务加载失败:', err);
+    });
+  }
+
+  function renderOverviewIfActive() {
+    if (state.activeTab === 'overview') renderOverview();
+  }
+
+  function updateStatusBar() {
+    var demoStatus = $('demo-data-status');
+    if (!demoStatus) return;
+    var s = state.apiSummary || {};
+    var nodes = s.total_nodes || 0;
+    var online = s.online_nodes || 0;
+    var queue = s.queue_depth || 0;
+    demoStatus.textContent = '算力节点：共 ' + nodes + ' 台，在线 ' + online + ' 台，排队 ' + queue + ' 个任务';
+  }
+
+  // ══════════════════════════════════════════════════
   // Initialization
   // ══════════════════════════════════════════════════
   function init() {
-    // Load demo data
-    var data = window.AIGV_DEMO_DATA;
-    if (!data) {
-      showToast('演示数据加载失败', 'error');
-      return;
-    }
+    // Keep demo data for Three.js sub-tabs (film, architecture, gaming visuals)
+    var data = window.AIGV_DEMO_DATA || {};
     state.demoData = data;
-
-    // Deep copy mutable data
     state.renderSessions = JSON.parse(JSON.stringify(data.renderSessions || []));
     state.networkLinksCopy = JSON.parse(JSON.stringify(data.networkLinks || []));
     state.sensingNodesCopy = JSON.parse(JSON.stringify(data.sensingNodes || []));
@@ -3129,14 +3333,11 @@
     // Load from localStorage (overrides above)
     loadFromLocalStorage();
 
+    // Fetch real data from APIs
+    loadRealData();
+
     // Update status bar
-    var demoStatus = $('demo-data-status');
-    if (demoStatus) {
-      var poolCount = (data.resourcePools && data.resourcePools.length) || 0;
-      var nodeCount = (data.gpuNodes && data.gpuNodes.length) || 0;
-      var alertCount = (state.alerts && state.alerts.length) || 0;
-      demoStatus.textContent = '数据面板：已加载 ' + poolCount + ' 个资源池，' + nodeCount + ' 个GPU节点，' + alertCount + ' 条告警';
-    }
+    updateStatusBar();
 
     // Bind tab click events
     var tabButtons = document.querySelectorAll('.cp-tab-btn');
@@ -3169,6 +3370,7 @@
       stopMonitoring();
       cancelFaultSimulation();
       if (state.clockTimer) { clearInterval(state.clockTimer); state.clockTimer = null; }
+      if (monitoringPollInterval) { clearInterval(monitoringPollInterval); monitoringPollInterval = null; }
       cleanupAllRenderSubTabs();
     });
 
@@ -3204,6 +3406,16 @@
     showToast: showToast,
     $: $,
     escapeHtml: escapeHtml,
+    showLoading: showLoading,
+    hideLoading: hideLoading,
+    refreshMonitoringData: refreshMonitoringData,
+    fetchMonitoringNodes: fetchMonitoringNodes,
+    fetchNetworkLinks: fetchNetworkLinks,
+    fetchMonitoringSamples: fetchMonitoringSamples,
+    fetchStorageData: fetchStorageData,
+    fetchAlerts: fetchAlerts,
+    acknowledgeAlert: acknowledgeAlert,
+    closeAlert: closeAlert,
 
     // Tab 2 - sub-tabs
     handleSessionDetail: handleSessionDetail,

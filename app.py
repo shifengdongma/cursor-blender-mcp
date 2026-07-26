@@ -10,6 +10,7 @@ from backend.asset_service import get_asset_service
 from backend.auth_service import AuthService
 from backend.catalog_service import CatalogService
 from backend.config import Config
+from backend.cloud_routes import register_cloud_routes
 from backend.control_plane_routes import register_control_plane_routes
 from backend.creative_routes import register_creative_routes
 from backend.demo_seed_service import seed_demo_data
@@ -24,6 +25,9 @@ from backend.http_utils import (
 from backend.jobs import JobStore, build_initial_result, normalize_job_payload, start_job_worker
 from backend.prompt_doc_service import get_prompt_doc_service
 from backend.prompt_engine import PromptOrchestrator
+from backend.csrf import csrf_required, generate_csrf_token
+from backend.rate_limiter import rate_limit
+from backend.request_context import request_context_middleware
 
 
 logging.basicConfig(
@@ -51,6 +55,51 @@ def _json_error(code, message, status_code=400, details=None):
         details=details,
     )
     return jsonify(payload), status_code
+
+
+def _check_dependencies(cfg):
+    """Check external dependency availability."""
+    import time
+
+    def _check_db():
+        try:
+            start = time.time()
+            from backend.database import get_database
+            db = get_database(os.path.join(cfg.DATA_DIR, 'aigv.db'))
+            db.fetch_one('SELECT 1')
+            latency = (time.time() - start) * 1000.0
+            return {'status': 'available', 'latency_ms': round(latency, 2)}
+        except Exception as e:
+            return {'status': 'unavailable', 'error': str(e)}
+
+    def _check_blender():
+        import shutil
+        available = bool(shutil.which(cfg.BLENDER_BIN))
+        return {'status': 'configured' if cfg.ENABLE_BLENDER_EXPORT else 'disabled',
+                'available': available}
+
+    def _check_ffmpeg():
+        import shutil
+        ffmpeg_ok = bool(shutil.which(cfg.FFMPEG_BIN))
+        ffprobe_ok = bool(shutil.which(cfg.FFPROBE_BIN))
+        return {'status': 'configured', 'ffmpeg_available': ffmpeg_ok,
+                'ffprobe_available': ffprobe_ok}
+
+    def _check_provider(name, has_key):
+        return {'status': 'configured', 'api_key_valid': bool(has_key)} if has_key else {'status': 'unavailable'}
+
+    return {
+        'database': _check_db(),
+        'blender': _check_blender(),
+        'ffmpeg': _check_ffmpeg(),
+        'seedance': _check_provider('seedance', cfg.SEEDANCE_API_KEY),
+        'luma': _check_provider('luma', cfg.LUMA_API_KEY),
+        'llm': _check_provider('llm', cfg.LLM_API_KEY),
+        'comfyui': {'status': 'available' if cfg.has_comfyui_configured() else 'unavailable'},
+        'piper': {'status': 'available' if cfg.has_piper_configured() else 'unavailable'},
+        'aliyun': {'status': 'available' if cfg.ALIYUN_ACCESS_KEY else 'unavailable'},
+        'tencent': {'status': 'available' if cfg.TENCENT_SECRET_ID else 'unavailable'},
+    }
 
 
 def _job_response(job):
@@ -100,6 +149,7 @@ def _register_main_routes(app, web_root, catalog_service, prompt_orchestrator, j
         return _json_success(preview)
 
     @app.route("/api/jobs", methods=["POST"])
+    @rate_limit(max_requests=30, window_s=60)
     def create_job():
         payload = parse_json_body(request)
         normalized_payload, preview = _normalize_preview_payload(prompt_orchestrator, payload)
@@ -121,6 +171,11 @@ def _register_main_routes(app, web_root, catalog_service, prompt_orchestrator, j
                 "persistence": "json-jobstore",
             }
         )
+
+    @app.route("/api/health/dependencies", methods=["GET"])
+    def health_dependencies():
+        deps = _check_dependencies(cfg)
+        return _json_success(deps)
 
 
 def _register_asset_routes(app, web_root, cfg):
@@ -347,6 +402,7 @@ def _register_auth_routes(app, cfg, web_root):
         return send_from_directory(web_root, "register.html")
 
     @app.route("/api/auth/login", methods=["POST"])
+    @rate_limit(max_requests=cfg.LOGIN_RATE_LIMIT, window_s=60)
     def auth_login():
         payload = parse_json_body(request)
         require_fields(payload, ["username", "password"])
@@ -359,9 +415,11 @@ def _register_auth_routes(app, cfg, web_root):
             return _json_error("invalid_credentials", "用户名或密码错误", status_code=401)
 
         session["user"] = user
+        generate_csrf_token()  # Rotate CSRF token on login
         return _json_success(user, message="登录成功")
 
     @app.route("/api/auth/register", methods=["POST"])
+    @rate_limit(max_requests=3, window_s=60)
     def auth_register():
         payload = parse_json_body(request)
         require_fields(payload, ["username", "password"])
@@ -381,6 +439,7 @@ def _register_auth_routes(app, cfg, web_root):
             return _json_error("username_taken", "用户名已被占用", status_code=409)
 
         session["user"] = user
+        generate_csrf_token()  # Generate CSRF token on register
         return _json_success(user, message="注册成功", status_code=201)
 
     @app.route("/api/auth/logout", methods=["POST"])
@@ -401,6 +460,15 @@ def create_app(config_class=Config):
     cfg = config_class()
     app.secret_key = cfg.SECRET_KEY
 
+    # Session security config
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    if cfg.SESSION_SECURE:
+        app.config['SESSION_COOKIE_SECURE'] = True
+
+    # Request ID middleware
+    request_context_middleware(app)
+
     seed_demo_data(cfg.DATA_DIR)
     job_store = JobStore(cfg.JOBS_DIR)
     catalog_service = CatalogService(cfg.CATALOG_PATH)
@@ -412,6 +480,7 @@ def create_app(config_class=Config):
     _register_asset_routes(app, web_root, cfg)
     _register_prompt_doc_routes(app, cfg)
     register_control_plane_routes(app, cfg, catalog_service, job_store, _json_success, _json_error)
+    register_cloud_routes(app, cfg, _json_success, _json_error)
 
     # Creative production routes
     from backend.task_service import get_task_service
@@ -421,6 +490,20 @@ def create_app(config_class=Config):
 
     task_service = get_task_service(cfg.DATA_DIR)
     start_task_worker(task_service, cfg)
+
+    # Start monitoring worker
+    if cfg.ENABLE_MONITORING_WORKER:
+        from backend.monitoring_service import MonitoringWorker
+        _monitoring_worker = MonitoringWorker(
+            data_dir=cfg.DATA_DIR,
+            interval_s=cfg.MONITOR_INTERVAL_S,
+            timeout_s=cfg.MONITOR_TIMEOUT_S,
+            monitor_targets=cfg.MONITOR_TARGETS,
+            storage_targets=cfg.STORAGE_TARGETS,
+            node_agent_urls=cfg.NODE_AGENT_URLS,
+            node_agent_token=cfg.NODE_AGENT_TOKEN,
+        )
+        _monitoring_worker.start()
 
     # Serve export files
     @app.route("/data/exports/<path:filename>", methods=["GET"])

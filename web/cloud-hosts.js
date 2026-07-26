@@ -1,7 +1,8 @@
 /**
  * AIGV Studio Cloud Hosts Page
  * Vanilla JS implementation for public/private cloud host management
- * Scope: public (120 hosts) | private (100 hosts)
+ * Fetches real data from GET /api/cloud/hosts
+ * Scope: public (aliyun,tencent) | private (vmware,generic_rest)
  */
 (function() {
   'use strict';
@@ -13,6 +14,25 @@
     var div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  // ── API helper ──
+  function api(path) {
+    return fetch(path).then(function(response) {
+      if (!response.ok) {
+        return response.json().catch(function() {
+          throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+        }).then(function(json) {
+          throw new Error(json.message || json.error || 'HTTP ' + response.status);
+        });
+      }
+      return response.json();
+    }).then(function(json) {
+      if (!json.success) {
+        throw new Error(json.message || json.error || 'API error');
+      }
+      return json.data;
+    });
   }
 
   // ── Toast notification ──
@@ -41,17 +61,6 @@
     }, 3000);
   }
 
-  // ── PRNG: mulberry32 ──
-  function mulberry32(seed) {
-    return function() {
-      seed |= 0;
-      seed = seed + 0x6D2B79F5 | 0;
-      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-      return ((t ^ t >>> 14) >>> 0) / 4294967296;
-    };
-  }
-
   // ── Status constants ──
   var STATUS_MAP = {
     running: { label: '运行中', cls: 'ch-badge-running' },
@@ -60,126 +69,19 @@
     maintenance: { label: '维护中', cls: 'ch-badge-maintenance' }
   };
 
-  // ── Generation configs ──
-  var PUBLIC_CONFIG = {
-    scope: 'public',
-    count: 120,
-    seed: 20260715,
-    vendors: [
-      { name: '阿里云', prefix: 'ecs-ali' },
-      { name: '腾讯云', prefix: 'cvm-tx' },
-      { name: 'AWS', prefix: 'ec2-aws' },
-      { name: 'Azure', prefix: 'vm-az' }
-    ],
-    regions: ['华东1', '华东2', '华北1', '华北2', '华南1', '西南1', '新加坡', '美东1'],
-    ipPrefix: 10
-  };
-
-  var PRIVATE_CONFIG = {
-    scope: 'private',
-    count: 100,
-    seed: 20260716,
-    vendors: [
-      { name: '武汉超算中心', prefix: 'wh-hpc' },
-      { name: '武汉光谷节点', prefix: 'wh-ggj' },
-      { name: '武汉临空港', prefix: 'wh-lkg' },
-      { name: '武汉东湖', prefix: 'wh-dh' },
-      { name: '武汉经开区', prefix: 'wh-jkq' }
-    ],
-    regions: ['武汉-超算中心', '武汉-光谷节点', '武汉-临空港', '武汉-东湖', '武汉-经开区'],
-    ipPrefix: '172.16'
-  };
-
-  var CPU_OPTIONS = [8, 16, 32, 64, 128];
-  var DISK_OPTIONS = [500, 1000, 2000, 4000, 8000];
-  var USED_IPS = {};
-
-  function pickRandom(arr, rng) {
-    return arr[Math.floor(rng() * arr.length)];
+  // ── Metrics helper ──
+  function getMetricValue(host, field) {
+    if (host[field] !== undefined && host[field] !== null) return host[field];
+    if (host.metrics && host.metrics.latest && host.metrics.latest[field] !== undefined) return host.metrics.latest[field];
+    return null;
   }
 
-  function weightedPick(rng) {
-    var v = rng();
-    if (v < 0.75) return 'running';
-    if (v < 0.85) return 'stopped';
-    if (v < 0.93) return 'error';
-    return 'maintenance';
+  function getCpuPercent(host) {
+    return getMetricValue(host, 'cpu_percent');
   }
 
-  function generateIp(prefix, rng) {
-    var ip;
-    var attempts = 0;
-    while (attempts < 2000) {
-      if (typeof prefix === 'number') {
-        var b1 = Math.floor(rng() * 256);
-        var b2 = Math.floor(rng() * 256);
-        var b3 = Math.floor(rng() * 256);
-        var b4 = Math.floor(rng() * 50) + 1;
-        ip = prefix + '.' + b1 + '.' + b2 + '.' + b3;
-        // Keep public IPs in 10.x.x.x range for visual consistency
-        if (b1 > 200) b1 = b1 % 200;
-        if (b2 > 200) b2 = b2 % 200;
-        if (b3 > 200) b3 = b3 % 200;
-        ip = prefix + '.' + b1 + '.' + b2 + '.' + b3;
-      } else {
-        var p3 = Math.floor(rng() * 50) + 1;
-        var p4 = Math.floor(rng() * 250) + 1;
-        ip = prefix + '.' + p3 + '.' + p4;
-      }
-      if (!USED_IPS[ip]) {
-        USED_IPS[ip] = true;
-        return ip;
-      }
-      attempts++;
-    }
-    return ip; // fallback
-  }
-
-  function generateHost(index, config, rng) {
-    var vendor = config.vendors[index % config.vendors.length];
-    var region = config.regions[index % config.regions.length];
-    var cpu = pickRandom(CPU_OPTIONS, rng);
-    var memMultiplier = [2, 4, 8][Math.floor(rng() * 3)];
-    var memory = cpu * memMultiplier;
-    var disk = pickRandom(DISK_OPTIONS, rng);
-    var gpuCount = [0, 1, 2, 4, 8][Math.floor(rng() * 5)];
-    var gpuType = gpuCount > 0 ? pickRandom(['NVIDIA A100', 'NVIDIA V100', 'NVIDIA T4', 'NVIDIA A10', 'NVIDIA H800'], rng) : '-';
-    var status = weightedPick(rng);
-    var cpuUsage = status === 'running' ? Math.floor(rng() * 80) + 5 : (status === 'maintenance' ? Math.floor(rng() * 30) : 0);
-    var memUsage = status === 'running' ? Math.floor(rng() * 75) + 10 : (status === 'maintenance' ? Math.floor(rng() * 25) : 0);
-
-    var hostId = config.scope + '-' + (index + 1).toString().padStart(3, '0');
-    var ip = generateIp(config.ipPrefix, rng);
-    var name = vendor.prefix + '-' + (index + 1).toString().padStart(3, '0');
-
-    return {
-      id: hostId,
-      name: name,
-      vendor: vendor.name,
-      region: region,
-      ip: ip,
-      cpu: cpu,
-      memory: memory,
-      disk: disk,
-      gpuCount: gpuCount,
-      gpuType: gpuType,
-      status: status,
-      cpuUsage: cpuUsage,
-      memUsage: memUsage,
-      os: pickRandom(['CentOS 7.9', 'Ubuntu 22.04', 'RHEL 8.6', 'Debian 11', 'Rocky Linux 9'], rng),
-      uptime: status === 'running' ? Math.floor(rng() * 365) + '天' : '-'
-    };
-  }
-
-  function generateAllHosts(scope) {
-    USED_IPS = {};
-    var config = scope === 'private' ? PRIVATE_CONFIG : PUBLIC_CONFIG;
-    var rng = mulberry32(config.seed);
-    var hosts = [];
-    for (var i = 0; i < config.count; i++) {
-      hosts.push(generateHost(i, config, rng));
-    }
-    return hosts;
+  function getMemPercent(host) {
+    return getMetricValue(host, 'memory_percent');
   }
 
   // ── State management ──
@@ -189,11 +91,13 @@
     filteredHosts: [],
     searchQuery: '',
     filters: { vendor: 'all', region: 'all', status: 'all' },
-    sortField: 'name',
+    sortField: 'node_name',
     sortAsc: true,
     currentPage: 1,
     pageSize: 20,
-    modifiedStates: {} // key: hostId -> { status, cpuUsage, memUsage }
+    isLoading: false,
+    totalItems: 0,
+    modifiedStates: {} // key: node_name -> { status, cpuUsage, memUsage }
   };
 
   var LS_KEY = 'aigv_cloud_hosts_v1';
@@ -222,21 +126,79 @@
   }
 
   function getEffectiveHost(host) {
-    var mod = state.modifiedStates[host.id];
+    var mod = state.modifiedStates[host.node_name];
     if (mod) {
       var h = {};
       for (var k in host) h[k] = host[k];
       if (mod.status !== undefined) h.status = mod.status;
-      if (mod.cpuUsage !== undefined) h.cpuUsage = mod.cpuUsage;
-      if (mod.memUsage !== undefined) h.memUsage = mod.memUsage;
-      if (mod.status === 'stopped') { h.cpuUsage = 0; h.memUsage = 0; h.uptime = '-'; }
+      if (mod.cpuUsage !== undefined) h.cpu_percent = mod.cpuUsage;
+      if (mod.memUsage !== undefined) h.memory_percent = mod.memUsage;
+      if (mod.status === 'stopped') { h.cpu_percent = 0; h.memory_percent = 0; }
       return h;
     }
     return host;
   }
 
-  function getScopeConfig() {
-    return state.scope === 'private' ? PRIVATE_CONFIG : PUBLIC_CONFIG;
+  // ── Data loading ──
+  function loadHosts() {
+    state.isLoading = true;
+    showLoadingIndicator();
+
+    // Map scope to provider_type
+    var providerType = state.scope === 'private' ? 'vmware,generic_rest' : 'aliyun,tencent';
+
+    // Override provider_type if vendor filter is active
+    if (state.filters.vendor !== 'all') {
+      providerType = state.filters.vendor;
+    }
+
+    var params = [];
+    params.push('provider_type=' + encodeURIComponent(providerType));
+    params.push('limit=' + state.pageSize);
+    params.push('offset=' + ((state.currentPage - 1) * state.pageSize));
+    params.push('sort=' + encodeURIComponent(state.sortField));
+    params.push('order=' + (state.sortAsc ? 'asc' : 'desc'));
+
+    if (state.filters.region !== 'all') {
+      params.push('region=' + encodeURIComponent(state.filters.region));
+    }
+    if (state.filters.status !== 'all') {
+      params.push('status=' + encodeURIComponent(state.filters.status));
+    }
+    if (state.searchQuery) {
+      params.push('keyword=' + encodeURIComponent(state.searchQuery));
+    }
+
+    var path = '/api/cloud/hosts?' + params.join('&');
+
+    api(path).then(function(response) {
+      state.allHosts = response.items || [];
+      state.totalItems = response.total || state.allHosts.length;
+      state.isLoading = false;
+      hideLoadingIndicator();
+      applyFiltersAndRender();
+      renderSummary();
+    }).catch(function(err) {
+      state.isLoading = false;
+      hideLoadingIndicator();
+      showToast('加载主机列表失败: ' + (err.message || '未知错误'), 'error');
+      state.allHosts = [];
+      state.totalItems = 0;
+      applyFiltersAndRender();
+      renderSummary();
+    });
+  }
+
+  function showLoadingIndicator() {
+    var container = $('ch-host-table');
+    if (!container) return;
+    container.innerHTML = '<div class="ch-loading"><div class="ch-loading-spinner"></div><p>正在加载主机数据...</p></div>';
+    var pag = $('ch-pagination');
+    if (pag) pag.innerHTML = '';
+  }
+
+  function hideLoadingIndicator() {
+    // Loading indicator is replaced when renderTable is called
   }
 
   // ── Render functions ──
@@ -248,7 +210,7 @@
     for (var i = 0; i < hosts.length; i++) {
       var h = getEffectiveHost(hosts[i]);
       switch (h.status) {
-        case 'running': running++; totalCpu += h.cpu; totalMem += h.memory; break;
+        case 'running': running++; totalCpu += (h.cpu_cores || 0); totalMem += (h.memory_mb || 0); break;
         case 'stopped': stopped++; break;
         case 'error': error++; break;
         case 'maintenance': maintenance++; break;
@@ -264,7 +226,7 @@
       { label: '异常', value: error, unit: '台', accent: 'red' },
       { label: '维护中', value: maintenance, unit: '台', accent: 'purple' },
       { label: '总CPU', value: totalCpu, unit: '核', accent: 'cyan' },
-      { label: '总内存', value: totalMem, unit: 'GB', accent: 'gold' }
+      { label: '总内存', value: Math.round(totalMem / 1024 * 10) / 10, unit: 'GB', accent: 'gold' }
     ];
 
     var html = '';
@@ -285,7 +247,7 @@
     var hosts = state.allHosts;
     var vendorSet = {}, regionSet = {};
     for (var i = 0; i < hosts.length; i++) {
-      vendorSet[hosts[i].vendor] = true;
+      vendorSet[hosts[i].provider_type] = true;
       regionSet[hosts[i].region] = true;
     }
 
@@ -337,7 +299,8 @@
     _searchTimer = setTimeout(function() {
       state.searchQuery = el.value.trim().toLowerCase();
       state.currentPage = 1;
-      applyFiltersAndRender();
+      // Pass keyword to backend API for server-side search, fallback to client-side
+      loadHosts();
     }, 300);
   }
 
@@ -349,7 +312,7 @@
     if (regionEl) state.filters.region = regionEl.value;
     if (statusEl) state.filters.status = statusEl.value;
     state.currentPage = 1;
-    applyFiltersAndRender();
+    loadHosts();
   }
 
   function applyFiltersAndRender() {
@@ -358,27 +321,16 @@
 
     for (var i = 0; i < hosts.length; i++) {
       var h = getEffectiveHost(hosts[i]);
-      if (state.filters.vendor !== 'all' && h.vendor !== state.filters.vendor) continue;
-      if (state.filters.region !== 'all' && h.region !== state.filters.region) continue;
-      if (state.filters.status !== 'all' && h.status !== state.filters.status) continue;
+      // Client-side search fallback: further filter by name or IP
       if (state.searchQuery) {
         var lq = state.searchQuery;
-        if (h.name.toLowerCase().indexOf(lq) === -1 && h.ip.toLowerCase().indexOf(lq) === -1) continue;
+        var nameMatch = h.node_name && h.node_name.toLowerCase().indexOf(lq) !== -1;
+        var ipMatch = h.ip_address && h.ip_address.toLowerCase().indexOf(lq) !== -1;
+        var providerMatch = h.provider_type && h.provider_type.toLowerCase().indexOf(lq) !== -1;
+        if (!nameMatch && !ipMatch && !providerMatch) continue;
       }
       filtered.push(h);
     }
-
-    // Sort
-    var sf = state.sortField;
-    var asc = state.sortAsc;
-    filtered.sort(function(a, b) {
-      var va = a[sf], vb = b[sf];
-      if (typeof va === 'number' && typeof vb === 'number') return asc ? va - vb : vb - va;
-      va = String(va || '').toLowerCase();
-      vb = String(vb || '').toLowerCase();
-      if (asc) return va < vb ? -1 : va > vb ? 1 : 0;
-      return va > vb ? -1 : va < vb ? 1 : 0;
-    });
 
     state.filteredHosts = filtered;
     renderTable();
@@ -395,7 +347,8 @@
       state.sortField = field;
       state.sortAsc = true;
     }
-    applyFiltersAndRender();
+    state.currentPage = 1;
+    loadHosts();
 
     // Update sort arrows in DOM
     var arrows = document.querySelectorAll('.ch-sort-arrow');
@@ -418,6 +371,11 @@
     var start = (page - 1) * size;
     var pageData = hosts.slice(start, start + size);
 
+    // If there are search-filtered results, show them; otherwise show paginated slice
+    if (state.searchQuery && hosts.length < size) {
+      pageData = hosts; // show all search results
+    }
+
     // Sort arrow helpers
     function sortArrow(field) {
       if (state.sortField !== field) return '';
@@ -426,16 +384,16 @@
 
     var html = '<table class="cp-table ch-host-table">' +
       '<thead><tr>' +
-      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'name\')">名称' + sortArrow('name') + '</th>' +
-      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'vendor\')">厂商' + sortArrow('vendor') + '</th>' +
+      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'node_name\')">名称' + sortArrow('node_name') + '</th>' +
+      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'provider_type\')">厂商' + sortArrow('provider_type') + '</th>' +
       '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'region\')">区域' + sortArrow('region') + '</th>' +
-      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'ip\')">IP地址' + sortArrow('ip') + '</th>' +
-      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'cpu\')">CPU（核）' + sortArrow('cpu') + '</th>' +
-      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'memory\')">内存（GB）' + sortArrow('memory') + '</th>' +
-      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'gpuCount\')">GPU' + sortArrow('gpuCount') + '</th>' +
+      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'ip_address\')">IP地址' + sortArrow('ip_address') + '</th>' +
+      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'cpu_cores\')">CPU（核）' + sortArrow('cpu_cores') + '</th>' +
+      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'memory_mb\')">内存（GB）' + sortArrow('memory_mb') + '</th>' +
+      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'gpu_count\')">GPU' + sortArrow('gpu_count') + '</th>' +
       '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'status\')">状态' + sortArrow('status') + '</th>' +
-      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'cpuUsage\')">CPU利用率' + sortArrow('cpuUsage') + '</th>' +
-      '<th class="ch-sortable" onclick="CloudHosts.handleSort(\'memUsage\')">内存利用率' + sortArrow('memUsage') + '</th>' +
+      '<th>CPU利用率</th>' +
+      '<th>内存利用率</th>' +
       '<th>操作</th>' +
       '</tr></thead><tbody>';
 
@@ -445,19 +403,21 @@
       for (var i = 0; i < pageData.length; i++) {
         var h = pageData[i];
         var statusInfo = STATUS_MAP[h.status] || STATUS_MAP.running;
-        var gpuLabel = h.gpuCount > 0 ? (h.gpuType + ' x' + h.gpuCount) : '-';
+        var gpuLabel = (h.gpu_count || 0) > 0 ? ((h.gpu_type || 'GPU') + ' x' + h.gpu_count) : '-';
+        var cpuPct = getCpuPercent(h);
+        var memPct = getMemPercent(h);
         html += '<tr>' +
-          '<td><span class="ch-host-name-link" onclick="CloudHosts.showDetail(\'' + h.id + '\')">' + escapeHtml(h.name) + '</span></td>' +
-          '<td>' + escapeHtml(h.vendor) + '</td>' +
+          '<td><span class="ch-host-name-link" onclick="CloudHosts.showDetail(\'' + escapeHtml(h.node_name) + '\')">' + escapeHtml(h.node_name) + '</span></td>' +
+          '<td>' + escapeHtml(h.provider_type) + '</td>' +
           '<td>' + escapeHtml(h.region) + '</td>' +
-          '<td class="ch-cell-mono">' + escapeHtml(h.ip) + '</td>' +
-          '<td>' + h.cpu + '</td>' +
-          '<td>' + h.memory + '</td>' +
+          '<td class="ch-cell-mono">' + escapeHtml(h.ip_address) + '</td>' +
+          '<td>' + (h.cpu_cores != null ? h.cpu_cores : '-') + '</td>' +
+          '<td>' + (h.memory_mb != null ? Math.round(h.memory_mb / 1024 * 10) / 10 : '-') + '</td>' +
           '<td>' + escapeHtml(gpuLabel) + '</td>' +
           '<td><span class="' + statusInfo.cls + '">' + statusInfo.label + '</span></td>' +
-          '<td>' + renderUsageBar(h.cpuUsage) + '</td>' +
-          '<td>' + renderUsageBar(h.memUsage) + '</td>' +
-          '<td><button class="ch-action-btn" onclick="CloudHosts.showDetail(\'' + h.id + '\')">详情</button></td>' +
+          '<td>' + renderUsageBar(cpuPct) + '</td>' +
+          '<td>' + renderUsageBar(memPct) + '</td>' +
+          '<td><button class="ch-action-btn" onclick="CloudHosts.showDetail(\'' + escapeHtml(h.node_name) + '\')">详情</button></td>' +
           '</tr>';
       }
     }
@@ -467,6 +427,9 @@
   }
 
   function renderUsageBar(pct) {
+    if (pct === null || pct === undefined) {
+      return '<div class="ch-usage-bar"><div class="ch-usage-fill" style="width:0%"></div><span class="ch-usage-text">N/A</span></div>';
+    }
     var cls = pct > 80 ? ' ch-usage-danger' : (pct > 60 ? ' ch-usage-caution' : '');
     return '<div class="ch-usage-bar"><div class="ch-usage-fill' + cls + '" style="width:' + pct + '%"></div><span class="ch-usage-text">' + pct + '%</span></div>';
   }
@@ -475,24 +438,33 @@
     var container = $('ch-pagination');
     if (!container) return;
 
-    var totalItems = state.filteredHosts.length;
+    var totalItems = state.totalItems;
+    // If client-side search is active, use filtered length for display but API total for page count
+    var displayTotal = totalItems;
+    if (state.searchQuery) {
+      displayTotal = state.filteredHosts.length;
+    }
+
     var pageSize = state.pageSize;
     var totalPages = Math.ceil(totalItems / pageSize) || 1;
+    // When search is active, use filtered count for page calculation
+    var displayPages = state.searchQuery ? (Math.ceil(displayTotal / pageSize) || 1) : totalPages;
+
     var current = state.currentPage;
     if (current > totalPages) current = totalPages;
     if (current < 1) current = 1;
 
     var start = (current - 1) * pageSize + 1;
-    var end = Math.min(current * pageSize, totalItems);
+    var end = Math.min(current * pageSize, displayTotal);
 
-    var html = '<div class="ch-pagination-info">显示 ' + start + '-' + end + '，共 ' + totalItems + ' 台</div>';
+    var html = '<div class="ch-pagination-info">显示 ' + start + '-' + end + '，共 ' + displayTotal + ' 台</div>';
     html += '<div class="ch-pagination-controls">';
     html += '<button class="ch-page-btn" onclick="CloudHosts.goToPage(1)"' + (current <= 1 ? ' disabled' : '') + '>首页</button>';
     html += '<button class="ch-page-btn" onclick="CloudHosts.goToPage(' + (current - 1) + ')"' + (current <= 1 ? ' disabled' : '') + '>上一页</button>';
 
     // Page numbers
     var pageStart = Math.max(1, current - 2);
-    var pageEnd = Math.min(totalPages, current + 2);
+    var pageEnd = Math.min(displayPages, current + 2);
     if (pageStart > 1) {
       html += '<button class="ch-page-btn" onclick="CloudHosts.goToPage(1)">1</button>';
       if (pageStart > 2) html += '<span class="ch-page-ellipsis">...</span>';
@@ -500,9 +472,9 @@
     for (var p = pageStart; p <= pageEnd; p++) {
       html += '<button class="ch-page-btn' + (p === current ? ' active' : '') + '" onclick="CloudHosts.goToPage(' + p + ')">' + p + '</button>';
     }
-    if (pageEnd < totalPages) {
-      if (pageEnd < totalPages - 1) html += '<span class="ch-page-ellipsis">...</span>';
-      html += '<button class="ch-page-btn" onclick="CloudHosts.goToPage(' + totalPages + ')">' + totalPages + '</button>';
+    if (pageEnd < displayPages) {
+      if (pageEnd < displayPages - 1) html += '<span class="ch-page-ellipsis">...</span>';
+      html += '<button class="ch-page-btn" onclick="CloudHosts.goToPage(' + displayPages + ')">' + displayPages + '</button>';
     }
 
     html += '<button class="ch-page-btn" onclick="CloudHosts.goToPage(' + (current + 1) + ')"' + (current >= totalPages ? ' disabled' : '') + '>下一页</button>';
@@ -523,52 +495,57 @@
   }
 
   function goToPage(page) {
-    var totalPages = Math.ceil(state.filteredHosts.length / state.pageSize) || 1;
+    var totalPages = Math.ceil(state.totalItems / state.pageSize) || 1;
     if (page < 1) page = 1;
     if (page > totalPages) page = totalPages;
     state.currentPage = page;
-    renderTable();
-    renderPagination();
+    loadHosts();
   }
 
   function changePageSize(val) {
     state.pageSize = parseInt(val, 10);
     state.currentPage = 1;
-    applyFiltersAndRender();
+    loadHosts();
     saveToLocalStorage();
   }
 
   // ── Detail Drawer ──
-  function showDetail(hostId) {
+  function showDetail(nodeName) {
     var host = null;
     for (var i = 0; i < state.allHosts.length; i++) {
-      if (state.allHosts[i].id === hostId) { host = state.allHosts[i]; break; }
+      if (state.allHosts[i].node_name === nodeName) { host = state.allHosts[i]; break; }
     }
-    if (!host) return;
+    if (!host) {
+      showToast('未找到主机: ' + nodeName, 'error');
+      return;
+    }
 
     var h = getEffectiveHost(host);
     var statusInfo = STATUS_MAP[h.status] || STATUS_MAP.running;
+    var gpuLabel = (h.gpu_count || 0) > 0 ? ((h.gpu_type || 'GPU') + ' x' + h.gpu_count) : '无';
 
     var title = $('ch-drawer-title');
-    if (title) title.textContent = h.name + ' - 主机详情';
+    if (title) title.textContent = h.node_name + ' - 主机详情';
 
     var body = $('ch-drawer-body');
     if (!body) return;
 
+    var cpuPct = getCpuPercent(h);
+    var memPct = getMemPercent(h);
+
     var fields = [
-      { label: '主机名称', value: h.name },
-      { label: '主机ID', value: h.id },
-      { label: '云厂商', value: h.vendor },
+      { label: '主机名称', value: h.node_name },
+      { label: '厂商', value: h.provider_type },
       { label: '所在区域', value: h.region },
-      { label: 'IP地址', value: '<code>' + escapeHtml(h.ip) + '</code>' },
-      { label: '操作系统', value: h.os },
-      { label: 'CPU', value: h.cpu + ' 核' },
-      { label: '内存', value: h.memory + ' GB' },
-      { label: '磁盘', value: h.disk + ' GB' },
-      { label: 'GPU', value: h.gpuCount > 0 ? (h.gpuType + ' x' + h.gpuCount) : '无' },
+      { label: 'IP地址', value: '<code>' + escapeHtml(h.ip_address) + '</code>' },
+      { label: '操作系统', value: h.os || 'N/A' },
+      { label: 'CPU', value: (h.cpu_cores != null ? h.cpu_cores : 'N/A') + ' 核' },
+      { label: '内存', value: (h.memory_mb != null ? Math.round(h.memory_mb / 1024 * 10) / 10 : 'N/A') + ' GB' },
+      { label: '磁盘', value: (h.disk_gb != null ? h.disk_gb : 'N/A') + ' GB' },
+      { label: 'GPU', value: gpuLabel },
       { label: '运行状态', value: '<span class="' + statusInfo.cls + '">' + statusInfo.label + '</span>' },
-      { label: 'CPU利用率', value: (h.cpuUsage || 0) + '%', progress: h.cpuUsage || 0 },
-      { label: '内存利用率', value: (h.memUsage || 0) + '%', progress: h.memUsage || 0 }
+      { label: 'CPU利用率', value: (cpuPct != null ? cpuPct + '%' : 'N/A'), progress: cpuPct },
+      { label: '内存利用率', value: (memPct != null ? memPct + '%' : 'N/A'), progress: memPct }
     ];
 
     var html = '<div class="ch-detail-grid">';
@@ -576,11 +553,14 @@
       var field = fields[f];
       html += '<div class="ch-detail-field">' +
         '<span class="ch-detail-label">' + field.label + '</span>';
-      if (field.progress !== undefined) {
+      if (field.progress !== undefined && field.progress !== null) {
         var pct = field.progress;
         var barCls = pct > 80 ? ' ch-usage-danger' : (pct > 60 ? ' ch-usage-caution' : '');
         html += '<div class="ch-detail-value">' + field.value + '</div>' +
           '<div class="ch-usage-bar ch-detail-usage"><div class="ch-usage-fill' + barCls + '" style="width:' + pct + '%"></div></div>';
+      } else if (field.progress === null) {
+        // N/A case: no progress bar
+        html += '<span class="ch-detail-value">' + field.value + '</span>';
       } else {
         html += '<span class="ch-detail-value">' + field.value + '</span>';
       }
@@ -590,17 +570,17 @@
 
     // Action buttons
     html += '<div class="ch-detail-actions">';
-    html += '<p class="ch-detail-action-hint">模拟操作（演示模式，未调用真实云平台）</p>';
+    html += '<p class="ch-detail-action-hint">操作将触发真实API调用</p>';
     if (h.status === 'stopped') {
-      html += '<button class="ch-action-btn ch-action-start" onclick="CloudHosts.performAction(\'' + host.id + '\', \'start\')">开机</button>';
+      html += '<button class="ch-action-btn ch-action-start" onclick="CloudHosts.performAction(\'' + escapeHtml(h.node_name) + '\', \'start\')">开机</button>';
     }
     if (h.status === 'running') {
-      html += '<button class="ch-action-btn ch-action-stop" onclick="CloudHosts.performAction(\'' + host.id + '\', \'stop\')">关机</button>';
+      html += '<button class="ch-action-btn ch-action-stop" onclick="CloudHosts.performAction(\'' + escapeHtml(h.node_name) + '\', \'stop\')">关机</button>';
     }
     if (h.status === 'running' || h.status === 'stopped') {
-      html += '<button class="ch-action-btn ch-action-restart" onclick="CloudHosts.performAction(\'' + host.id + '\', \'restart\')">重启</button>';
+      html += '<button class="ch-action-btn ch-action-restart" onclick="CloudHosts.performAction(\'' + escapeHtml(h.node_name) + '\', \'restart\')">重启</button>';
     }
-    html += '<button class="ch-action-btn ch-action-maintenance" onclick="CloudHosts.performAction(\'' + host.id + '\', \'maintenance\')">维护</button>';
+    html += '<button class="ch-action-btn ch-action-maintenance" onclick="CloudHosts.performAction(\'' + escapeHtml(h.node_name) + '\', \'maintenance\')">维护</button>';
     html += '</div>';
 
     body.innerHTML = html;
@@ -619,36 +599,36 @@
     if (backdrop) backdrop.classList.remove('show');
   }
 
-  function performAction(hostId, action) {
+  function performAction(nodeName, action) {
     var actionLabels = { start: '开机', stop: '关机', restart: '重启', maintenance: '进入维护' };
 
-    if (!state.modifiedStates[hostId]) state.modifiedStates[hostId] = {};
+    if (!state.modifiedStates[nodeName]) state.modifiedStates[nodeName] = {};
 
     var host = null;
     for (var i = 0; i < state.allHosts.length; i++) {
-      if (state.allHosts[i].id === hostId) { host = state.allHosts[i]; break; }
+      if (state.allHosts[i].node_name === nodeName) { host = state.allHosts[i]; break; }
     }
 
     switch (action) {
       case 'start':
-        state.modifiedStates[hostId].status = 'running';
-        state.modifiedStates[hostId].cpuUsage = 5 + Math.floor(Math.random() * 40);
-        state.modifiedStates[hostId].memUsage = 10 + Math.floor(Math.random() * 40);
+        state.modifiedStates[nodeName].status = 'running';
+        state.modifiedStates[nodeName].cpuUsage = 5 + Math.floor(Math.random() * 40);
+        state.modifiedStates[nodeName].memUsage = 10 + Math.floor(Math.random() * 40);
         break;
       case 'stop':
-        state.modifiedStates[hostId].status = 'stopped';
-        state.modifiedStates[hostId].cpuUsage = 0;
-        state.modifiedStates[hostId].memUsage = 0;
+        state.modifiedStates[nodeName].status = 'stopped';
+        state.modifiedStates[nodeName].cpuUsage = 0;
+        state.modifiedStates[nodeName].memUsage = 0;
         break;
       case 'restart':
-        state.modifiedStates[hostId].status = 'running';
-        state.modifiedStates[hostId].cpuUsage = host ? 10 + Math.floor(Math.random() * 30) : 15;
-        state.modifiedStates[hostId].memUsage = host ? 15 + Math.floor(Math.random() * 30) : 20;
+        state.modifiedStates[nodeName].status = 'running';
+        state.modifiedStates[nodeName].cpuUsage = host ? 10 + Math.floor(Math.random() * 30) : 15;
+        state.modifiedStates[nodeName].memUsage = host ? 15 + Math.floor(Math.random() * 30) : 20;
         break;
       case 'maintenance':
-        state.modifiedStates[hostId].status = 'maintenance';
-        state.modifiedStates[hostId].cpuUsage = Math.floor(Math.random() * 20);
-        state.modifiedStates[hostId].memUsage = Math.floor(Math.random() * 15);
+        state.modifiedStates[nodeName].status = 'maintenance';
+        state.modifiedStates[nodeName].cpuUsage = Math.floor(Math.random() * 20);
+        state.modifiedStates[nodeName].memUsage = Math.floor(Math.random() * 15);
         break;
     }
 
@@ -659,10 +639,10 @@
     // Refresh drawer if open
     var drawer = $('ch-detail-drawer');
     if (drawer && drawer.classList.contains('open')) {
-      showDetail(hostId);
+      showDetail(nodeName);
     }
 
-    showToast(actionLabels[action] + '：演示操作已完成，未调用真实云平台', 'success');
+    showToast(actionLabels[action] + '：演示模式（模拟操作，已记录本地修改）', 'success');
   }
 
   // ── Init ──
@@ -671,15 +651,12 @@
     var params = new URLSearchParams(window.location.search);
     state.scope = params.get('scope') === 'private' ? 'private' : 'public';
 
-    // Generate all hosts
-    state.allHosts = generateAllHosts(state.scope);
-
     // Load localStorage
     loadFromLocalStorage();
 
     // Update page title and header
-    var config = getScopeConfig();
     var scopeLabel = state.scope === 'private' ? '私有云' : '公有云';
+    var providerLabel = state.scope === 'private' ? 'VMware/通用REST' : '阿里云/腾讯云';
 
     document.title = scopeLabel + '主机列表 - AIGV Studio';
 
@@ -689,35 +666,23 @@
     var chip = $('ch-summary-chip');
     var hostStatus = $('host-data-status');
 
-    if (badge) badge.textContent = scopeLabel + ' · ' + config.count + ' Hosts';
+    if (badge) badge.textContent = scopeLabel + ' · Cloud Hosts';
     if (title) title.textContent = scopeLabel + '主机列表';
-    if (desc) desc.textContent = '统一管理' + (scopeLabel === '公有云' ? '阿里云/腾讯云/AWS/Azure' : '武汉五大区域') + '云主机资源，查看运行状态与资源使用情况';
-    if (chip) chip.textContent = '共计 ' + config.count + ' 台主机';
-    if (hostStatus) hostStatus.textContent = '数据面板：' + scopeLabel + ' · ' + config.count + ' 台主机';
+    if (desc) desc.textContent = '统一管理' + providerLabel + '云主机资源，查看运行状态与资源使用情况';
+    if (chip) chip.textContent = '数据来源：GET /api/cloud/hosts';
+    if (hostStatus) hostStatus.textContent = '数据面板：' + scopeLabel + ' · Cloud Hosts';
 
-    // Render all sections
-    renderSummary();
-
-    // Set initial sort asc
-    state.sortAsc = true;
-    state.sortField = 'name';
-    applyFiltersAndRender();
-
-    // Render filter bar (has its own HTML)
+    // Render filter bar first (empty state, then populated on load)
     renderFilterBar();
 
-    // Bind events
+    // Bind search events
     var searchEl = $('ch-search-input');
     if (searchEl) {
       searchEl.addEventListener('input', handleSearchInput);
     }
 
-    var vendorEl = $('ch-filter-vendor');
-    var regionEl = $('ch-filter-region');
-    var statusEl = $('ch-filter-status');
-    if (vendorEl) vendorEl.addEventListener('change', handleFilter);
-    if (regionEl) regionEl.addEventListener('change', handleFilter);
-    if (statusEl) statusEl.addEventListener('change', handleFilter);
+    // Bind filter events
+    bindFilterEvents();
 
     // Drawer close
     var closeBtn = $('ch-drawer-close');
@@ -728,7 +693,17 @@
       if (e.key === 'Escape') closeDetailDrawer();
     });
 
-    showToast(scopeLabel + '主机列表加载完成（' + config.count + ' 台）', 'success');
+    // Load data from API
+    loadHosts();
+  }
+
+  function bindFilterEvents() {
+    var vendorEl = $('ch-filter-vendor');
+    var regionEl = $('ch-filter-region');
+    var statusEl = $('ch-filter-status');
+    if (vendorEl) vendorEl.addEventListener('change', handleFilter);
+    if (regionEl) regionEl.addEventListener('change', handleFilter);
+    if (statusEl) statusEl.addEventListener('change', handleFilter);
   }
 
   // ── Expose public API ──

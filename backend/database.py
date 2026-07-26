@@ -50,6 +50,13 @@ class Database(object):
         # Initialize database schema
         self._init_schema()
 
+    def _ensure_column(self, cursor, table, col_name, col_type):
+        """Add a column to a table if it doesn't already exist."""
+        try:
+            cursor.execute('SELECT {0} FROM {1} LIMIT 1'.format(col_name, table))
+        except sqlite3.OperationalError:
+            cursor.execute('ALTER TABLE {0} ADD COLUMN {1} {2}'.format(table, col_name, col_type))
+
     def _get_connection(self):
         """Get thread-local database connection."""
         if not hasattr(self._local, 'conn') or self._local.conn is None:
@@ -67,6 +74,10 @@ class Database(object):
         """Initialize database schema."""
         conn = self._get_connection()
         cursor = conn.cursor()
+
+        # Enable WAL mode for better concurrent read/write performance
+        cursor.execute('PRAGMA journal_mode=WAL')
+        cursor.execute('PRAGMA busy_timeout=5000')
 
         # Assets table (3D models, images, prompt documents)
         cursor.execute('''
@@ -374,6 +385,141 @@ class Database(object):
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_billing_project ON billing_usage_records(project_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_ops_project ON ops_events(project_id)')
 
+        # ── Cloud Compute Tables (Phase 2) ──
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS cloud_accounts (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                provider_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                region_list TEXT,
+                enabled INTEGER DEFAULT 1,
+                config_metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS compute_nodes (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                provider_type TEXT,
+                external_id TEXT,
+                node_name TEXT NOT NULL,
+                host_name TEXT,
+                ip_address TEXT,
+                region TEXT,
+                zone TEXT,
+                cluster_name TEXT,
+                cpu_cores INTEGER DEFAULT 0,
+                memory_mb INTEGER DEFAULT 0,
+                disk_gb INTEGER DEFAULT 0,
+                gpu_type TEXT,
+                gpu_count INTEGER DEFAULT 0,
+                gpu_memory_mb INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'online',
+                schedulable INTEGER DEFAULT 1,
+                last_heartbeat_at INTEGER,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS node_metric_samples (
+                id TEXT PRIMARY KEY,
+                node_id TEXT NOT NULL,
+                sampled_at INTEGER NOT NULL,
+                cpu_percent REAL,
+                memory_percent REAL,
+                gpu_percent REAL,
+                gpu_memory_percent REAL,
+                gpu_temperature REAL,
+                disk_read_bps REAL,
+                disk_write_bps REAL,
+                network_rx_bps REAL,
+                network_tx_bps REAL,
+                latency_ms REAL,
+                packet_loss_percent REAL,
+                running_tasks INTEGER DEFAULT 0,
+                metadata TEXT,
+                FOREIGN KEY (node_id) REFERENCES compute_nodes(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS render_jobs (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                project_id TEXT,
+                node_id TEXT,
+                engine_type TEXT DEFAULT 'blender_anchor',
+                asset_id TEXT,
+                status TEXT DEFAULT 'pending',
+                progress INTEGER DEFAULT 0,
+                input_spec TEXT,
+                output_dir TEXT,
+                output_files TEXT,
+                error_message TEXT,
+                started_at INTEGER,
+                finished_at INTEGER,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                FOREIGN KEY (node_id) REFERENCES compute_nodes(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS scheduler_policies (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                name TEXT NOT NULL,
+                policy_type TEXT,
+                scoring_weights TEXT,
+                rules TEXT,
+                enabled INTEGER DEFAULT 1,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS health_checks (
+                id TEXT PRIMARY KEY,
+                target_type TEXT,
+                target_id TEXT,
+                status TEXT DEFAULT 'ok',
+                latency_ms REAL,
+                error_message TEXT,
+                checked_at INTEGER,
+                created_at INTEGER
+            )
+        ''')
+
+        # Cloud compute indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_compute_nodes_status ON compute_nodes(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_compute_nodes_tenant ON compute_nodes(tenant_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_node_metrics_node ON node_metric_samples(node_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_node_metrics_sampled ON node_metric_samples(node_id, sampled_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_render_jobs_status ON render_jobs(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_render_jobs_project ON render_jobs(project_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_health_checks_target ON health_checks(target_type, target_id)')
+
+        # Migration: add new columns to billing_usage_records if they don't exist
+        self._ensure_column(cursor, 'billing_usage_records', 'render_job_id', 'TEXT')
+        self._ensure_column(cursor, 'billing_usage_records', 'node_id', 'TEXT')
+        self._ensure_column(cursor, 'billing_usage_records', 'provider', 'TEXT')
+        self._ensure_column(cursor, 'billing_usage_records', 'usage_seconds', 'REAL')
+        self._ensure_column(cursor, 'billing_usage_records', 'unit_price', 'REAL')
+
         # ── Creative Production Tables ──
 
         cursor.execute('''
@@ -538,6 +684,113 @@ class Database(object):
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_task_artifacts_task ON task_artifacts(task_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_export_packages_project ON export_packages(creative_project_id)')
 
+        # ── Phase 3: Alerting & Task Management Tables ──
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS alert_rules (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                rule_type TEXT NOT NULL,
+                target_type TEXT,
+                metric_name TEXT,
+                operator TEXT,
+                threshold REAL,
+                duration_s INTEGER DEFAULT 30,
+                severity TEXT DEFAULT 'warning',
+                enabled INTEGER DEFAULT 1,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS alerts (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                rule_id TEXT,
+                target_type TEXT,
+                target_id TEXT,
+                metric_name TEXT,
+                current_value REAL,
+                threshold_value REAL,
+                status TEXT DEFAULT 'open',
+                severity TEXT DEFAULT 'warning',
+                first_triggered_at INTEGER,
+                last_triggered_at INTEGER,
+                recovered_at INTEGER,
+                closed_at INTEGER,
+                acknowledged_by TEXT,
+                closed_by TEXT,
+                notes TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+                FOREIGN KEY (rule_id) REFERENCES alert_rules(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS alert_events (
+                id TEXT PRIMARY KEY,
+                alert_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                user_id TEXT,
+                message TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                FOREIGN KEY (alert_id) REFERENCES alerts(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS task_attempts (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                attempt_number INTEGER DEFAULT 1,
+                node_id TEXT,
+                allocation_id TEXT,
+                status TEXT DEFAULT 'pending',
+                started_at INTEGER,
+                finished_at INTEGER,
+                error_message TEXT,
+                metadata TEXT,
+                created_at INTEGER,
+                FOREIGN KEY (job_id) REFERENCES job_history(id),
+                FOREIGN KEY (node_id) REFERENCES compute_nodes(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS auth_users (
+                id TEXT PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT,
+                password_hash TEXT NOT NULL,
+                tenant_id TEXT,
+                user_id TEXT,
+                is_active INTEGER DEFAULT 1,
+                last_login_at INTEGER,
+                failed_login_count INTEGER DEFAULT 0,
+                locked_until INTEGER,
+                created_at INTEGER,
+                updated_at INTEGER
+            )
+        ''')
+
+        # Phase 3 indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_rules_tenant ON alert_rules(tenant_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_rules_type ON alert_rules(rule_type)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_alerts_target ON alerts(target_type, target_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_alerts_tenant ON alerts(tenant_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_events_alert ON alert_events(alert_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_task_attempts_job ON task_attempts(job_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_auth_users_username ON auth_users(username)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_auth_users_tenant ON auth_users(tenant_id)')
+
         conn.commit()
         logger.info("Database schema initialized at %s", self.db_path)
 
@@ -690,6 +943,18 @@ class Database(object):
             query = 'SELECT COUNT(*) as cnt FROM {0}'.format(table)
             row = self.fetch_one(query)
         return row['cnt'] if row else 0
+
+    def execute_with_retry(self, query, params=None, max_retries=3):
+        """Execute a query with retry on database locked error."""
+        for attempt in range(max_retries):
+            try:
+                return self.execute(query, params)
+            except sqlite3.OperationalError as e:
+                if 'locked' in str(e).lower() and attempt < max_retries - 1:
+                    import time
+                    time.sleep(0.1 * (attempt + 1))
+                    continue
+                raise
 
     def close(self):
         """Close database connection."""

@@ -47,3 +47,7 @@ data/users.json
 # Blender backup files
 *.blend1
 *.blend2
+
+# SQLite WAL/Journal (runtime artifacts)
+data/aigv.db-shm
+data/aigv.db-wal

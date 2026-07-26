@@ -43,8 +43,23 @@ class DemoSeedService(object):
         project = Project(id='project_mid_demo', tenant_id=tenant.id, name='中期汇报沉浸式样片', code='mid-demo', status='active', render_mode='cinematic', metadata={'package_status': 'demo_ready', 'usage_scope': 'client_review'})
         _insert_if_missing(self.db, Project.TABLE_NAME, project.id, project.to_insert_params())
 
-        membership_1 = ProjectMembership(id='membership_owner_demo', project_id=project.id, user_id=user_admin.id, tenant_id=tenant.id, role='owner', permissions=['submit_job', 'approve_rights', 'view_billing'])
-        membership_2 = ProjectMembership(id='membership_pm_demo', project_id=project.id, user_id=user_pm.id, tenant_id=tenant.id, role='editor', permissions=['submit_job', 'view_monitor'])
+        membership_1 = ProjectMembership(
+            id='membership_owner_demo', project_id=project.id, user_id=user_admin.id,
+            tenant_id=tenant.id, role='owner',
+            permissions=[
+                'submit_job', 'approve_rights', 'view_billing',
+                'view_compute', 'manage_compute', 'submit_render_job',
+                'manage_cloud_accounts', 'view_monitor'
+            ]
+        )
+        membership_2 = ProjectMembership(
+            id='membership_pm_demo', project_id=project.id, user_id=user_pm.id,
+            tenant_id=tenant.id, role='editor',
+            permissions=[
+                'submit_job', 'view_monitor', 'view_compute',
+                'submit_render_job', 'view_billing'
+            ]
+        )
         _insert_if_missing(self.db, ProjectMembership.TABLE_NAME, membership_1.id, membership_1.to_insert_params())
         _insert_if_missing(self.db, ProjectMembership.TABLE_NAME, membership_2.id, membership_2.to_insert_params())
 

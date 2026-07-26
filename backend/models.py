@@ -1069,7 +1069,11 @@ class BillingAccount(BaseModel):
 
 class BillingUsageRecord(BaseModel):
     TABLE_NAME = 'billing_usage_records'
-    COLUMNS = ['id', 'job_id', 'tenant_id', 'project_id', 'amount', 'currency', 'usage_type', 'usage_units', 'metadata', 'created_at', 'updated_at']
+    COLUMNS = [
+        'id', 'job_id', 'tenant_id', 'project_id', 'amount', 'currency',
+        'usage_type', 'usage_units', 'render_job_id', 'node_id', 'provider',
+        'usage_seconds', 'unit_price', 'metadata', 'created_at', 'updated_at'
+    ]
 
     def __init__(self, **kwargs):
         self.id = kwargs.get('id') or _generate_id()
@@ -1080,6 +1084,11 @@ class BillingUsageRecord(BaseModel):
         self.currency = kwargs.get('currency')
         self.usage_type = kwargs.get('usage_type')
         self.usage_units = kwargs.get('usage_units', 0.0)
+        self.render_job_id = kwargs.get('render_job_id')
+        self.node_id = kwargs.get('node_id')
+        self.provider = kwargs.get('provider')
+        self.usage_seconds = kwargs.get('usage_seconds')
+        self.unit_price = kwargs.get('unit_price')
         self.metadata = kwargs.get('metadata')
         self.created_at = kwargs.get('created_at') or _now()
         self.updated_at = kwargs.get('updated_at') or _now()
@@ -1097,6 +1106,11 @@ class BillingUsageRecord(BaseModel):
             currency=row.get('currency'),
             usage_type=row.get('usage_type'),
             usage_units=row.get('usage_units'),
+            render_job_id=row.get('render_job_id'),
+            node_id=row.get('node_id'),
+            provider=row.get('provider'),
+            usage_seconds=row.get('usage_seconds'),
+            unit_price=row.get('unit_price'),
             metadata=_json_loads(row.get('metadata')),
             created_at=row.get('created_at'),
             updated_at=row.get('updated_at')
@@ -1112,6 +1126,11 @@ class BillingUsageRecord(BaseModel):
             'currency': self.currency,
             'usage_type': self.usage_type,
             'usage_units': self.usage_units,
+            'render_job_id': self.render_job_id,
+            'node_id': self.node_id,
+            'provider': self.provider,
+            'usage_seconds': self.usage_seconds,
+            'unit_price': self.unit_price,
             'metadata': self.metadata,
             'created_at': self.created_at,
             'updated_at': self.updated_at
@@ -1127,6 +1146,11 @@ class BillingUsageRecord(BaseModel):
             'currency': self.currency,
             'usage_type': self.usage_type,
             'usage_units': self.usage_units,
+            'render_job_id': self.render_job_id,
+            'node_id': self.node_id,
+            'provider': self.provider,
+            'usage_seconds': self.usage_seconds,
+            'unit_price': self.unit_price,
             'metadata': _json_dumps(self.metadata),
             'created_at': self.created_at,
             'updated_at': self.updated_at
@@ -1765,6 +1789,525 @@ class TimelineClip(BaseModel):
         }
 
 
+# ── Cloud Compute Models ──
+
+
+class CloudAccount(BaseModel):
+    """Cloud provider account configuration (credentials stored in env, never in DB)."""
+    TABLE_NAME = 'cloud_accounts'
+
+    PROVIDER_ALIYUN = 'aliyun'
+    PROVIDER_TENCENT = 'tencent'
+    PROVIDER_VMWARE = 'vmware'
+    PROVIDER_GENERIC_REST = 'generic_rest'
+
+    COLUMNS = [
+        'id', 'tenant_id', 'provider_type', 'name', 'region_list',
+        'enabled', 'config_metadata', 'created_at', 'updated_at'
+    ]
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.tenant_id = kwargs.get('tenant_id')
+        self.provider_type = kwargs.get('provider_type', '')
+        self.name = kwargs.get('name', '')
+        self.region_list = kwargs.get('region_list')
+        self.enabled = kwargs.get('enabled', 1)
+        self.config_metadata = kwargs.get('config_metadata')
+        self.created_at = kwargs.get('created_at') or _now()
+        self.updated_at = kwargs.get('updated_at') or _now()
+
+    @classmethod
+    def from_row(cls, row):
+        if row is None:
+            return None
+        return cls(
+            id=row.get('id'),
+            tenant_id=row.get('tenant_id'),
+            provider_type=row.get('provider_type'),
+            name=row.get('name'),
+            region_list=_json_loads(row.get('region_list')),
+            enabled=row.get('enabled', 1),
+            config_metadata=_json_loads(row.get('config_metadata')),
+            created_at=row.get('created_at'),
+            updated_at=row.get('updated_at')
+        )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'provider_type': self.provider_type,
+            'name': self.name,
+            'region_list': self.region_list,
+            'enabled': bool(self.enabled),
+            'config_metadata': self.config_metadata,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
+
+    def to_insert_params(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'provider_type': self.provider_type,
+            'name': self.name,
+            'region_list': _json_dumps(self.region_list),
+            'enabled': 1 if self.enabled else 0,
+            'config_metadata': _json_dumps(self.config_metadata),
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
+
+
+class ComputeNode(BaseModel):
+    """Compute node registered from cloud providers or node agent."""
+    TABLE_NAME = 'compute_nodes'
+
+    STATUS_ONLINE = 'online'
+    STATUS_OFFLINE = 'offline'
+    STATUS_ERROR = 'error'
+    STATUS_MAINTENANCE = 'maintenance'
+
+    COLUMNS = [
+        'id', 'tenant_id', 'provider_type', 'external_id', 'node_name',
+        'host_name', 'ip_address', 'region', 'zone', 'cluster_name',
+        'cpu_cores', 'memory_mb', 'disk_gb', 'gpu_type', 'gpu_count',
+        'gpu_memory_mb', 'status', 'schedulable', 'last_heartbeat_at',
+        'metadata', 'created_at', 'updated_at'
+    ]
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.tenant_id = kwargs.get('tenant_id')
+        self.provider_type = kwargs.get('provider_type')
+        self.external_id = kwargs.get('external_id')
+        self.node_name = kwargs.get('node_name', '')
+        self.host_name = kwargs.get('host_name')
+        self.ip_address = kwargs.get('ip_address')
+        self.region = kwargs.get('region')
+        self.zone = kwargs.get('zone')
+        self.cluster_name = kwargs.get('cluster_name')
+        self.cpu_cores = kwargs.get('cpu_cores', 0)
+        self.memory_mb = kwargs.get('memory_mb', 0)
+        self.disk_gb = kwargs.get('disk_gb', 0)
+        self.gpu_type = kwargs.get('gpu_type')
+        self.gpu_count = kwargs.get('gpu_count', 0)
+        self.gpu_memory_mb = kwargs.get('gpu_memory_mb', 0)
+        self.status = kwargs.get('status', self.STATUS_ONLINE)
+        self.schedulable = kwargs.get('schedulable', 1)
+        self.last_heartbeat_at = kwargs.get('last_heartbeat_at')
+        self.metadata = kwargs.get('metadata')
+        self.created_at = kwargs.get('created_at') or _now()
+        self.updated_at = kwargs.get('updated_at') or _now()
+
+    @classmethod
+    def from_row(cls, row):
+        if row is None:
+            return None
+        return cls(
+            id=row.get('id'),
+            tenant_id=row.get('tenant_id'),
+            provider_type=row.get('provider_type'),
+            external_id=row.get('external_id'),
+            node_name=row.get('node_name'),
+            host_name=row.get('host_name'),
+            ip_address=row.get('ip_address'),
+            region=row.get('region'),
+            zone=row.get('zone'),
+            cluster_name=row.get('cluster_name'),
+            cpu_cores=row.get('cpu_cores'),
+            memory_mb=row.get('memory_mb'),
+            disk_gb=row.get('disk_gb'),
+            gpu_type=row.get('gpu_type'),
+            gpu_count=row.get('gpu_count'),
+            gpu_memory_mb=row.get('gpu_memory_mb'),
+            status=row.get('status'),
+            schedulable=row.get('schedulable'),
+            last_heartbeat_at=row.get('last_heartbeat_at'),
+            metadata=_json_loads(row.get('metadata')),
+            created_at=row.get('created_at'),
+            updated_at=row.get('updated_at')
+        )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'provider_type': self.provider_type,
+            'external_id': self.external_id,
+            'node_name': self.node_name,
+            'host_name': self.host_name,
+            'ip_address': self.ip_address,
+            'region': self.region,
+            'zone': self.zone,
+            'cluster_name': self.cluster_name,
+            'cpu_cores': self.cpu_cores,
+            'memory_mb': self.memory_mb,
+            'disk_gb': self.disk_gb,
+            'gpu_type': self.gpu_type,
+            'gpu_count': self.gpu_count,
+            'gpu_memory_mb': self.gpu_memory_mb,
+            'status': self.status,
+            'schedulable': bool(self.schedulable),
+            'last_heartbeat_at': self.last_heartbeat_at,
+            'metadata': self.metadata,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
+
+    def to_insert_params(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'provider_type': self.provider_type,
+            'external_id': self.external_id,
+            'node_name': self.node_name,
+            'host_name': self.host_name,
+            'ip_address': self.ip_address,
+            'region': self.region,
+            'zone': self.zone,
+            'cluster_name': self.cluster_name,
+            'cpu_cores': self.cpu_cores,
+            'memory_mb': self.memory_mb,
+            'disk_gb': self.disk_gb,
+            'gpu_type': self.gpu_type,
+            'gpu_count': self.gpu_count,
+            'gpu_memory_mb': self.gpu_memory_mb,
+            'status': self.status,
+            'schedulable': 1 if self.schedulable else 0,
+            'last_heartbeat_at': self.last_heartbeat_at,
+            'metadata': _json_dumps(self.metadata),
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
+
+
+class NodeMetricSample(BaseModel):
+    """Time-series metrics collected from compute nodes."""
+    TABLE_NAME = 'node_metric_samples'
+
+    COLUMNS = [
+        'id', 'node_id', 'sampled_at', 'cpu_percent', 'memory_percent',
+        'gpu_percent', 'gpu_memory_percent', 'gpu_temperature',
+        'disk_read_bps', 'disk_write_bps', 'network_rx_bps',
+        'network_tx_bps', 'latency_ms', 'packet_loss_percent',
+        'running_tasks', 'metadata'
+    ]
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.node_id = kwargs.get('node_id')
+        self.sampled_at = kwargs.get('sampled_at') or _now()
+        self.cpu_percent = kwargs.get('cpu_percent')
+        self.memory_percent = kwargs.get('memory_percent')
+        self.gpu_percent = kwargs.get('gpu_percent')
+        self.gpu_memory_percent = kwargs.get('gpu_memory_percent')
+        self.gpu_temperature = kwargs.get('gpu_temperature')
+        self.disk_read_bps = kwargs.get('disk_read_bps')
+        self.disk_write_bps = kwargs.get('disk_write_bps')
+        self.network_rx_bps = kwargs.get('network_rx_bps')
+        self.network_tx_bps = kwargs.get('network_tx_bps')
+        self.latency_ms = kwargs.get('latency_ms')
+        self.packet_loss_percent = kwargs.get('packet_loss_percent')
+        self.running_tasks = kwargs.get('running_tasks', 0)
+        self.metadata = kwargs.get('metadata')
+
+    @classmethod
+    def from_row(cls, row):
+        if row is None:
+            return None
+        return cls(
+            id=row.get('id'),
+            node_id=row.get('node_id'),
+            sampled_at=row.get('sampled_at'),
+            cpu_percent=row.get('cpu_percent'),
+            memory_percent=row.get('memory_percent'),
+            gpu_percent=row.get('gpu_percent'),
+            gpu_memory_percent=row.get('gpu_memory_percent'),
+            gpu_temperature=row.get('gpu_temperature'),
+            disk_read_bps=row.get('disk_read_bps'),
+            disk_write_bps=row.get('disk_write_bps'),
+            network_rx_bps=row.get('network_rx_bps'),
+            network_tx_bps=row.get('network_tx_bps'),
+            latency_ms=row.get('latency_ms'),
+            packet_loss_percent=row.get('packet_loss_percent'),
+            running_tasks=row.get('running_tasks'),
+            metadata=_json_loads(row.get('metadata'))
+        )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'node_id': self.node_id,
+            'sampled_at': self.sampled_at,
+            'cpu_percent': self.cpu_percent,
+            'memory_percent': self.memory_percent,
+            'gpu_percent': self.gpu_percent,
+            'gpu_memory_percent': self.gpu_memory_percent,
+            'gpu_temperature': self.gpu_temperature,
+            'disk_read_bps': self.disk_read_bps,
+            'disk_write_bps': self.disk_write_bps,
+            'network_rx_bps': self.network_rx_bps,
+            'network_tx_bps': self.network_tx_bps,
+            'latency_ms': self.latency_ms,
+            'packet_loss_percent': self.packet_loss_percent,
+            'running_tasks': self.running_tasks,
+            'metadata': self.metadata
+        }
+
+    def to_insert_params(self):
+        return {
+            'id': self.id,
+            'node_id': self.node_id,
+            'sampled_at': self.sampled_at,
+            'cpu_percent': self.cpu_percent,
+            'memory_percent': self.memory_percent,
+            'gpu_percent': self.gpu_percent,
+            'gpu_memory_percent': self.gpu_memory_percent,
+            'gpu_temperature': self.gpu_temperature,
+            'disk_read_bps': self.disk_read_bps,
+            'disk_write_bps': self.disk_write_bps,
+            'network_rx_bps': self.network_rx_bps,
+            'network_tx_bps': self.network_tx_bps,
+            'latency_ms': self.latency_ms,
+            'packet_loss_percent': self.packet_loss_percent,
+            'running_tasks': self.running_tasks,
+            'metadata': _json_dumps(self.metadata)
+        }
+
+
+class RenderJob(BaseModel):
+    """Render job tracking for Blender rendering tasks."""
+    TABLE_NAME = 'render_jobs'
+
+    STATUS_PENDING = 'pending'
+    STATUS_RENDERING = 'rendering'
+    STATUS_SUCCEEDED = 'succeeded'
+    STATUS_FAILED = 'failed'
+    STATUS_CANCELLED = 'cancelled'
+
+    COLUMNS = [
+        'id', 'tenant_id', 'project_id', 'node_id', 'engine_type',
+        'asset_id', 'status', 'progress', 'input_spec', 'output_dir',
+        'output_files', 'error_message', 'started_at', 'finished_at',
+        'created_at', 'updated_at'
+    ]
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.tenant_id = kwargs.get('tenant_id')
+        self.project_id = kwargs.get('project_id')
+        self.node_id = kwargs.get('node_id')
+        self.engine_type = kwargs.get('engine_type', 'blender_anchor')
+        self.asset_id = kwargs.get('asset_id')
+        self.status = kwargs.get('status', self.STATUS_PENDING)
+        self.progress = kwargs.get('progress', 0)
+        self.input_spec = kwargs.get('input_spec')
+        self.output_dir = kwargs.get('output_dir')
+        self.output_files = kwargs.get('output_files')
+        self.error_message = kwargs.get('error_message')
+        self.started_at = kwargs.get('started_at')
+        self.finished_at = kwargs.get('finished_at')
+        self.created_at = kwargs.get('created_at') or _now()
+        self.updated_at = kwargs.get('updated_at') or _now()
+
+    @classmethod
+    def from_row(cls, row):
+        if row is None:
+            return None
+        return cls(
+            id=row.get('id'),
+            tenant_id=row.get('tenant_id'),
+            project_id=row.get('project_id'),
+            node_id=row.get('node_id'),
+            engine_type=row.get('engine_type'),
+            asset_id=row.get('asset_id'),
+            status=row.get('status'),
+            progress=row.get('progress'),
+            input_spec=_json_loads(row.get('input_spec')),
+            output_dir=row.get('output_dir'),
+            output_files=_json_loads(row.get('output_files')),
+            error_message=row.get('error_message'),
+            started_at=row.get('started_at'),
+            finished_at=row.get('finished_at'),
+            created_at=row.get('created_at'),
+            updated_at=row.get('updated_at')
+        )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'project_id': self.project_id,
+            'node_id': self.node_id,
+            'engine_type': self.engine_type,
+            'asset_id': self.asset_id,
+            'status': self.status,
+            'progress': self.progress,
+            'input_spec': self.input_spec,
+            'output_dir': self.output_dir,
+            'output_files': self.output_files,
+            'error_message': self.error_message,
+            'started_at': self.started_at,
+            'finished_at': self.finished_at,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
+
+    def to_insert_params(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'project_id': self.project_id,
+            'node_id': self.node_id,
+            'engine_type': self.engine_type,
+            'asset_id': self.asset_id,
+            'status': self.status,
+            'progress': self.progress,
+            'input_spec': _json_dumps(self.input_spec),
+            'output_dir': self.output_dir,
+            'output_files': _json_dumps(self.output_files),
+            'error_message': self.error_message,
+            'started_at': self.started_at,
+            'finished_at': self.finished_at,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
+
+
+class SchedulerPolicy(BaseModel):
+    """Scheduler scoring algorithm configuration."""
+    TABLE_NAME = 'scheduler_policies'
+
+    POLICY_LOWEST_COST = 'lowest_cost'
+    POLICY_LOWEST_LATENCY = 'lowest_latency'
+    POLICY_SHORTEST_QUEUE = 'shortest_queue'
+    POLICY_HIGHEST_PERFORMANCE = 'highest_performance'
+    POLICY_LOCAL_FIRST = 'local_first'
+
+    COLUMNS = [
+        'id', 'tenant_id', 'name', 'policy_type', 'scoring_weights',
+        'rules', 'enabled', 'created_at', 'updated_at'
+    ]
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.tenant_id = kwargs.get('tenant_id')
+        self.name = kwargs.get('name', '')
+        self.policy_type = kwargs.get('policy_type')
+        self.scoring_weights = kwargs.get('scoring_weights')
+        self.rules = kwargs.get('rules')
+        self.enabled = kwargs.get('enabled', 1)
+        self.created_at = kwargs.get('created_at') or _now()
+        self.updated_at = kwargs.get('updated_at') or _now()
+
+    @classmethod
+    def from_row(cls, row):
+        if row is None:
+            return None
+        return cls(
+            id=row.get('id'),
+            tenant_id=row.get('tenant_id'),
+            name=row.get('name'),
+            policy_type=row.get('policy_type'),
+            scoring_weights=_json_loads(row.get('scoring_weights')),
+            rules=_json_loads(row.get('rules')),
+            enabled=row.get('enabled', 1),
+            created_at=row.get('created_at'),
+            updated_at=row.get('updated_at')
+        )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'name': self.name,
+            'policy_type': self.policy_type,
+            'scoring_weights': self.scoring_weights,
+            'rules': self.rules,
+            'enabled': bool(self.enabled),
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
+
+    def to_insert_params(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'name': self.name,
+            'policy_type': self.policy_type,
+            'scoring_weights': _json_dumps(self.scoring_weights),
+            'rules': _json_dumps(self.rules),
+            'enabled': 1 if self.enabled else 0,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
+
+
+class HealthCheck(BaseModel):
+    """Health check records for nodes and services."""
+    TABLE_NAME = 'health_checks'
+
+    STATUS_OK = 'ok'
+    STATUS_ERROR = 'error'
+    STATUS_WARNING = 'warning'
+
+    COLUMNS = [
+        'id', 'target_type', 'target_id', 'status', 'latency_ms',
+        'error_message', 'checked_at', 'created_at'
+    ]
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.target_type = kwargs.get('target_type')
+        self.target_id = kwargs.get('target_id')
+        self.status = kwargs.get('status', self.STATUS_OK)
+        self.latency_ms = kwargs.get('latency_ms')
+        self.error_message = kwargs.get('error_message')
+        self.checked_at = kwargs.get('checked_at') or _now()
+        self.created_at = kwargs.get('created_at') or _now()
+
+    @classmethod
+    def from_row(cls, row):
+        if row is None:
+            return None
+        return cls(
+            id=row.get('id'),
+            target_type=row.get('target_type'),
+            target_id=row.get('target_id'),
+            status=row.get('status'),
+            latency_ms=row.get('latency_ms'),
+            error_message=row.get('error_message'),
+            checked_at=row.get('checked_at'),
+            created_at=row.get('created_at')
+        )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'target_type': self.target_type,
+            'target_id': self.target_id,
+            'status': self.status,
+            'latency_ms': self.latency_ms,
+            'error_message': self.error_message,
+            'checked_at': self.checked_at,
+            'created_at': self.created_at
+        }
+
+    def to_insert_params(self):
+        return {
+            'id': self.id,
+            'target_type': self.target_type,
+            'target_id': self.target_id,
+            'status': self.status,
+            'latency_ms': self.latency_ms,
+            'error_message': self.error_message,
+            'checked_at': self.checked_at,
+            'created_at': self.created_at
+        }
+
+
 class ExportPackage(BaseModel):
     TABLE_NAME = 'export_packages'
 
@@ -1847,3 +2390,268 @@ class ExportPackage(BaseModel):
             'updated_at': self.updated_at,
             'created_by': self.created_by,
         }
+
+
+# ── Phase 3 Models: Alerting, Task Attempts, Auth ──
+
+
+class AlertRule(BaseModel):
+    TABLE_NAME = 'alert_rules'
+    COLUMNS = ['id', 'tenant_id', 'rule_type', 'target_type', 'metric_name',
+               'operator', 'threshold', 'duration_s', 'severity', 'enabled',
+               'metadata', 'created_at', 'updated_at']
+
+    RULE_TYPE_THRESHOLD = 'threshold'
+    RULE_TYPE_HEARTBEAT = 'heartbeat'
+    RULE_TYPE_HEALTH_CHECK = 'health_check'
+    RULE_TYPE_BUDGET = 'budget'
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.tenant_id = kwargs.get('tenant_id')
+        self.rule_type = kwargs.get('rule_type', '')
+        self.target_type = kwargs.get('target_type')
+        self.metric_name = kwargs.get('metric_name')
+        self.operator = kwargs.get('operator', 'gt')
+        self.threshold = kwargs.get('threshold', 0)
+        self.duration_s = kwargs.get('duration_s', 30)
+        self.severity = kwargs.get('severity', 'warning')
+        self.enabled = kwargs.get('enabled', 1)
+        self.metadata = kwargs.get('metadata')
+        self.created_at = kwargs.get('created_at') or _now()
+        self.updated_at = kwargs.get('updated_at') or _now()
+
+    @classmethod
+    def from_row(cls, row):
+        return cls(
+            id=row['id'], tenant_id=row.get('tenant_id'),
+            rule_type=row['rule_type'], target_type=row.get('target_type'),
+            metric_name=row.get('metric_name'), operator=row.get('operator'),
+            threshold=row.get('threshold', 0), duration_s=row.get('duration_s', 30),
+            severity=row.get('severity', 'warning'), enabled=row.get('enabled', 1),
+            metadata=_json_loads(row.get('metadata')),
+            created_at=row.get('created_at'), updated_at=row.get('updated_at'),
+        )
+
+    def to_dict(self):
+        result = {}
+        for col in self.COLUMNS:
+            val = getattr(self, col, None)
+            if col == 'metadata':
+                result[col] = val
+            elif col == 'enabled':
+                result[col] = bool(val)
+            else:
+                result[col] = val
+        return result
+
+    def to_insert_params(self):
+        return {col: getattr(self, col) if col != 'metadata' else _json_dumps(getattr(self, col))
+                for col in self.COLUMNS}
+
+
+class Alert(BaseModel):
+    TABLE_NAME = 'alerts'
+    COLUMNS = ['id', 'tenant_id', 'rule_id', 'target_type', 'target_id', 'metric_name',
+               'current_value', 'threshold_value', 'status', 'severity',
+               'first_triggered_at', 'last_triggered_at', 'recovered_at', 'closed_at',
+               'acknowledged_by', 'closed_by', 'notes', 'metadata', 'created_at', 'updated_at']
+
+    STATUS_OPEN = 'open'
+    STATUS_ACKNOWLEDGED = 'acknowledged'
+    STATUS_PROCESSING = 'processing'
+    STATUS_RECOVERED = 'recovered'
+    STATUS_CLOSED = 'closed'
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.tenant_id = kwargs.get('tenant_id')
+        self.rule_id = kwargs.get('rule_id')
+        self.target_type = kwargs.get('target_type')
+        self.target_id = kwargs.get('target_id')
+        self.metric_name = kwargs.get('metric_name')
+        self.current_value = kwargs.get('current_value')
+        self.threshold_value = kwargs.get('threshold_value')
+        self.status = kwargs.get('status', 'open')
+        self.severity = kwargs.get('severity', 'warning')
+        self.first_triggered_at = kwargs.get('first_triggered_at')
+        self.last_triggered_at = kwargs.get('last_triggered_at')
+        self.recovered_at = kwargs.get('recovered_at')
+        self.closed_at = kwargs.get('closed_at')
+        self.acknowledged_by = kwargs.get('acknowledged_by')
+        self.closed_by = kwargs.get('closed_by')
+        self.notes = kwargs.get('notes')
+        self.metadata = kwargs.get('metadata')
+        self.created_at = kwargs.get('created_at') or _now()
+        self.updated_at = kwargs.get('updated_at') or _now()
+
+    @classmethod
+    def from_row(cls, row):
+        return cls(
+            id=row['id'], tenant_id=row.get('tenant_id'),
+            rule_id=row.get('rule_id'), target_type=row.get('target_type'),
+            target_id=row.get('target_id'), metric_name=row.get('metric_name'),
+            current_value=row.get('current_value'), threshold_value=row.get('threshold_value'),
+            status=row.get('status', 'open'), severity=row.get('severity', 'warning'),
+            first_triggered_at=row.get('first_triggered_at'), last_triggered_at=row.get('last_triggered_at'),
+            recovered_at=row.get('recovered_at'), closed_at=row.get('closed_at'),
+            acknowledged_by=row.get('acknowledged_by'), closed_by=row.get('closed_by'),
+            notes=row.get('notes'), metadata=_json_loads(row.get('metadata')),
+            created_at=row.get('created_at'), updated_at=row.get('updated_at'),
+        )
+
+    def to_dict(self):
+        result = {}
+        for col in self.COLUMNS:
+            val = getattr(self, col, None)
+            if col == 'metadata':
+                result[col] = val
+            else:
+                result[col] = val
+        return result
+
+    def to_insert_params(self):
+        return {col: getattr(self, col) if col != 'metadata' else _json_dumps(getattr(self, col))
+                for col in self.COLUMNS}
+
+
+class AlertEvent(BaseModel):
+    TABLE_NAME = 'alert_events'
+    COLUMNS = ['id', 'alert_id', 'event_type', 'user_id', 'message', 'metadata', 'created_at']
+
+    EVENT_TRIGGERED = 'triggered'
+    EVENT_ACKNOWLEDGED = 'acknowledged'
+    EVENT_ASSIGNED = 'assigned'
+    EVENT_RECOVERED = 'recovered'
+    EVENT_CLOSED = 'closed'
+    EVENT_COMMENTED = 'commented'
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.alert_id = kwargs.get('alert_id', '')
+        self.event_type = kwargs.get('event_type', '')
+        self.user_id = kwargs.get('user_id')
+        self.message = kwargs.get('message')
+        self.metadata = kwargs.get('metadata')
+        self.created_at = kwargs.get('created_at') or _now()
+
+    @classmethod
+    def from_row(cls, row):
+        return cls(
+            id=row['id'], alert_id=row['alert_id'],
+            event_type=row['event_type'], user_id=row.get('user_id'),
+            message=row.get('message'), metadata=_json_loads(row.get('metadata')),
+            created_at=row.get('created_at'),
+        )
+
+    def to_dict(self):
+        result = {}
+        for col in self.COLUMNS:
+            val = getattr(self, col, None)
+            if col == 'metadata':
+                result[col] = val
+            else:
+                result[col] = val
+        return result
+
+    def to_insert_params(self):
+        return {col: getattr(self, col) if col != 'metadata' else _json_dumps(getattr(self, col))
+                for col in self.COLUMNS}
+
+
+class TaskAttempt(BaseModel):
+    TABLE_NAME = 'task_attempts'
+    COLUMNS = ['id', 'job_id', 'attempt_number', 'node_id', 'allocation_id',
+               'status', 'started_at', 'finished_at', 'error_message', 'metadata', 'created_at']
+
+    STATUS_PENDING = 'pending'
+    STATUS_RUNNING = 'running'
+    STATUS_SUCCEEDED = 'succeeded'
+    STATUS_FAILED = 'failed'
+    STATUS_CANCELLED = 'cancelled'
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.job_id = kwargs.get('job_id', '')
+        self.attempt_number = kwargs.get('attempt_number', 1)
+        self.node_id = kwargs.get('node_id')
+        self.allocation_id = kwargs.get('allocation_id')
+        self.status = kwargs.get('status', 'pending')
+        self.started_at = kwargs.get('started_at')
+        self.finished_at = kwargs.get('finished_at')
+        self.error_message = kwargs.get('error_message')
+        self.metadata = kwargs.get('metadata')
+        self.created_at = kwargs.get('created_at') or _now()
+
+    @classmethod
+    def from_row(cls, row):
+        return cls(
+            id=row['id'], job_id=row['job_id'],
+            attempt_number=row.get('attempt_number', 1),
+            node_id=row.get('node_id'), allocation_id=row.get('allocation_id'),
+            status=row.get('status', 'pending'), started_at=row.get('started_at'),
+            finished_at=row.get('finished_at'), error_message=row.get('error_message'),
+            metadata=_json_loads(row.get('metadata')), created_at=row.get('created_at'),
+        )
+
+    def to_dict(self):
+        result = {}
+        for col in self.COLUMNS:
+            val = getattr(self, col, None)
+            if col == 'metadata':
+                result[col] = val
+            else:
+                result[col] = val
+        return result
+
+    def to_insert_params(self):
+        return {col: getattr(self, col) if col != 'metadata' else _json_dumps(getattr(self, col))
+                for col in self.COLUMNS}
+
+
+class AuthUser(BaseModel):
+    TABLE_NAME = 'auth_users'
+    COLUMNS = ['id', 'username', 'email', 'password_hash', 'tenant_id', 'user_id',
+               'is_active', 'last_login_at', 'failed_login_count', 'locked_until',
+               'created_at', 'updated_at']
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.username = kwargs.get('username', '')
+        self.email = kwargs.get('email')
+        self.password_hash = kwargs.get('password_hash', '')
+        self.tenant_id = kwargs.get('tenant_id')
+        self.user_id = kwargs.get('user_id')
+        self.is_active = kwargs.get('is_active', 1)
+        self.last_login_at = kwargs.get('last_login_at')
+        self.failed_login_count = kwargs.get('failed_login_count', 0)
+        self.locked_until = kwargs.get('locked_until')
+        self.created_at = kwargs.get('created_at') or _now()
+        self.updated_at = kwargs.get('updated_at') or _now()
+
+    @classmethod
+    def from_row(cls, row):
+        return cls(
+            id=row['id'], username=row['username'], email=row.get('email'),
+            password_hash=row['password_hash'], tenant_id=row.get('tenant_id'),
+            user_id=row.get('user_id'), is_active=row.get('is_active', 1),
+            last_login_at=row.get('last_login_at'),
+            failed_login_count=row.get('failed_login_count', 0),
+            locked_until=row.get('locked_until'),
+            created_at=row.get('created_at'), updated_at=row.get('updated_at'),
+        )
+
+    def to_dict(self):
+        result = {}
+        for col in self.COLUMNS:
+            val = getattr(self, col, None)
+            if col == 'password_hash':
+                continue  # Never expose password hash
+            if col == 'is_active':
+                result[col] = bool(val)
+            else:
+                result[col] = val
+        return result
+
+    def to_insert_params(self):
+        return {col: getattr(self, col) for col in self.COLUMNS}

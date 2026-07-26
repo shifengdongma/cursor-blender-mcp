@@ -43,6 +43,49 @@ def _normalize_choice(raw_value, allowed_values, default_value):
     return default_value
 
 
+def _record_task_attempt(job_id, status, node_id=None, error_message=None, metadata=None):
+    """Record a task execution attempt."""
+    try:
+        from .database import get_database
+        from .models import TaskAttempt
+
+        db = get_database(os.path.join(os.environ.get('DATA_DIR', './data'), 'aigv.db'))
+
+        # Count previous attempts
+        prev_attempts = db.count('task_attempts', 'job_id = ?', (job_id,))
+        attempt_number = prev_attempts + 1
+
+        attempt = TaskAttempt(
+            job_id=job_id,
+            attempt_number=attempt_number,
+            node_id=node_id,
+            status=status,
+            started_at=int(time.time()),
+            finished_at=int(time.time()) if status in ('succeeded', 'failed', 'cancelled') else None,
+            error_message=error_message,
+            metadata=metadata or {},
+        )
+        db.insert(TaskAttempt.TABLE_NAME, attempt.to_insert_params())
+        return attempt.to_dict()
+    except Exception as e:
+        logger.warning("Failed to record task attempt: %s", str(e))
+        return None
+
+
+MAX_RETRY_ATTEMPTS = 3
+
+
+def _should_retry(job_id):
+    """Check if a job should be retried."""
+    try:
+        from .database import get_database
+        db = get_database(os.path.join(os.environ.get('DATA_DIR', './data'), 'aigv.db'))
+        attempts = db.count('task_attempts', 'job_id = ?', (job_id,))
+        return attempts < MAX_RETRY_ATTEMPTS
+    except Exception:
+        return False
+
+
 JOB_STAGE_ORDER = [
     "queued",
     "knowledge_ready",
@@ -451,6 +494,55 @@ def start_job_worker(job_store, job_id, cfg, prompt_orchestrator):
             logger.exception("Job %s failed with exception: %s", job_id, str(e))
             if result is None:
                 result = _empty_result()
+
+            # Record task attempt
+            schedule_node = None
+            if schedule_result:
+                schedule_node = schedule_result.get("node", {}).get("id")
+                schedule_node = schedule_node or schedule_result.get("node_id")
+            _record_task_attempt(
+                job_id=job_id,
+                status="failed",
+                node_id=schedule_node,
+                error_message=str(e),
+                metadata={"stage": result.get("stage"), "exception": str(e)},
+            )
+
+            # Attempt re-scheduling if appropriate
+            if _should_retry(job_id):
+                try:
+                    re_schedule_result = scheduler_service.re_schedule(job_id)
+                    if re_schedule_result and re_schedule_result.get("status") == "rescheduled":
+                        new_node_id = re_schedule_result.get("node", {}).get("id")
+                        logger.info(
+                            "Re-scheduling job %s to node %s (attempt %d)",
+                            job_id, new_node_id, _should_retry(job_id) + 1,
+                        )
+                        # Record ops event for re-scheduling switch
+                        result["ops_events"].append(
+                            ops_service.record_event(
+                                payload.get("tenant_id"),
+                                payload.get("project_id"),
+                                job_id,
+                                "resource_re_scheduled",
+                                "warning",
+                                "任务失败，已重新调度到节点 {0}".format(new_node_id or "未知"),
+                                re_schedule_result,
+                            )
+                        )
+                        # Re-queue job for re-execution
+                        _set_job_state(
+                            job_store, job_id, result, "queued", "queued",
+                            error=None,
+                        )
+                        return
+                    else:
+                        reason = re_schedule_result.get("reason") if re_schedule_result else "unknown"
+                        logger.warning("Re-scheduling failed for job %s: %s", job_id, reason)
+                except Exception as re_sched_err:
+                    logger.warning("Re-scheduling exception for job %s: %s", job_id, str(re_sched_err))
+
+            # No retry available — mark as terminal error
             _set_job_state(job_store, job_id, result, "error", "error", error=str(e))
 
     t = threading.Thread(target=_run)

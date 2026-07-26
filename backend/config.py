@@ -61,6 +61,48 @@ class Config(object):
     FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "ffmpeg")
     FFPROBE_BIN = os.environ.get("FFPROBE_BIN", "ffprobe")
 
+    # ── Cloud Provider Credentials (env-only, NEVER stored in DB) ──
+    ALIYUN_ACCESS_KEY = os.environ.get("ALIYUN_ACCESS_KEY", "")
+    ALIYUN_ACCESS_SECRET = os.environ.get("ALIYUN_ACCESS_SECRET", "")
+    ALIYUN_REGION_ID = os.environ.get("ALIYUN_REGION_ID", "cn-hangzhou")
+
+    TENCENT_SECRET_ID = os.environ.get("TENCENT_SECRET_ID", "")
+    TENCENT_SECRET_KEY = os.environ.get("TENCENT_SECRET_KEY", "")
+    TENCENT_REGION = os.environ.get("TENCENT_REGION", "ap-guangzhou")
+
+    VMWARE_HOST = os.environ.get("VMWARE_HOST", "")
+    VMWARE_USER = os.environ.get("VMWARE_USER", "")
+    VMWARE_PASSWORD = os.environ.get("VMWARE_PASSWORD", "")
+
+    GENERIC_REST_URL = os.environ.get("GENERIC_REST_URL", "")
+    GENERIC_REST_TOKEN = os.environ.get("GENERIC_REST_TOKEN", "")
+
+    # ── Node Agent ──
+    NODE_AGENT_URLS = os.environ.get("NODE_AGENT_URLS", "")
+    NODE_AGENT_TOKEN = os.environ.get("NODE_AGENT_TOKEN", "")
+    NODE_POLL_INTERVAL_S = _to_int(os.environ.get("NODE_POLL_INTERVAL_S"), default=30)
+
+    # ── Billing ──
+    GPU_UNIT_PRICE_CNY = _to_int(os.environ.get("GPU_UNIT_PRICE_CNY"), default=120)
+    ENGINE_UNIT_PRICE_CNY = _to_int(os.environ.get("ENGINE_UNIT_PRICE_CNY"), default=80)
+    STREAM_UNIT_PRICE_CNY = _to_int(os.environ.get("STREAM_UNIT_PRICE_CNY"), default=40)
+    GPU_PRICE_MAP = os.environ.get("GPU_PRICE_MAP", "A100:150,A10:80,L40:120")
+
+    # ── Monitoring & Alerting ──
+    MONITOR_TARGETS = os.environ.get("MONITOR_TARGETS", "")
+    MONITOR_INTERVAL_S = _to_int(os.environ.get("MONITOR_INTERVAL_S"), default=5)
+    MONITOR_TIMEOUT_S = _to_int(os.environ.get("MONITOR_TIMEOUT_S"), default=3)
+    STORAGE_TARGETS = os.environ.get("STORAGE_TARGETS", "")
+    ENABLE_MONITORING_WORKER = _to_bool(os.environ.get("ENABLE_MONITORING_WORKER"), default=True)
+    ALERT_RULES_FILE = os.environ.get("ALERT_RULES_FILE", "")
+
+    # ── Security & Stability ──
+    LOGIN_RATE_LIMIT = _to_int(os.environ.get("LOGIN_RATE_LIMIT"), default=10)
+    CSRF_ENABLED = _to_bool(os.environ.get("CSRF_ENABLED"), default=True)
+    SESSION_SECURE = _to_bool(os.environ.get("SESSION_SECURE"), default=False)
+    AUDIT_ENABLED = _to_bool(os.environ.get("AUDIT_ENABLED"), default=True)
+    SQLITE_WAL_MODE = _to_bool(os.environ.get("SQLITE_WAL_MODE"), default=True)
+
     SECRET_KEY = os.environ.get("SECRET_KEY", os.urandom(24).hex())
 
     HOST = os.environ.get("HOST", "0.0.0.0")
@@ -120,3 +162,8 @@ class Config(object):
     def has_ffmpeg_configured(self):
         """检查是否配置了 FFmpeg"""
         return bool(self.FFMPEG_BIN)
+
+    def has_blender_configured(self):
+        """Check if Blender is available."""
+        import shutil
+        return bool(shutil.which(self.BLENDER_BIN))

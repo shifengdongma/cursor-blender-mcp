@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AIGV Studio创意生产工作台 - 从创意需求、分镜、概念图到动态镜头的多模态生产" />
+    <meta name="theme-color" content="#d7a84f" />
+    <title>创意生产 - AIGV Studio</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body class="creative-studio-page">
+    <div class="page-bg"></div>
+
+    <nav class="navbar" aria-label="主导航">
+      <div class="nav-container">
+        <a href="/" class="nav-brand">
+          <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span>
+          <span class="brand-text">AIGV Studio</span>
+        </a>
+        <div class="nav-links">
+          <a href="/">工作台</a>
+          <a href="/creative-studio" class="active">创意生产</a>
+          <a href="/assets">素材库</a>
+          <a href="/compute-platform">算力调度</a>
+          <a href="/login">登录</a>
+        </div>
+      </div>
+    </nav>
+
+    <main>
+      <header class="page-header page-header-curated">
+        <div class="page-header-text page-header-grid">
+          <div class="page-header-copy">
+            <div class="hero-badge">Creative Production Studio</div>
+            <h1 class="page-title">多模态 AIGV 创意生产工作台</h1>
+            <p class="page-desc">
+              从创意需求、分镜、概念图、动态镜头到多平台素材输出
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <section class="creative-studio-shell" aria-label="创意生产主体区域">
+
+        <!-- Project Overview Bar -->
+        <div class="project-overview-bar" id="project-overview-bar">
+          <div class="project-selector">
+            <label class="project-selector-label">当前项目</label>
+            <select class="project-selector-dropdown" id="project-select">
+              <option value="">-- 选择一个项目 --</option>
+            </select>
+          </div>
+          <div class="project-metrics" id="project-metrics">
+            <span class="metric-item"><span class="metric-value" id="metric-shots">0</span><span class="metric-label">分镜</span></span>
+            <span class="metric-item"><span class="metric-value" id="metric-duration">0s</span><span class="metric-label">总时长</span></span>
+            <span class="metric-item"><span class="metric-value" id="metric-status">-</span><span class="metric-label">状态</span></span>
+          </div>
+          <div class="project-actions" id="project-actions">
+            <button class="btn-outline btn-sm" id="btn-save-project" title="保存项目">保存</button>
+            <button class="btn-outline btn-sm" id="btn-reset-project" title="重置为演示数据">重置</button>
+          </div>
+        </div>
+
+        <!-- Flow Navigation -->
+        <nav class="flow-nav" id="flow-nav" aria-label="创意流程步骤">
+          <button class="flow-step active" data-step="1">
+            <span class="flow-step-number">01</span>
+            <span class="flow-step-label">需求分析</span>
+          </button>
+          <button class="flow-step" data-step="2">
+            <span class="flow-step-number">02</span>
+            <span class="flow-step-label">概念图</span>
+          </button>
+          <button class="flow-step" data-step="3">
+            <span class="flow-step-number">03</span>
+            <span class="flow-step-label">视频生成</span>
+          </button>
+          <button class="flow-step" data-step="4">
+            <span class="flow-step-number">04</span>
+            <span class="flow-step-label">多媒体增强</span>
+          </button>
+          <button class="flow-step" data-step="5">
+            <span class="flow-step-number">05</span>
+            <span class="flow-step-label">后期精调</span>
+          </button>
+          <button class="flow-step" data-step="6">
+            <span class="flow-step-number">06</span>
+            <span class="flow-step-label">输出适配</span>
+          </button>
+        </nav>
+
+        <!-- Main Two-Column Area -->
+        <div class="studio-main-area">
+          <div class="studio-content-panel" id="studio-content-panel">
+            <!-- Dynamic module content rendered by JS -->
+          </div>
+          <aside class="studio-preview-panel" id="studio-preview-panel">
+            <div class="preview-header">
+              <h3 class="preview-title">实时预览</h3>
+              <span class="preview-step-label" id="preview-step-label">模块 1</span>
+            </div>
+            <div class="preview-body" id="preview-body">
+              <p class="preview-placeholder-text">选择项目并完成各步骤，预览将在此显示</p>
+            </div>
+          </aside>
+        </div>
+
+      </section>
+    </main>
+
+    <footer class="status-bar">
+      <div class="status-bar-content">
+        <span class="status-indicator" id="connection-status">已连接</span>
+        <span class="status-info" id="demo-data-status">演示数据：加载中...</span>
+        <span class="status-version">AIGV Studio v2.0</span>
+      </div>
+    </footer>
+
+    <script src="/web/aigv-demo-data.js"></script>
+    <script src="/web/creative-studio.js"></script>
+  </body>
+</html>

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AIGV Studio云主机列表 - 统一管理公有云和私有云主机资源" />
+    <meta name="theme-color" content="#78bfd2" />
+    <title>云主机列表 - AIGV Studio</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body class="compute-platform-page">
+    <div class="page-bg"></div>
+
+    <nav class="navbar" aria-label="主导航">
+      <div class="nav-container">
+        <a href="/" class="nav-brand">
+          <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span>
+          <span class="brand-text">AIGV Studio</span>
+        </a>
+        <div class="nav-links">
+          <a href="/">工作台</a>
+          <a href="/creative-studio">创意生产</a>
+          <a href="/assets">素材库</a>
+          <a href="/compute-platform" class="active">算力调度</a>
+          <a href="/login">登录</a>
+        </div>
+      </div>
+    </nav>
+
+    <main>
+      <header class="page-header page-header-curated">
+        <div class="page-header-text page-header-grid">
+          <div class="page-header-copy">
+            <div class="hero-badge" id="ch-hero-badge">Host Management</div>
+            <h1 class="page-title" id="ch-page-title">云主机列表</h1>
+            <p class="page-desc" id="ch-page-desc">
+              统一管理云主机资源，查看运行状态与资源使用情况
+            </p>
+            <span class="summary-chip summary-chip-strong" id="ch-summary-chip">主机数据实时更新</span>
+            <a href="/compute-platform#gpu" class="ch-back-link">&larr; 返回算力调度中心</a>
+          </div>
+        </div>
+      </header>
+
+      <section class="compute-platform-shell" aria-label="云主机列表主体区域">
+        <!-- 统计指标卡片 -->
+        <div class="ch-summary-grid" id="ch-summary-grid"></div>
+
+        <!-- 搜索与筛选栏 -->
+        <div class="ch-filter-bar" id="ch-filter-bar"></div>
+
+        <!-- 主机表格 -->
+        <div class="cp-table-container ch-table-wrapper" id="ch-host-table"></div>
+
+        <!-- 分页栏 -->
+        <div class="ch-pagination" id="ch-pagination"></div>
+      </section>
+
+      <!-- 详情抽屉 -->
+      <aside class="detail-drawer cp-detail-drawer" id="ch-detail-drawer">
+        <div class="detail-drawer-header">
+          <h3 id="ch-drawer-title">主机详情</h3>
+          <button class="detail-drawer-close" id="ch-drawer-close" aria-label="关闭详情">&times;</button>
+        </div>
+        <div class="detail-drawer-body" id="ch-drawer-body"></div>
+      </aside>
+      <div class="cp-drawer-backdrop" id="ch-drawer-backdrop"></div>
+    </main>
+
+    <footer class="status-bar">
+      <div class="status-bar-content">
+        <span class="status-indicator" id="connection-status">已连接</span>
+        <span class="status-info" id="host-data-status">数据就绪</span>
+        <span class="status-version">AIGV Studio v2.0</span>
+      </div>
+    </footer>
+
+    <script src="/web/cloud-hosts.js"></script>
+  </body>
+</html>

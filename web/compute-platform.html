@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AIGV Studio算力调度中心 - 统一管理GPU资源、云渲染与网络链路" />
+    <meta name="theme-color" content="#78bfd2" />
+    <title>算力调度 - AIGV Studio</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+    <!-- Three.js for 3D preview interactions -->
+    <script src="/web/vendor/three/three.min.js"></script>
+    <script src="/web/vendor/three/OrbitControls.js"></script>
+    <script src="/web/vendor/three/GLTFLoader.js"></script>
+  </head>
+  <body class="compute-platform-page">
+    <div class="page-bg"></div>
+
+    <nav class="navbar" aria-label="主导航">
+      <div class="nav-container">
+        <a href="/" class="nav-brand">
+          <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span>
+          <span class="brand-text">AIGV Studio</span>
+        </a>
+        <div class="nav-links">
+          <a href="/">工作台</a>
+          <a href="/creative-studio">创意生产</a>
+          <a href="/assets">素材库</a>
+          <a href="/compute-platform" class="active">算力调度</a>
+          <a href="/login">登录</a>
+        </div>
+      </div>
+    </nav>
+
+    <main>
+      <header class="page-header page-header-curated">
+        <div class="page-header-text page-header-grid">
+          <div class="page-header-copy">
+            <div class="hero-badge">Compute Orchestration Center</div>
+            <h1 class="page-title">AIGV 多云算力调度与云渲染中心</h1>
+            <p class="page-desc">
+              智能感知与传输优化状态、云渲染、GPU 资源和任务运行
+            </p>
+            <span class="summary-chip summary-chip-strong">智能感知与传输优化平台，实时展示算力节点、链路与故障告警</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="compute-platform-shell" aria-label="算力调度主体区域">
+        <!-- Tab Navigation -->
+        <nav class="cp-tabs" role="tablist">
+          <button class="cp-tab-btn active" data-tab="overview" role="tab" aria-selected="true">运行总览</button>
+          <button class="cp-tab-btn" data-tab="rendering" role="tab" aria-selected="false">云渲染</button>
+          <button class="cp-tab-btn" data-tab="gpu" role="tab" aria-selected="false">GPU调度</button>
+          <button class="cp-tab-btn" data-tab="scheduling" role="tab" aria-selected="false">调度任务编排</button>
+          <button class="cp-tab-btn" data-tab="network" role="tab" aria-selected="false">网络监控</button>
+          <button class="cp-tab-btn" data-tab="permissions" role="tab" aria-selected="false">权限安全</button>
+          <button class="cp-tab-btn" data-tab="billing" role="tab" aria-selected="false">费用告警</button>
+        </nav>
+
+        <!-- Tab Content -->
+        <div class="cp-tab-content" id="cp-tab-content">
+          <!-- Tab 1: Overview -->
+          <div class="cp-panel active" id="tab-overview" role="tabpanel">
+            <div class="cp-section-header">
+              <h2 class="cp-section-title">运行总览</h2>
+            </div>
+            <div class="cp-metrics-grid" id="cp-metrics-grid"></div>
+            <div class="cp-charts-grid" id="cp-charts-grid"></div>
+          </div>
+
+          <!-- Tab 2: Cloud Rendering -->
+          <div class="cp-panel" id="tab-rendering" role="tabpanel">
+            <div class="cp-section-header">
+              <h2 class="cp-section-title">云渲染中心</h2>
+            </div>
+            <!-- Sub-tab navigation -->
+            <nav class="cp-sub-tabs" id="cp-sub-tabs" role="tablist">
+              <button class="cp-sub-tab-btn active" data-subtab="film" role="tab" aria-selected="true">影视与动画</button>
+              <button class="cp-sub-tab-btn" data-subtab="architecture" role="tab" aria-selected="false">建筑与工业</button>
+              <button class="cp-sub-tab-btn" data-subtab="gaming" role="tab" aria-selected="false">云游戏互动</button>
+              <button class="cp-sub-tab-btn" data-subtab="sessions" role="tab" aria-selected="false">渲染会话</button>
+            </nav>
+            <!-- Sub-panel: Film & Animation -->
+            <div class="cp-sub-panel active" id="cp-sub-film" role="tabpanel">
+              <div class="cp-film-layout">
+                <div class="cp-film-viewer" id="cp-film-viewer">
+                  <div class="cp-film-viewer-placeholder" id="cp-film-placeholder">3D 场景加载中…</div>
+                </div>
+                <div class="cp-film-info" id="cp-film-info">
+                  <div class="cp-film-info-title" id="cp-film-shot-title">全景开场</div>
+                  <div class="cp-film-info-detail" id="cp-film-shot-desc">博物馆大厅全景，编钟阵列在灯光下熠熠生辉</div>
+                  <div class="cp-film-info-row"><span class="cp-film-info-label">镜头</span><span class="cp-film-info-value" id="cp-film-lens">广角镜头</span></div>
+                  <div class="cp-film-info-row"><span class="cp-film-info-label">时长</span><span class="cp-film-info-value" id="cp-film-dur">8秒</span></div>
+                  <div class="cp-film-info-row"><span class="cp-film-info-label">帧数</span><span class="cp-film-info-value" id="cp-film-frame">1 / 8</span></div>
+                  <div class="cp-film-controls">
+                    <button onclick="ComputePlatform.prevFilmKeyframe()" title="上一帧">&lt; 上一帧</button>
+                    <button id="cp-film-autoplay-btn" onclick="ComputePlatform.toggleFilmAutoplay()">自动轮播</button>
+                    <button onclick="ComputePlatform.nextFilmKeyframe()" title="下一帧">下一帧 &gt;</button>
+                  </div>
+                </div>
+              </div>
+              <div class="cp-film-thumb-strip" id="cp-film-thumb-strip"></div>
+              <div class="cp-demo-note">演示模式：Three.js 实时预览（影视动画关键帧时间线）</div>
+            </div>
+            <!-- Sub-panel: Architecture & Industrial -->
+            <div class="cp-sub-panel" id="cp-sub-architecture" role="tabpanel">
+              <div class="cp-arch-layout">
+                <div class="cp-arch-viewer" id="cp-arch-viewer">
+                  <div class="cp-film-viewer-placeholder" id="cp-arch-placeholder">3D 场景加载中…</div>
+                </div>
+                <div class="cp-arch-presets" id="cp-arch-presets"></div>
+              </div>
+              <div class="cp-arch-task-area" id="cp-arch-task-area">
+                <div class="cp-arch-task-title">云渲染任务</div>
+                <div class="cp-arch-task-info" id="cp-arch-task-info">准备就绪，点击提交将模拟云渲染任务流程</div>
+                <div class="cp-arch-progress"><div class="cp-arch-progress-bar" id="cp-arch-progress-bar" style="width:0%"></div></div>
+                <div class="cp-arch-progress-label" id="cp-arch-progress-label"></div>
+                <button class="cp-arch-render-btn" id="cp-arch-render-btn" onclick="ComputePlatform.submitArchRenderTask()">提交云渲染任务</button>
+              </div>
+              <div class="cp-arch-effect-grid" id="cp-arch-effect-grid"></div>
+              <div class="cp-demo-note">演示模式：Three.js 材质与光照实时预览</div>
+            </div>
+            <!-- Sub-panel: Gaming & Interactive -->
+            <div class="cp-sub-panel" id="cp-sub-gaming" role="tabpanel">
+              <div class="cp-game-layout">
+                <div class="cp-game-viewer" id="cp-game-viewer">
+                  <div class="cp-film-viewer-placeholder" id="cp-game-placeholder">3D 场景加载中…</div>
+                  <div class="cp-game-overlay" id="cp-game-overlay">
+                    <div class="cp-game-overlay-icon">&#9888;</div>
+                    <div class="cp-game-overlay-text">连接已断开</div>
+                  </div>
+                </div>
+                <div class="cp-game-sidebar">
+                  <div class="cp-game-metrics" id="cp-game-metrics"></div>
+                  <div class="cp-game-keyhint">W A S D 方向键移动</div>
+                  <div class="cp-game-dpad" id="cp-game-dpad">
+                    <button class="cp-game-dpad-btn dpad-up" id="gp-dpad-up">&#9650;</button>
+                    <button class="cp-game-dpad-btn dpad-left" id="gp-dpad-left">&#9664;</button>
+                    <button class="cp-game-dpad-btn dpad-right" id="gp-dpad-right">&#9654;</button>
+                    <button class="cp-game-dpad-btn dpad-down" id="gp-dpad-down">&#9660;</button>
+                  </div>
+                  <div class="cp-game-controls">
+                    <button id="cp-game-connect-btn" onclick="ComputePlatform.toggleGameConnection()">断开连接</button>
+                    <button onclick="ComputePlatform.toggleGameFullscreen()">全屏</button>
+                  </div>
+                </div>
+              </div>
+              <div class="cp-demo-note">演示模式：Three.js 虚拟展厅漫游（模拟云游戏串流）</div>
+            </div>
+            <!-- Sub-panel: Sessions -->
+            <div class="cp-sub-panel" id="cp-sub-sessions" role="tabpanel">
+              <div class="cp-table-container" id="cp-render-table"></div>
+            </div>
+          </div>
+
+          <!-- Tab 3: GPU Resource Pools -->
+          <div class="cp-panel" id="tab-gpu" role="tabpanel">
+            <div class="cp-section-header">
+              <h2 class="cp-section-title">GPU 资源池</h2>
+            </div>
+            <div class="cp-pool-grid" id="cp-pool-grid"></div>
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">云主机入口</h3>
+            </div>
+            <div class="cp-cloud-entry-grid" id="cp-cloud-entry-grid"></div>
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">GPU 节点详情</h3>
+            </div>
+            <div class="cp-filter-bar" id="cp-node-filter-bar"></div>
+            <div class="cp-table-container" id="cp-node-table"></div>
+          </div>
+
+          <!-- Tab 4: Scheduling Tasks -->
+          <div class="cp-panel" id="tab-scheduling" role="tabpanel">
+            <div class="cp-section-header">
+              <h2 class="cp-section-title">调度任务编排</h2>
+            </div>
+            <div class="cp-schedule-layout" id="cp-schedule-layout"></div>
+          </div>
+
+          <!-- Tab 5: 智能感知与传输优化 -->
+          <div class="cp-panel" id="tab-network" role="tabpanel">
+            <!-- Header -->
+            <div class="sd-header" id="sd-header">
+              <div class="sd-header-left">
+                <span class="sd-status-dot normal" id="sd-status-dot"></span>
+                <span class="sd-status-label" id="sd-status-label">系统状态：正常</span>
+                <span class="sd-clock" id="sd-clock">--</span>
+              </div>
+              <div class="sd-header-actions">
+                <label><input type="checkbox" id="sd-auto-refresh" onchange="ComputePlatform.toggleNetworkRefresh()" checked> 自动刷新</label>
+                <button class="cp-refresh-btn" onclick="ComputePlatform.manualNetworkRefresh()">手动刷新</button>
+                <button class="cp-anomaly-btn" onclick="ComputePlatform.showFaultSimModal()">模拟故障</button>
+              </div>
+            </div>
+            <!-- Top Row: Nodes + Links + Alerts -->
+            <div class="sd-top-row">
+              <div class="sd-section"><div class="sd-section-title">算力节点感知</div><div class="sd-nodes-grid" id="sd-nodes-grid"></div></div>
+              <div class="sd-section"><div class="sd-section-title">链路状态</div><div class="sd-links-list" id="sd-links-list"></div></div>
+              <div class="sd-section"><div class="sd-section-title">故障告警</div><div class="sd-alerts-panel" id="sd-alerts-panel"></div></div>
+            </div>
+            <!-- Charts Row -->
+            <div class="sd-charts-row" id="sd-charts-row">
+              <div class="sd-section"><div class="sd-chart-wrap" id="sd-chart-bandwidth"></div></div>
+              <div class="sd-section"><div class="sd-chart-wrap" id="sd-chart-latency"></div></div>
+              <div class="sd-section"><div class="sd-chart-wrap" id="sd-chart-loss"></div></div>
+            </div>
+            <!-- Mid Row: Storage + Switch Records -->
+            <div class="sd-mid-row">
+              <div class="sd-section"><div class="sd-section-title">存储感知</div><div class="sd-storage-grid" id="sd-storage-grid"></div><div class="sd-storage-summary" id="sd-storage-summary"></div></div>
+              <div class="sd-section"><div class="sd-section-title">故障切换记录</div><div id="sd-switch-table-wrapper"></div></div>
+            </div>
+            <!-- Bottom Metrics -->
+            <div class="sd-metrics-bar" id="sd-metrics-bar"></div>
+          </div>
+
+          <!-- Tab 6: Permissions & Security -->
+          <div class="cp-panel" id="tab-permissions" role="tabpanel">
+            <div class="cp-section-header">
+              <h2 class="cp-section-title">权限与安全</h2>
+            </div>
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">角色权限矩阵</h3>
+            </div>
+            <div class="cp-table-container" id="cp-perms-table"></div>
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">安全状态</h3>
+            </div>
+            <div class="cp-security-cards" id="cp-security-cards"></div>
+          </div>
+
+          <!-- Tab 7: Billing & Alerts (6th tab button, 7th panel) -->
+          <div class="cp-panel" id="tab-billing" role="tabpanel">
+            <div class="cp-section-header">
+              <h2 class="cp-section-title">费用概览</h2>
+            </div>
+            <div class="cp-cost-grid" id="cp-cost-grid"></div>
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">告警列表</h3>
+            </div>
+            <div class="cp-table-container" id="cp-alert-table"></div>
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">运维事件</h3>
+            </div>
+            <div class="cp-table-container" id="cp-ops-table"></div>
+          </div>
+        </div>
+      </section>
+      <!-- Detail Drawer -->
+      <aside class="detail-drawer cp-detail-drawer" id="cp-detail-drawer">
+        <div class="detail-drawer-header">
+          <h3 id="cp-drawer-title">详情</h3>
+          <button class="detail-drawer-close" id="cp-drawer-close" aria-label="关闭详情">&times;</button>
+        </div>
+        <div class="detail-drawer-body" id="cp-drawer-body"></div>
+      </aside>
+      <!-- Drawer backdrop -->
+      <div class="cp-drawer-backdrop" id="cp-drawer-backdrop"></div>
+    </main>
+
+    <footer class="status-bar">
+      <div class="status-bar-content">
+        <span class="status-indicator" id="connection-status">已连接</span>
+        <span class="status-info" id="demo-data-status">系统状态：已就绪</span>
+        <span class="status-version">AIGV Studio v2.0</span>
+      </div>
+    </footer>
+
+    <script src="/web/aigv-demo-data.js"></script>
+    <script src="/web/compute-platform.js"></script>
+  </body>
+</html>

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AIGV Studio - 登录</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body class="auth-page">
+    <div class="page-bg" aria-hidden="true"></div>
+
+    <nav class="navbar auth-nav" aria-label="主导航">
+      <div class="nav-container">
+        <div class="nav-brand">
+          <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span>
+          <span class="brand-text">AIGV Studio</span>
+        </div>
+      </div>
+    </nav>
+
+    <main class="auth-container">
+      <div class="auth-card">
+        <div class="auth-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1"/></svg></div>
+        <h1 class="auth-title">登录</h1>
+        <p class="auth-subtitle">使用您的账号登录 AIGV Studio 创作平台</p>
+
+        <div class="auth-message" id="auth-message" style="display:none;"></div>
+
+        <form id="auth-form" class="auth-form" novalidate>
+          <div class="form-group">
+            <label for="username">用户名</label>
+            <input id="username" name="username" type="text" placeholder="请输入用户名" autocomplete="username" />
+          </div>
+          <div class="form-group">
+            <label for="password">密码</label>
+            <input id="password" name="password" type="password" placeholder="请输入密码" autocomplete="current-password" />
+          </div>
+          <button type="submit" class="btn-primary" style="width:100%;justify-content:center;">
+            登录
+          </button>
+        </form>
+
+        <div class="auth-footer">
+          还没有账号？<a href="/register">立即注册</a>
+        </div>
+      </div>
+    </main>
+
+    <script src="/web/auth.js"></script>
+  </body>
+</html>

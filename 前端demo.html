@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>艺术文化场馆 · AI 视频生成与 Prompt 工作台 - AIGV Studio</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+    <style>
+      /* 扩展样式 - 基于项目设计系统 */
+      .demo-section {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: var(--space-3xl) var(--space-xl);
+      }
+
+      /* 黄金六格公式卡片 */
+      .formula-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-lg);
+      }
+
+      @media (max-width: 1200px) {
+        .formula-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      @media (max-width: 768px) {
+        .formula-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .formula-card {
+        position: relative;
+        padding: var(--space-xl);
+        background: var(--bg-card);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-xl);
+        transition: all 0.3s;
+        overflow: hidden;
+      }
+
+      .formula-card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 4px;
+        height: 100%;
+        transition: width 0.3s ease;
+      }
+
+      .formula-card:nth-child(1)::before { background: var(--accent-cyan); }
+      .formula-card:nth-child(2)::before { background: var(--accent-purple); }
+      .formula-card:nth-child(3)::before { background: #ec4899; }
+      .formula-card:nth-child(4)::before { background: var(--accent-green); }
+      .formula-card:nth-child(5)::before { background: var(--primary); }
+      .formula-card:nth-child(6)::before { background: var(--accent-coral); }
+
+      .formula-card:hover {
+        transform: translateY(-4px);
+        border-color: var(--border-strong);
+        box-shadow: var(--shadow-md);
+      }
+
+      .formula-card:hover::before {
+        width: 100%;
+        opacity: 0.05;
+      }
+
+      .formula-card h3 {
+        font-size: 1.2rem;
+        color: var(--text-primary);
+        margin-bottom: var(--space-sm);
+        display: flex;
+        align-items: center;
+        gap: var(--space-sm);
+      }
+
+      .formula-card h3 span {
+        font-size: 0.85rem;
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        background: rgba(242, 179, 61, 0.1);
+        color: var(--primary);
+        font-weight: 600;
+      }
+
+      .formula-card p {
+        font-size: 0.95rem;
+        color: var(--text-secondary);
+        line-height: 1.6;
+      }
+
+      .formula-card code {
+        background: rgba(0, 0, 0, 0.3);
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        color: var(--accent-cyan);
+        font-family: "SF Mono", "Fira Code", monospace;
+        font-size: 0.85rem;
+      }
+
+      /* 词汇表容器 */
+      .lexicon-container {
+        background: var(--bg-card);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-xl);
+        overflow: hidden;
+      }
+
+      .lexicon-header {
+        display: grid;
+        grid-template-columns: 1.5fr 1fr 2fr;
+        background: rgba(255, 255, 255, 0.02);
+        padding: var(--space-md) var(--space-lg);
+        font-weight: 600;
+        color: var(--primary);
+        font-size: 0.95rem;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .lexicon-row {
+        display: grid;
+        grid-template-columns: 1.5fr 1fr 2fr;
+        padding: var(--space-md) var(--space-lg);
+        border-bottom: 1px solid var(--border-subtle);
+        font-size: 0.9rem;
+        transition: background 0.2s;
+      }
+
+      .lexicon-row:last-child {
+        border-bottom: none;
+      }
+
+      .lexicon-row:hover {
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .lexicon-term {
+        color: var(--accent-cyan);
+        font-family: "SF Mono", "Fira Code", monospace;
+        font-weight: 500;
+      }
+
+      @media (max-width: 768px) {
+        .lexicon-header,
+        .lexicon-row {
+          grid-template-columns: 1fr;
+          gap: var(--space-xs);
+        }
+        .lexicon-header div:not(:first-child),
+        .lexicon-row div:not(:first-child) {
+          font-size: 0.85rem;
+          color: var(--text-muted);
+        }
+      }
+
+      /* 瀑布流布局 */
+      .masonry-layout {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-lg);
+      }
+
+      @media (max-width: 1200px) {
+        .masonry-layout {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      @media (max-width: 768px) {
+        .masonry-layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .masonry-item {
+        background: var(--bg-card);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-xl);
+        overflow: hidden;
+        transition: all 0.3s;
+      }
+
+      .masonry-item:hover {
+        transform: translateY(-4px);
+        border-color: var(--border-strong);
+        box-shadow: var(--shadow-md);
+      }
+
+      .card-image-wrapper {
+        width: 100%;
+        height: 200px;
+        overflow: hidden;
+        position: relative;
+        background: var(--bg-elevated);
+      }
+
+      .card-image-wrapper img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 0.4s;
+      }
+
+      .masonry-item:hover .card-image-wrapper img {
+        transform: scale(1.05);
+      }
+
+      .badge-tag {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(8px);
+        color: var(--text-primary);
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 4px 10px;
+        border-radius: var(--radius-sm);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+
+      .item-content {
+        padding: var(--space-lg);
+      }
+
+      .item-title {
+        font-size: 1.1rem;
+        margin-bottom: var(--space-sm);
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .item-text {
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+        margin-bottom: var(--space-md);
+      }
+
+      .prompt-code {
+        background: rgba(0, 0, 0, 0.4);
+        border: 1px solid var(--border-subtle);
+        padding: var(--space-md);
+        border-radius: var(--radius-md);
+        font-family: "SF Mono", "Fira Code", monospace;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        line-height: 1.6;
+      }
+
+      .prompt-code span {
+        color: var(--primary);
+        font-weight: 600;
+      }
+
+      /* 工作流提示 */
+      .workflow-tips {
+        background: rgba(114, 208, 167, 0.05);
+        border-left: 4px solid var(--accent-green);
+        padding: var(--space-lg);
+        border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+      }
+
+      .workflow-tips h3 {
+        color: var(--accent-green);
+        margin-bottom: var(--space-md);
+        font-size: 1.1rem;
+      }
+
+      .workflow-tips ul {
+        color: var(--text-secondary);
+        padding-left: var(--space-xl);
+        font-size: 0.95rem;
+        line-height: 1.8;
+      }
+
+      .workflow-tips li {
+        margin-bottom: var(--space-sm);
+      }
+
+      .workflow-tips li code {
+        background: rgba(0, 0, 0, 0.3);
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        color: var(--accent-cyan);
+        font-family: "SF Mono", monospace;
+      }
+
+      /* Demo 工作台 */
+      .demo-workspace {
+        background: var(--bg-card);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-xl);
+        display: grid;
+        grid-template-columns: 1.2fr 1fr;
+        gap: var(--space-xl);
+        overflow: hidden;
+      }
+
+      @media (max-width: 992px) {
+        .demo-workspace {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .demo-workspace-form {
+        padding: var(--space-xl);
+      }
+
+      .demo-preview-panel {
+        background: rgba(0, 0, 0, 0.2);
+        border-left: 1px solid var(--border-subtle);
+        padding: var(--space-xl);
+        display: flex;
+        flex-direction: column;
+      }
+
+      @media (max-width: 992px) {
+        .demo-preview-panel {
+          border-left: none;
+          border-top: 1px solid var(--border-subtle);
+        }
+      }
+
+      .panel-title {
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: var(--space-md);
+        padding-bottom: var(--space-md);
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .status-box {
+        background: var(--bg-elevated);
+        padding: var(--space-md);
+        border-radius: var(--radius-md);
+        border: 1px dashed var(--border-default);
+        font-size: 0.95rem;
+        color: var(--text-secondary);
+      }
+
+      .result-box {
+        margin-top: var(--space-md);
+        overflow-y: auto;
+        flex: 1;
+        font-family: "SF Mono", monospace;
+        font-size: 0.9rem;
+        color: var(--accent-purple);
+      }
+
+      .status-success {
+        color: var(--accent-green);
+      }
+
+      .status-info {
+        color: var(--primary);
+      }
+
+      /* 滚动显示动画 */
+      .reveal-up {
+        opacity: 0;
+        transform: translateY(40px);
+        transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .reveal-up.active {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      /* 加载动画 */
+      @keyframes spin {
+        100% { transform: rotate(360deg); }
+      }
+
+      .spinner {
+        transform-origin: center;
+        animation: spin 1.5s linear infinite;
+      }
+
+      /* Hero 区域扩展 */
+      .hero-badge-custom {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-sm);
+        padding: var(--space-sm) var(--space-md);
+        background: rgba(116, 200, 211, 0.1);
+        border: 1px solid rgba(116, 200, 211, 0.2);
+        border-radius: var(--radius-full);
+        color: var(--accent-cyan);
+        font-size: 0.85rem;
+        font-weight: 500;
+        margin-bottom: var(--space-lg);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page-bg"></div>
+
+    <!-- 导航栏 -->
+    <nav class="navbar">
+      <div class="nav-container">
+        <div class="nav-brand">
+          <span class="brand-icon"></span>
+          <span class="brand-text">AIGV Studio</span>
+        </div>
+        <div class="nav-links">
+          <a href="#formula">黄金六格</a>
+          <a href="#lexicon">视觉词典</a>
+          <a href="#assets">资产库</a>
+          <a href="#workspace">生成控制台</a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Hero 区域 -->
+    <header class="hero">
+      <div class="hero-content">
+        <div class="hero-badge-custom">导演级 AI 视频生成方案</div>
+        <h1 class="hero-title">
+          艺术文化场馆<br />
+          <span class="gradient-text">AI 视频生成工作台</span>
+        </h1>
+        <p class="hero-desc">
+          基于最新 SOTA 模型 (Sora 2 / Veo 3 / Runway Gen-3) 的导演级视觉控制方案。通过"黄金六格提示词公式"与高质量 3D 资产，将剧院、画廊、博物馆的抽象氛围转译为精确的算力代码。
+        </p>
+        <div class="hero-actions">
+          <a href="#workspace" class="btn-primary">
+            <span>开始创作</span>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+          <a href="#formula" class="btn-secondary">了解公式</a>
+        </div>
+      </div>
+
+      <!-- 展示区域 -->
+      <div class="hero-visual">
+        <div class="visual-frame">
+          <div class="visual-header">
+            <div class="visual-dots">
+              <span></span><span></span><span></span>
+            </div>
+            <span class="visual-title">Prompt 结构预览</span>
+          </div>
+          <div class="visual-content">
+            <div class="visual-grid">
+              <div class="visual-card venue-card">
+                <div class="card-icon theater"></div>
+                <span>剧院</span>
+              </div>
+              <div class="visual-card venue-card">
+                <div class="card-icon gallery"></div>
+                <span>画廊</span>
+              </div>
+              <div class="visual-card venue-card">
+                <div class="card-icon museum"></div>
+                <span>博物馆</span>
+              </div>
+              <div class="visual-card venue-card">
+                <div class="card-icon concert"></div>
+                <span>音乐厅</span>
+              </div>
+            </div>
+            <div class="visual-flow">
+              <div class="flow-node">
+                <span class="node-icon prompt"></span>
+                <span class="node-label">六格公式</span>
+              </div>
+              <div class="flow-arrow"></div>
+              <div class="flow-node">
+                <span class="node-icon blender"></span>
+                <span class="node-label">3D 资产</span>
+              </div>
+              <div class="flow-arrow"></div>
+              <div class="flow-node">
+                <span class="node-icon ai"></span>
+                <span class="node-label">视频生成</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- 黄金六格公式区域 -->
+    <section id="formula" class="demo-section reveal-up">
+      <div class="section-header">
+        <span class="section-label">Prompt Formula</span>
+        <h2 class="section-title">核心逻辑 · 黄金六格提示词公式</h2>
+        <p class="section-desc">
+          在 AI 视频生成中，语言即代码。顺序代表了 Attention 机制的计算权重。必须遵循 <strong>[镜头] -> [主体] -> [动态] -> [环境] -> [光影] -> [风格]</strong> 的空间构建顺序。
+        </p>
+      </div>
+
+      <div class="formula-grid">
+        <article class="formula-card">
+          <h3><span>01</span> 镜头语言与运镜</h3>
+          <p>首位锚定。优先建立三维坐标系与观众视角，防止画面崩坏。例如使用 <code>Slow Push-in</code> 或 <code>FPV Drone</code> 控制物理摄像机。</p>
+        </article>
+        <article class="formula-card">
+          <h3><span>02</span> 主体描述与材质</h3>
+          <p>在镜头框架内布置核心展品。赋予精确物理属性，如 <code>Translucent Carrara marble</code> (半透明大理石) 或 <code>Oxidized bronze patina</code>。</p>
+        </article>
+        <article class="formula-card">
+          <h3><span>03</span> 动态与行为</h3>
+          <p>锚定时间流逝。避免剧烈运动，强调优雅的物理交互。如 <code>dust motes dancing</code> (尘埃飞舞) 或丝绸受重力自然滑落。</p>
+        </article>
+        <article class="formula-card">
+          <h3><span>04</span> 环境与空间构建</h3>
+          <p>为 AI 设定三维容器。如 <code>Baroque opera house</code> 或 <code>Minimalist Bauhaus space</code>，确保建筑透视逻辑与流派正确。</p>
+        </article>
+        <article class="formula-card">
+          <h3><span>05</span> 光影与氛围</h3>
+          <p>空间情绪的灵魂。结合材质词激活光线追踪，如 <code>Volumetric spotlight</code> (体积光) 或 <code>Caustics</code> (复杂折射光斑)。</p>
+        </article>
+        <article class="formula-card">
+          <h3><span>06</span> 风格与美学参数</h3>
+          <p>渲染出图的"后期调色"。如 <code>Shot on Arri Alexa 65</code> (电影级) 或 <code>Vintage 16mm film stock</code> (档案复古级)。</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- 视觉词典区域 -->
+    <section id="lexicon" class="demo-section reveal-up">
+      <div class="section-header">
+        <span class="section-label">Visual Lexicon</span>
+        <h2 class="section-title">导演级视觉词典</h2>
+        <p class="section-desc">从摄影指导 (DoP) 与建筑可视化手册中提炼，直接复制用于 Prompt 编写以大幅拔高画面专业度。</p>
+      </div>
+
+      <div class="lexicon-container">
+        <div class="lexicon-header">
+          <div>英文术语 (Prompt 词)</div>
+          <div>视觉目标</div>
+          <div>艺术场馆实战应用</div>
+        </div>
+        <div class="lexicon-row">
+          <div class="lexicon-term">Rack Focus / Focus Pull</div>
+          <div>焦点平滑切换</div>
+          <div>焦点从前景模糊的观众后脑勺，转移到深处清晰的展品上，制造叙事惊喜。</div>
+        </div>
+        <div class="lexicon-row">
+          <div class="lexicon-term">Low Angle Gliding</div>
+          <div>低角度贴地滑行</div>
+          <div>贴近地面移动，极大地强调自然历史博物馆恐龙骨架的高耸与历史压迫感。</div>
+        </div>
+        <div class="lexicon-row">
+          <div class="lexicon-term">Volumetric Lighting</div>
+          <div>体积光 / 丁达尔效应</div>
+          <div>光束穿过空气中的尘埃，让古典剧院或古籍馆显得真实且具有神圣沉淀感。</div>
+        </div>
+        <div class="lexicon-row">
+          <div class="lexicon-term">Strong Rim Lighting</div>
+          <div>强烈的轮廓光/逆光</div>
+          <div>勾勒出交响乐指挥家的边缘，使其从漆黑的背景中剥离，提升顶级电影感。</div>
+        </div>
+        <div class="lexicon-row">
+          <div class="lexicon-term">Caustics / Bounce Light</div>
+          <div>焦散光斑 / 物理反射光</div>
+          <div>强制激活光追。展现光线透过展柜玻璃或在大理石地板上产生的真实折射效果。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3D 资产库区域 -->
+    <section id="assets" class="demo-section reveal-up">
+      <div class="section-header">
+        <span class="section-label">3D Asset Library</span>
+        <h2 class="section-title">3D 场景资产库</h2>
+        <p class="section-desc">
+          图生视频 (Image-to-Video) 优于文生视频。利用 3D 资产作为生成底帧，可解决 AI "建筑柱子弯曲"、"透视崩坏"的结构幻觉问题。推荐格式 <code>GLB/glTF</code>。
+        </p>
+      </div>
+
+      <div class="masonry-layout">
+        <article class="masonry-item">
+          <div class="card-image-wrapper">
+            <span class="badge-tag">3D Model</span>
+            <img src="https://images.unsplash.com/photo-1507676184212-d0330a15233c?auto=format&fit=crop&q=80&w=800" alt="Classical Theater" />
+          </div>
+          <div class="item-content">
+            <h3 class="item-title">Classical Opera House Interior</h3>
+            <p class="item-text">包含巴洛克式穹顶、弧形包厢排列与舞台灯光预设。格式: <code>.glb</code> (14.2MB)</p>
+          </div>
+        </article>
+        <article class="masonry-item">
+          <div class="card-image-wrapper">
+            <span class="badge-tag">3D Model</span>
+            <img src="https://images.unsplash.com/photo-1518998053901-5348d3961a04?auto=format&fit=crop&q=80&w=800" alt="Modern Art Gallery" />
+          </div>
+          <div class="item-content">
+            <h3 class="item-title">Minimalist White Cube Gallery</h3>
+            <p class="item-text">现代极简包豪斯画廊白模，自带漫反射天光烘焙，空间透视完美。格式: <code>.fbx</code> (8.5MB)</p>
+          </div>
+        </article>
+        <article class="masonry-item">
+          <div class="card-image-wrapper">
+            <span class="badge-tag">3D Model</span>
+            <img src="https://images.unsplash.com/photo-1565557623262-b51c2513a641?auto=format&fit=crop&q=80&w=800" alt="Symphony Hall" />
+          </div>
+          <div class="item-content">
+            <h3 class="item-title">Vineyard Acoustic Concert Hall</h3>
+            <p class="item-text">葡萄园式声学音乐厅结构，高精度木纹起伏与物理声学反射板。格式: <code>.glb</code> (22.1MB)</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Prompt 模板库 -->
+    <section class="demo-section reveal-up">
+      <div class="section-header">
+        <span class="section-label">Prompt Templates</span>
+        <h2 class="section-title">四大核心场景 · Prompt 模板库</h2>
+        <p class="section-desc">经过 Sora 2 与 Runway Gen-3 验证的实战案例。已集成魔法前缀与渲染参数。</p>
+      </div>
+
+      <div class="masonry-layout">
+        <article class="masonry-item" style="border-top: 3px solid var(--accent-cyan);">
+          <div class="card-image-wrapper">
+            <img src="https://images.unsplash.com/photo-1583795128727-6ec3642408f8?auto=format&fit=crop&q=80&w=800" alt="Grand Theater" />
+          </div>
+          <div class="item-content">
+            <h3 class="item-title">剧院 · 开幕前的宏大静谧</h3>
+            <p class="item-text">利用摇臂上升与体积光，展示巴洛克空间的奢华与历史沉淀。</p>
+            <div class="prompt-code">
+              A Cinematic Still of a <span>majestic crane shot</span> rising slowly from the <span>plush crimson velvet seats</span> towards the grand ornate ceiling and glowing crystal chandelier in a historic Baroque opera house. Atmospheric <span>volumetric lighting</span>... 8k, hyper-realistic.
+            </div>
+          </div>
+        </article>
+
+        <article class="masonry-item" style="border-top: 3px solid var(--accent-coral);">
+          <div class="card-image-wrapper">
+            <img src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=800" alt="Modern Gallery" />
+          </div>
+          <div class="item-content">
+            <h3 class="item-title">画廊 · 第一人称沉浸漫游</h3>
+            <p class="item-text">平视跟踪运镜配合纯净的漫射天光，消除生硬阴影，模拟真实看展体验。</p>
+            <div class="prompt-code">
+              <span>Eye-level tracking shot</span> moving smoothly through a minimalist modern art gallery with <span>polished concrete floors</span>. Soft diffused daylight streaming through frosted skylights... Symmetrical composition, serene atmosphere.
+            </div>
+          </div>
+        </article>
+
+        <article class="masonry-item" style="border-top: 3px solid var(--accent-green);">
+          <div class="card-image-wrapper">
+            <img src="https://images.unsplash.com/photo-1574359411659-15573a27fd0c?auto=format&fit=crop&q=80&w=800" alt="Museum Night" />
+          </div>
+          <div class="item-content">
+            <h3 class="item-title">博物馆 · 古典文物微距展示</h3>
+            <p class="item-text">微距运镜配合国家地理级打光，强调青铜锈迹与岁月痕迹的极致肌理。</p>
+            <div class="prompt-code">
+              <span>Macro slow-motion pan shot</span> moving across the surface of an ancient bronze artifact. Showcasing the <span>oxidized patina texture</span>. Professional museum studio lighting, <span>shallow depth of field</span>, National Geographic style.
+            </div>
+          </div>
+        </article>
+
+        <article class="masonry-item" style="border-top: 3px solid var(--primary);">
+          <div class="card-image-wrapper">
+            <img src="https://images.unsplash.com/photo-1562924318-7bc92e67df14?auto=format&fit=crop&q=80&w=800" alt="Concert Orbit" />
+          </div>
+          <div class="item-content">
+            <h3 class="item-title">音乐厅 · 交响乐团史诗环绕</h3>
+            <p class="item-text">360度平滑环绕舞台中央钢琴，聚焦温暖木质声学板与乐器高光反射。</p>
+            <div class="prompt-code">
+              Pristine <span>360-degree orbiting shot</span> around a grand piano on the stage of a magnificent wooden concert hall. <span>Warm golden hour lighting</span> hitting the <span>curved acoustic wood panels</span> and brass instruments. Epic scale.
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 工作流提示 -->
+    <section class="demo-section reveal-up">
+      <div class="workflow-tips">
+        <h3>质量控制与高阶工作流建议</h3>
+        <ul>
+          <li><strong>图生视频基底锁定：</strong>文生视频易产生"结构幻觉"。最佳实践是先用 Midjourney / Flux 生成首帧（定义建筑完美透视），再导入 Runway Gen-3 / Kling 3.0，Prompt 中<strong>只写运镜和动态</strong>，勿重复描述静态场景防止 Morphing 变形。</li>
+          <li><strong>跨镜头一致性：</strong>如需生成长篇漫游，在所有镜头的 Prompt 尾部附加统一的"风格锚点" (如 <code>35mm film stock, 5600K daylight</code>) 并固定 Seed 值。</li>
+          <li><strong>负向提示词：</strong>为保持艺术馆高雅纯净感，强烈建议排除：<code>people, crowd, warped pillars, melting architecture, plastic texture, CG look</code>。</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 生成控制台 -->
+    <section id="workspace" class="demo-section reveal-up">
+      <div class="section-header">
+        <span class="section-label">Generation Console</span>
+        <h2 class="section-title">AIGV 生成调度控制台</h2>
+      </div>
+
+      <div class="demo-workspace">
+        <div class="demo-workspace-form">
+          <form id="job-form" class="control-form">
+            <div class="form-group">
+              <label for="title">任务标识</label>
+              <input id="title" name="title" type="text" placeholder="如：白立方画廊穿梭漫游" />
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="ai_model">算力引擎 / 模型选择</label>
+                <select id="ai_model" name="ai_model">
+                  <option value="sora">OpenAI Sora 2</option>
+                  <option value="veo">Google Veo 3</option>
+                  <option value="runway">Runway Gen-3 Alpha</option>
+                  <option value="kling">Kling 3.0</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="fps">帧率 / 时长</label>
+                <select id="fps" name="fps">
+                  <option value="24">24fps (电影级) - 10s</option>
+                  <option value="60">60fps (丝滑慢动作) - 5s</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="camera_move_type">镜头语言与运镜</label>
+                <select id="camera_move_type" name="camera_move_type">
+                  <option value="orbit">Slow 360-degree Orbit</option>
+                  <option value="dolly_in">Cinematic Slow Push-in</option>
+                  <option value="crane_up">Majestic Crane Shot</option>
+                  <option value="fpv">Dynamic FPV Drone</option>
+                  <option value="tracking">Eye-level Tracking</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="asset_id">关联 3D 资产</label>
+                <select id="asset_id" name="asset_id">
+                  <option value="opera">Classical_Opera_House.glb</option>
+                  <option value="gallery">White_Cube_Gallery.fbx</option>
+                  <option value="none">无底层资产</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="environment_hint">主体材质与动态描述</label>
+              <textarea id="environment_hint" name="environment_hint" rows="2" placeholder="如：Translucent Carrara marble statue. Dust motes dancing in the air..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="lighting_hint">光影与氛围</label>
+              <textarea id="lighting_hint" name="lighting_hint" rows="2" placeholder="如：Volumetric spotlight cutting through theatrical haze..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="style_anchor">风格与美学参数</label>
+              <textarea id="style_anchor" name="style_anchor" rows="2" placeholder="如：Shot on Arri Alexa 65, 8k resolution. --no people, warped pillars"></textarea>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn-primary" id="submit-btn">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>下发算力生成任务</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="demo-preview-panel">
+          <div class="panel-title">推理队列与生成结果状态</div>
+          <div id="job-status" class="status-box">控制台就绪。等待组装黄金六格 Prompt 并派发任务...</div>
+          <div id="job-result" class="result-box"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 页脚 -->
+    <footer class="app-footer">
+      <div class="footer-content">
+        <div class="footer-brand">
+          <span class="brand-icon"></span>
+          <span>AIGV Studio</span>
+        </div>
+        <p class="footer-desc">
+          Flask + Blender + MCP + 多模型路由的文创视频智能生成平台
+        </p>
+        <p class="footer-copyright">
+          基于空间智能与知识增强的视频生产引擎
+        </p>
+      </div>
+    </footer>
+
+    <script>
+      // 滚动显现动效
+      const observer = new IntersectionObserver((entries, ob) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("active");
+            ob.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.1 });
+      document.querySelectorAll(".reveal-up").forEach(el => observer.observe(el));
+
+      // 表单提交模拟
+      const form = document.getElementById("job-form");
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const btn = document.getElementById("submit-btn");
+        const status = document.getElementById("job-status");
+
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-dasharray="30" stroke-dashoffset="0"><animateTransform attributeName="transform" type="rotate" from="0 8 8" to="360 8 8" dur="1s" repeatCount="indefinite"/></circle></svg><span>编译 Prompt...</span>';
+        btn.disabled = true;
+
+        status.innerHTML = '<span class="status-info">[INFO]</span> 正在结合 3D 场景与光影矩阵重构语义...<br><span class="status-info">[INFO]</span> 正在请求算力调度...';
+
+        setTimeout(() => {
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>下发算力生成任务</span>';
+          btn.disabled = false;
+          status.innerHTML = '<span class="status-success">[SUCCESS]</span> 任务已提交至集群。正在执行图生视频推理...';
+        }, 2000);
+      });
+    </script>
+  </body>
+</html>

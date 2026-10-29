@@ -57,7 +57,7 @@
           </div>
           <div class="project-actions" id="project-actions">
             <button class="btn-outline btn-sm" id="btn-save-project" title="保存项目">保存</button>
-            <button class="btn-outline btn-sm" id="btn-reset-project" title="重置为演示数据">重置</button>
+            <button class="btn-outline btn-sm" id="btn-reset-project" title="清除本地进度并重新选择项目">重置</button>
           </div>
         </div>
 
@@ -111,12 +111,15 @@
     <footer class="status-bar">
       <div class="status-bar-content">
         <span class="status-indicator" id="connection-status">已连接</span>
-        <span class="status-info" id="demo-data-status">演示数据：加载中...</span>
+        <span class="status-info" id="demo-data-status">真实项目数据</span>
         <span class="status-version">AIGV Studio v2.0</span>
       </div>
     </footer>
 
+    <script src="/web/runtime-config.js"></script>
+    <script src="/web/api-client.js"></script>
     <script src="/web/aigv-demo-data.js"></script>
     <script src="/web/creative-studio.js"></script>
+    <script src="/web/session-nav.js"></script>
   </body>
 </html>

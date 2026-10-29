@@ -79,7 +79,10 @@ def rate_limit(max_requests, window_s, key_func=None):
             if key_func:
                 key = key_func(request) if callable(key_func) else str(key_func)
             else:
-                key = 'ip:' + (request.headers.get('X-Forwarded-For', request.remote_addr) or 'unknown')
+                # ProxyFix (when TRUST_PROXY is enabled) already rewrites
+                # remote_addr from trusted headers.  Never trust a raw
+                # X-Forwarded-For supplied by the client.
+                key = 'ip:' + (request.remote_addr or 'unknown')
 
             endpoint_key = request.endpoint or 'unknown'
             full_key = '{0}:{1}'.format(endpoint_key, key)

@@ -59,8 +59,12 @@ class StoryboardService(object):
         self.db.insert("storyboard_shots", params)
         return shot
 
-    def update_shot(self, shot_id, **kwargs):
-        """Update a storyboard shot."""
+    def update_shot(self, shot_id, cursor=None, **kwargs):
+        """Update a storyboard shot.
+
+        Pass ``cursor`` when called inside ``db.transaction()`` so the update
+        joins the surrounding transaction instead of taking the DB write lock.
+        """
         existing = self.get_shot(shot_id)
         if not existing:
             return None
@@ -70,7 +74,7 @@ class StoryboardService(object):
             "duration_s", "dialogue", "voice_id", "camera_movement",
             "lighting_mood", "environment_detail", "character_action",
             "visual_style", "prompt_cn", "prompt_en", "negative_prompt",
-            "primary_image_asset_id", "video_asset_id", "audio_asset_id",
+            "primary_image_asset_id", "keyframe_asset_id", "video_asset_id", "audio_asset_id",
             "srt_path", "video_url", "status", "metadata",
         ]
         update_data = {}
@@ -85,7 +89,16 @@ class StoryboardService(object):
         existing.updated_at = _now()
         update_data["updated_at"] = existing.updated_at
 
-        self.db.update("storyboard_shots", update_data, "id = ?", (shot_id,))
+        if cursor is None:
+            self.db.update("storyboard_shots", update_data, "id = ?", (shot_id,))
+        else:
+            columns = list(update_data.keys())
+            cursor.execute(
+                "UPDATE storyboard_shots SET {0} WHERE id = ?".format(
+                    ", ".join("{0} = ?".format(column) for column in columns)
+                ),
+                tuple(update_data[column] for column in columns) + (shot_id,),
+            )
         return self.get_shot(shot_id)
 
     def delete_shot(self, shot_id):

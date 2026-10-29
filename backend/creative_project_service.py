@@ -5,6 +5,7 @@ Creative project service for AIGV Studio.
 from __future__ import absolute_import
 
 import logging
+import os
 import time
 
 from .database import get_database
@@ -21,22 +22,29 @@ class CreativeProjectService(object):
     """Service for managing creative production projects."""
 
     def __init__(self, data_dir=None):
+        self.data_dir = data_dir or os.environ.get('DATA_DIR', './data')
         self.db = get_database()
 
-    def list_projects(self, tenant_id=None, limit=100, offset=0):
-        """List creative projects, optionally filtered by tenant."""
+    def list_projects(self, tenant_id=None, user_id=None, include_unowned=False, limit=100, offset=0):
+        """List creative projects with optional tenant/user scoping."""
+        conditions = []
+        params = []
         if tenant_id:
-            rows = self.db.fetch_all(
-                "SELECT * FROM creative_projects WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (tenant_id, limit, offset),
-            )
-            total = self.db.count("creative_projects", "tenant_id = ?", (tenant_id,))
-        else:
-            rows = self.db.fetch_all(
-                "SELECT * FROM creative_projects ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (limit, offset),
-            )
-            total = self.db.count("creative_projects")
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
+        if user_id:
+            if include_unowned:
+                conditions.append("(user_id = ? OR user_id IS NULL)")
+                params.append(user_id)
+            else:
+                conditions.append("user_id = ?")
+                params.append(user_id)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        rows = self.db.fetch_all(
+            "SELECT * FROM creative_projects WHERE {0} ORDER BY created_at DESC LIMIT ? OFFSET ?".format(where),
+            tuple(params) + (limit, offset),
+        )
+        total = self.db.count("creative_projects", where, tuple(params))
 
         projects = [CreativeProject.from_row(r) for r in rows]
         return {
@@ -89,21 +97,42 @@ class CreativeProjectService(object):
         return self.get_project(project_id)
 
     def delete_project(self, project_id):
-        """Delete a creative project and related data."""
-        # Delete storyboard shots
+        """Delete a creative project and related data.
+
+        Generated assets are removed only after the project rows are gone and
+        only when no other shot/timeline/task still references them.
+        """
+        asset_ids = set()
+        for row in self.db.fetch_all(
+            "SELECT output_asset_id FROM generation_tasks "
+            "WHERE creative_project_id = ? AND output_asset_id IS NOT NULL",
+            (project_id,),
+        ):
+            asset_ids.add(row["output_asset_id"])
+        for row in self.db.fetch_all(
+            "SELECT DISTINCT asset_id FROM task_artifacts "
+            "WHERE creative_project_id = ? AND asset_id IS NOT NULL",
+            (project_id,),
+        ):
+            asset_ids.add(row["asset_id"])
+
         self.db.delete("storyboard_shots", "creative_project_id = ?", (project_id,))
-        # Delete timeline clips
         self.db.delete("timeline_clips", "creative_project_id = ?", (project_id,))
-        # Delete timeline tracks
         self.db.delete("timeline_tracks", "creative_project_id = ?", (project_id,))
-        # Delete task artifacts
         self.db.delete("task_artifacts", "creative_project_id = ?", (project_id,))
-        # Delete generation tasks
         self.db.delete("generation_tasks", "creative_project_id = ?", (project_id,))
-        # Delete export packages
         self.db.delete("export_packages", "creative_project_id = ?", (project_id,))
-        # Delete the project
         deleted = self.db.delete("creative_projects", "id = ?", (project_id,))
+
+        if deleted and asset_ids:
+            from .asset_service import get_asset_service
+            asset_service = get_asset_service(self.data_dir)
+            for asset_id in asset_ids:
+                if sum(asset_service.asset_reference_breakdown(asset_id).values()):
+                    continue
+                asset = asset_service.get_asset(asset_id)
+                if asset and (asset.metadata or {}).get("source") == "generation":
+                    asset_service.delete_asset(asset_id)
         return deleted > 0
 
 

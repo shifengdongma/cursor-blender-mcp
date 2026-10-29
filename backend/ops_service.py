@@ -57,7 +57,8 @@ class OpsService(object):
         self.data_dir = data_dir or os.environ.get('DATA_DIR', './data')
         self.db = get_database(os.path.join(self.data_dir, 'aigv.db'))
 
-    def record_event(self, tenant_id, project_id, job_id, event_type, severity, message, metadata=None):
+    def record_event(self, tenant_id, project_id, job_id, event_type, severity, message,
+                     metadata=None, actor_user_id=None, request_id=None):
         event = OpsEvent(
             tenant_id=tenant_id,
             project_id=project_id,
@@ -66,6 +67,8 @@ class OpsService(object):
             severity=severity,
             message=message,
             metadata=metadata or {},
+            actor_user_id=actor_user_id,
+            request_id=request_id,
         )
         self.db.insert(OpsEvent.TABLE_NAME, event.to_insert_params())
         return event.to_dict()
@@ -108,6 +111,8 @@ class OpsService(object):
                 'target_id': target_id,
                 'details': sanitized,
             },
+            actor_user_id=user_id,
+            request_id=request_id,
         )
 
 

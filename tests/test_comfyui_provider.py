@@ -100,9 +100,27 @@ class TestComfyUIProvider(object):
                 with patch("backend.providers.image_provider.requests.get") as mock_get:
                     resp = MagicMock()
                     resp.status_code = 200
-                    resp.content = b"fake-png-data"
+                    resp.iter_content.return_value = [b"\x89PNG\r\n\x1a\n" + b"0" * 128]
                     mock_get.return_value = resp
 
                     files = provider.download_results("test", tmpdir)
                     assert len(files) == 1
-                    assert files[0].endswith("test_00001_.png")
+                    # Server-supplied filenames are never trusted.
+                    assert files[0].endswith(".png")
+                    assert os.path.isfile(files[0])
+
+    def test_download_rejects_non_image(self):
+        provider = self.make_provider()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            entry = {
+                "outputs": {
+                    "9": {"images": [{"filename": "x.png", "subfolder": "", "type": "output"}]}
+                }
+            }
+            with patch("backend.providers.image_provider.requests.get") as mock_get:
+                resp = MagicMock()
+                resp.status_code = 200
+                resp.iter_content.return_value = [b"<html>not an image</html>"]
+                mock_get.return_value = resp
+                with pytest.raises(ProviderError):
+                    provider.download_results_from_history(entry, tmpdir)

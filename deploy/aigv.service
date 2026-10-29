@@ -1,0 +1,22 @@
+[Unit]
+Description=AIGV Studio web (Gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=aigv
+Group=aigv
+WorkingDirectory=/srv/aigv-studio
+EnvironmentFile=/srv/aigv-studio/.env
+# START_TASK_WORKER must stay false when running multiple Gunicorn workers.
+ExecStart=/srv/aigv-studio/.venv/bin/gunicorn \
+    --workers 4 \
+    --bind 127.0.0.1:8000 \
+    --access-logfile - \
+    --error-logfile - \
+    wsgi:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

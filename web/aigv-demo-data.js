@@ -5,6 +5,11 @@
 (function() {
   'use strict';
 
+  if (!window.AIGV_RUNTIME || !window.AIGV_RUNTIME.demoMode) {
+    window.AIGV_DEMO_DATA = null;
+    return;
+  }
+
   var creativeProjects = [
     {
       id: "proj-chu-culture",

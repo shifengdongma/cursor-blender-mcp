@@ -170,11 +170,17 @@ class MediaService(object):
         if not clip_specs:
             raise MediaServiceError("No clips provided for composition")
 
-        # Write concat file
+        # Write concat file. Reject paths that could break the concat syntax.
         concat_file = os.path.join(self.work_dir, "{0}_concat.txt".format(str(uuid.uuid4())[:8]))
         with open(concat_file, "w") as f:
             for spec in clip_specs:
-                f.write("file '{0}'\n".format(spec["file_path"]))
+                raw_path = str(spec["file_path"])
+                if "://" in raw_path or raw_path.startswith("data:"):
+                    raise MediaServiceError("Remote media URLs are not allowed in composition")
+                path = os.path.abspath(raw_path)
+                if any(ch in path for ch in ("'", "\n", "\r")):
+                    raise MediaServiceError("Unsafe media path in composition")
+                f.write("file '{0}'\n".format(path))
 
         args = [
             "-f", "concat", "-safe", "0",
@@ -209,7 +215,13 @@ class MediaService(object):
             concat_file = os.path.join(self.work_dir, "{0}_audio.txt".format(str(uuid.uuid4())[:8]))
             with open(concat_file, "w") as f:
                 for af in audio_files:
-                    f.write("file '{0}'\n".format(af))
+                    raw_path = str(af)
+                    if "://" in raw_path or raw_path.startswith("data:"):
+                        raise MediaServiceError("Remote audio URLs are not allowed")
+                    path = os.path.abspath(raw_path)
+                    if any(ch in path for ch in ("'", "\n", "\r")):
+                        raise MediaServiceError("Unsafe audio path")
+                    f.write("file '{0}'\n".format(path))
 
             args = [
                 "-f", "concat", "-safe", "0",

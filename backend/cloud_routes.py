@@ -4,11 +4,12 @@ from __future__ import absolute_import
 
 import logging
 
-from flask import request
+from flask import g, request
 
 from .auth_middleware import (
     login_required,
     permission_required,
+    is_admin,
     PERM_VIEW_COMPUTE,
     PERM_MANAGE_COMPUTE,
     PERM_SUBMIT_RENDER_JOB,
@@ -25,13 +26,23 @@ logger = logging.getLogger(__name__)
 def register_cloud_routes(app, cfg, json_success, json_error):
     cloud_service = get_cloud_inventory_service(cfg.DATA_DIR, cfg)
 
+    def _account_allowed(account_id):
+        row = cloud_service.db.fetch_one(
+            'SELECT tenant_id FROM cloud_accounts WHERE id = ?', (account_id,)
+        )
+        if not row:
+            return None
+        if is_admin(g.current_user):
+            return True
+        return row.get('tenant_id') == g.current_user.get('tenant_id')
+
     # ── Cloud Accounts ──
 
     @app.route('/api/cloud/providers', methods=['GET'])
     @login_required
     @permission_required(PERM_VIEW_COMPUTE)
     def list_cloud_providers():
-        tenant_id = request.args.get('tenant_id') or (__import__('flask').session.get('user') or {}).get('tenant_id')
+        tenant_id = request.args.get('tenant_id') if is_admin(g.current_user) else g.current_user.get('tenant_id')
         return json_success(cloud_service.list_accounts(tenant_id=tenant_id))
 
     @app.route('/api/cloud/providers', methods=['POST'])
@@ -39,7 +50,7 @@ def register_cloud_routes(app, cfg, json_success, json_error):
     @permission_required(PERM_MANAGE_CLOUD_ACCOUNTS)
     def create_cloud_provider():
         payload = parse_json_body(request)
-        tenant_id = payload.get('tenant_id') or (__import__('flask').session.get('user') or {}).get('tenant_id')
+        tenant_id = payload.get('tenant_id') if is_admin(g.current_user) else g.current_user.get('tenant_id')
         if not tenant_id:
             return json_error('missing_field', '缺少 tenant_id', 400)
 
@@ -62,6 +73,11 @@ def register_cloud_routes(app, cfg, json_success, json_error):
     @login_required
     @permission_required(PERM_MANAGE_CLOUD_ACCOUNTS)
     def delete_cloud_provider(account_id):
+        allowed = _account_allowed(account_id)
+        if allowed is None:
+            return json_error('not_found', '云账号不存在', 404)
+        if allowed is not True:
+            return json_error('forbidden', '无权操作该云账号', 403)
         try:
             cloud_service.delete_account(account_id)
             return json_success(None, message='已删除')
@@ -73,6 +89,11 @@ def register_cloud_routes(app, cfg, json_success, json_error):
     @login_required
     @permission_required(PERM_MANAGE_COMPUTE)
     def sync_cloud_provider(account_id):
+        allowed = _account_allowed(account_id)
+        if allowed is None:
+            return json_error('not_found', '云账号不存在', 404)
+        if allowed is not True:
+            return json_error('forbidden', '无权操作该云账号', 403)
         try:
             result = cloud_service.sync_hosts(account_id)
             return json_success(result)
@@ -86,6 +107,11 @@ def register_cloud_routes(app, cfg, json_success, json_error):
     @login_required
     @permission_required(PERM_VIEW_COMPUTE)
     def cloud_provider_health(account_id):
+        allowed = _account_allowed(account_id)
+        if allowed is None:
+            return json_error('not_found', '云账号不存在', 404)
+        if allowed is not True:
+            return json_error('forbidden', '无权操作该云账号', 403)
         try:
             result = cloud_service.provider_health_check(account_id)
             return json_success(result)
@@ -101,7 +127,7 @@ def register_cloud_routes(app, cfg, json_success, json_error):
     @login_required
     @permission_required(PERM_VIEW_COMPUTE)
     def list_cloud_hosts():
-        tenant_id = request.args.get('tenant_id')
+        tenant_id = request.args.get('tenant_id') if is_admin(g.current_user) else g.current_user.get('tenant_id')
         provider_type = request.args.get('provider_type')
         region = request.args.get('region')
         status = request.args.get('status')
@@ -134,4 +160,6 @@ def register_cloud_routes(app, cfg, json_success, json_error):
         host = cloud_service.get_host(host_id)
         if not host:
             return json_error('not_found', '主机不存在', 404)
+        if not is_admin(g.current_user) and host.get('tenant_id') != g.current_user.get('tenant_id'):
+            return json_error('forbidden', '无权访问该主机', 403)
         return json_success(host)

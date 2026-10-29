@@ -4,8 +4,10 @@ from __future__ import absolute_import
 
 import logging
 import os
+import re
 import threading
 import time
+import uuid
 
 from .config import Config
 from .database import get_database
@@ -41,14 +43,14 @@ class RenderService(object):
 
     def create_render_job(self, tenant_id, project_id, node_id, engine_type,
                           asset_id, input_spec, output_dir=None):
-        """Create a render job record and return it."""
-        if not output_dir:
-            job_id = RenderJob.__init__.__defaults__[0] if False else None
-            output_dir = os.path.join(self.data_dir, 'renders', '{0}_{1}'.format(
-                tenant_id or 'default', int(time.time())))
+        """Create a render job record. output_dir is server-controlled."""
+        job_id = str(uuid.uuid4())
+        safe_tenant = re.sub(r'[^A-Za-z0-9_.-]', '_', tenant_id or 'default')[:80]
+        output_dir = os.path.join(self.data_dir, 'renders', safe_tenant, job_id)
         os.makedirs(output_dir, exist_ok=True)
 
         job = RenderJob(
+            id=job_id,
             tenant_id=tenant_id,
             project_id=project_id,
             node_id=node_id,
@@ -262,12 +264,17 @@ class RenderService(object):
                 _active_tasks.pop(job_id, None)
 
     def get_render_output(self, job_id, filename):
-        """Serve a render output file."""
+        """Resolve a render output file inside the job's output directory."""
         job = self.get_render_job(job_id)
         if not job:
             raise ValueError('Render job not found')
-        filepath = os.path.join(job.get('output_dir', ''), filename)
-        if not os.path.exists(filepath):
+        base = os.path.realpath(job.get('output_dir') or '')
+        if not base:
+            raise ValueError('Render output directory missing')
+        filepath = os.path.realpath(os.path.join(base, filename))
+        if filepath != base and not filepath.startswith(base + os.sep):
+            raise ValueError('Invalid render output path')
+        if not os.path.isfile(filepath):
             raise ValueError('File not found: {0}'.format(filename))
         return filepath
 

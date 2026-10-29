@@ -61,16 +61,8 @@
     return fallback;
   }
 
-  async function api(path, options) {
-    var res = await fetch(path, options || {});
-    var contentType = res.headers.get("content-type") || "";
-    var payload = contentType.indexOf("application/json") >= 0 ? await res.json() : await res.text();
-    if (!res.ok) throw new Error(apiMessage(payload, "请求失败: " + res.status));
-    if (payload && typeof payload === "object" && payload.success !== undefined) {
-      if (!payload.success) throw new Error(apiMessage(payload, "请求失败"));
-      return payload.data;
-    }
-    return payload;
+  function api(path, options) {
+    return window.AIGV.api(path, options || {});
   }
 
   function setUiStatus(status, message) {
@@ -561,6 +553,39 @@
     populateSelect(els.projectId, (state.demoContext && state.demoContext.available_projects) || [], function (item) { return item.name; }, state.demoContext && state.demoContext.project && state.demoContext.project.id);
   }
 
+  async function loadAssetLibrary() {
+    var grid = document.getElementById('asset-grid');
+    if (!grid) return;
+    var typeLabels = {
+      glb: '3D模型', image: '图片', video: '视频', audio: '音频',
+      document: '文档', archive: '压缩包', spatial_anchor: '空间锚点'
+    };
+    try {
+      var data = await api('/api/assets?limit=6');
+      var items = (data && data.items) || [];
+      if (!items.length) {
+        grid.innerHTML = '<div class="empty-state-container">' +
+          '<h3 class="empty-title">素材库还是空的</h3>' +
+          '<p class="empty-desc">在素材库上传文件，或从创意工作台生成第一张图片。</p>' +
+          '<a class="btn-outline btn-sm" href="/assets">前往素材库</a></div>';
+        return;
+      }
+      grid.innerHTML = items.map(function (asset) {
+        var typeLabel = typeLabels[asset.asset_type] || asset.asset_type || '素材';
+        return '<a class="asset-card" href="/assets" style="text-decoration:none;color:inherit;display:block;">' +
+          '<header><h3>' + escapeHtml(asset.name) + '</h3>' +
+          '<span class="route-badge">' + escapeHtml(typeLabel) + '</span></header>' +
+          '<p>' + escapeHtml(asset.description || '暂无描述') + '</p>' +
+          '<div class="meta-tag">' + escapeHtml(window.AIGV.formatTime(asset.created_at)) + '</div>' +
+          '</a>';
+      }).join('');
+    } catch (err) {
+      grid.innerHTML = '<div class="empty-state-container">' +
+        '<h3 class="empty-title">素材加载失败</h3>' +
+        '<p class="empty-desc">' + escapeHtml(err.message || '请稍后重试') + '</p></div>';
+    }
+  }
+
   async function bootstrap() {
     cacheElements();
     bindEvents();
@@ -573,7 +598,7 @@
       initializeSelects();
       applyVenueDefaults();
       renderJob(null);
-      await previewPrompt({ silent: true });
+      await Promise.all([previewPrompt({ silent: true }), loadAssetLibrary()]);
       setUiStatus('ready', '工作台就绪，请配置场景参数后提交任务。');
     } catch (err) {
       setUiStatus('error', '初始化失败：' + err.message);

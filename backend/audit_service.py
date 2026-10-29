@@ -75,6 +75,8 @@ class AuditService(object):
                 'request_id': request_id,
                 'details': audit_metadata,
             },
+            actor_user_id=user_id,
+            request_id=request_id,
         )
 
     def record_login(self, user_id, tenant_id, success=True, metadata=None, request_id=None):

@@ -132,31 +132,79 @@ class ComfyUIProvider(BaseImageProvider):
 
         raise ProviderError("ComfyUI generation timed out after {0}s".format(timeout_s), error_type="comfyui_timeout")
 
-    def download_results(self, prompt_id, output_dir):
-        """Download generated images from ComfyUI."""
+    def download_results(self, prompt_id, output_dir, max_bytes=None):
+        """Synchronous compatibility helper: wait, then download."""
         history_entry = self.wait_until_done(prompt_id)
-        outputs = history_entry.get("outputs") or {}
+        return self.download_results_from_history(
+            history_entry, output_dir, max_bytes=max_bytes
+        )
+
+    def download_results_from_history(self, history_entry, output_dir, max_bytes=None):
+        """Download images described by a completed ComfyUI history entry.
+
+        The worker calls this after polling, so no blocking wait is involved.
+        Filenames are never trusted: a UUID-based name is generated locally and
+        the payload is checked for an image magic header and size limit.
+        """
+        outputs = (history_entry or {}).get("outputs") or {}
         file_paths = []
+        max_bytes = max_bytes or 200 * 1024 * 1024
 
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
 
-        for node_id, node_outputs in outputs.items():
-            images = node_outputs.get("images") or []
+        for _node_id, node_outputs in outputs.items():
+            images = (node_outputs or {}).get("images") or []
             for img_info in images:
-                filename = img_info.get("filename") or "{0}.png".format(str(uuid.uuid4())[:8])
-                # Get from ComfyUI
+                filename = os.path.basename(str(img_info.get("filename") or ""))
+                if not filename:
+                    continue
                 view_url = "{0}/view".format(self.base_url)
                 params = {
                     "filename": filename,
                     "subfolder": img_info.get("subfolder", ""),
                     "type": img_info.get("type", "output"),
                 }
-                r = requests.get(view_url, params=params, timeout=60)
-                if r.status_code == 200:
-                    out_path = os.path.join(output_dir, filename)
-                    with open(out_path, "wb") as f:
-                        f.write(r.content)
-                    file_paths.append(out_path)
+                try:
+                    response = requests.get(
+                        view_url, params=params, timeout=60, stream=True
+                    )
+                except requests.exceptions.RequestException as exc:
+                    raise ProviderError(
+                        "ComfyUI 下载失败: {0}".format(str(exc)[:200]),
+                        error_type="comfyui_download_error",
+                    )
+                if response.status_code != 200:
+                    response.close()
+                    continue
+
+                chunks = []
+                total = 0
+                for chunk in response.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > max_bytes:
+                        response.close()
+                        raise ProviderError(
+                            "ComfyUI 图片超过大小限制", error_type="comfyui_file_too_large"
+                        )
+                    chunks.append(chunk)
+                response.close()
+                raw = b"".join(chunks)
+                if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+                    extension = ".png"
+                elif raw.startswith(b"\xff\xd8\xff"):
+                    extension = ".jpg"
+                elif len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+                    extension = ".webp"
+                else:
+                    raise ProviderError(
+                        "ComfyUI 返回了非图片内容",
+                        error_type="comfyui_invalid_file",
+                    )
+                out_path = os.path.join(output_dir, uuid.uuid4().hex + extension)
+                with open(out_path, "wb") as handle:
+                    handle.write(raw)
+                file_paths.append(out_path)
 
         return file_paths

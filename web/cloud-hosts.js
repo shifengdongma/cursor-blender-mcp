@@ -18,21 +18,7 @@
 
   // ── API helper ──
   function api(path) {
-    return fetch(path).then(function(response) {
-      if (!response.ok) {
-        return response.json().catch(function() {
-          throw new Error('HTTP ' + response.status + ': ' + response.statusText);
-        }).then(function(json) {
-          throw new Error(json.message || json.error || 'HTTP ' + response.status);
-        });
-      }
-      return response.json();
-    }).then(function(json) {
-      if (!json.success) {
-        throw new Error(json.message || json.error || 'API error');
-      }
-      return json.data;
-    });
+    return window.AIGV.api(path);
   }
 
   // ── Toast notification ──
@@ -102,7 +88,12 @@
 
   var LS_KEY = 'aigv_cloud_hosts_v1';
 
+  function demoMode() {
+    return !!(window.AIGV_RUNTIME && window.AIGV_RUNTIME.demoMode);
+  }
+
   function saveToLocalStorage() {
+    if (!demoMode()) return;
     try {
       var payload = {
         scope: state.scope,
@@ -114,6 +105,10 @@
   }
 
   function loadFromLocalStorage() {
+    if (!demoMode()) {
+      try { localStorage.removeItem(LS_KEY); } catch (e) {}
+      return;
+    }
     try {
       var raw = localStorage.getItem(LS_KEY);
       if (!raw) return;
@@ -601,6 +596,10 @@
 
   function performAction(nodeName, action) {
     var actionLabels = { start: '开机', stop: '关机', restart: '重启', maintenance: '进入维护' };
+    if (!demoMode()) {
+      showToast('未接入真实云主机操作 API，生产模式不允许模拟启停', 'warning');
+      return;
+    }
 
     if (!state.modifiedStates[nodeName]) state.modifiedStates[nodeName] = {};
 

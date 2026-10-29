@@ -14,7 +14,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from backend.auth_service import AuthService
+from backend.auth_service import AuthError, AuthService
+from backend.config import Config
 from backend.rate_limiter import RateLimiter
 
 
@@ -70,7 +71,11 @@ class TestPasswordSecurity:
         assert check_password_hash(hashed, password) is True
         assert check_password_hash(hashed, 'wrong-password') is False
 
-    def test_password_minimum_length(self):
-        """Test that short passwords are rejected."""
-        short_pwd = '12345'  # 5 chars, min is 6
-        assert len(short_pwd) < 6
+    def test_password_minimum_length(self, tmp_path):
+        """The configured minimum is 8 and shorter passwords are rejected."""
+        service = AuthService(str(tmp_path), Config())
+        assert service.password_min >= 8
+        with pytest.raises(AuthError) as exc:
+            service.validate_password("1234567", "user")
+        assert exc.value.code == "weak_password"
+        assert service.validate_password("12345678", "user") == "12345678"

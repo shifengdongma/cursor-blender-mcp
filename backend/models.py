@@ -59,6 +59,7 @@ class Asset(BaseModel):
     COLUMNS = [
         'id', 'name', 'asset_type', 'venue_type', 'file_path',
         'file_size', 'description', 'metadata', 'thumbnail_path',
+        'owner_user_id', 'tenant_id', 'visibility', 'checksum_sha256',
         'created_at', 'updated_at'
     ]
 
@@ -72,6 +73,10 @@ class Asset(BaseModel):
         self.description = kwargs.get('description')
         self.metadata = kwargs.get('metadata')
         self.thumbnail_path = kwargs.get('thumbnail_path')
+        self.owner_user_id = kwargs.get('owner_user_id')
+        self.tenant_id = kwargs.get('tenant_id')
+        self.visibility = kwargs.get('visibility') or ('shared' if not self.owner_user_id else 'private')
+        self.checksum_sha256 = kwargs.get('checksum_sha256')
         self.created_at = kwargs.get('created_at') or _now()
         self.updated_at = kwargs.get('updated_at') or _now()
 
@@ -89,6 +94,10 @@ class Asset(BaseModel):
             description=row.get('description'),
             metadata=_json_loads(row.get('metadata')),
             thumbnail_path=row.get('thumbnail_path'),
+            owner_user_id=row.get('owner_user_id'),
+            tenant_id=row.get('tenant_id'),
+            visibility=row.get('visibility'),
+            checksum_sha256=row.get('checksum_sha256'),
             created_at=row.get('created_at'),
             updated_at=row.get('updated_at')
         )
@@ -104,6 +113,10 @@ class Asset(BaseModel):
             'description': self.description,
             'metadata': self.metadata,
             'thumbnail_path': self.thumbnail_path,
+            'owner_user_id': self.owner_user_id,
+            'tenant_id': self.tenant_id,
+            'visibility': self.visibility,
+            'checksum_sha256': self.checksum_sha256,
             'created_at': self.created_at,
             'updated_at': self.updated_at
         }
@@ -119,6 +132,10 @@ class Asset(BaseModel):
             'description': self.description,
             'metadata': _json_dumps(self.metadata),
             'thumbnail_path': self.thumbnail_path,
+            'owner_user_id': self.owner_user_id,
+            'tenant_id': self.tenant_id,
+            'visibility': self.visibility,
+            'checksum_sha256': self.checksum_sha256,
             'created_at': self.created_at,
             'updated_at': self.updated_at
         }
@@ -1159,7 +1176,7 @@ class BillingUsageRecord(BaseModel):
 
 class OpsEvent(BaseModel):
     TABLE_NAME = 'ops_events'
-    COLUMNS = ['id', 'tenant_id', 'project_id', 'job_id', 'event_type', 'severity', 'message', 'metadata', 'created_at', 'updated_at']
+    COLUMNS = ['id', 'tenant_id', 'project_id', 'job_id', 'event_type', 'severity', 'message', 'metadata', 'actor_user_id', 'request_id', 'created_at', 'updated_at']
 
     def __init__(self, **kwargs):
         self.id = kwargs.get('id') or _generate_id()
@@ -1170,6 +1187,8 @@ class OpsEvent(BaseModel):
         self.severity = kwargs.get('severity')
         self.message = kwargs.get('message')
         self.metadata = kwargs.get('metadata')
+        self.actor_user_id = kwargs.get('actor_user_id')
+        self.request_id = kwargs.get('request_id')
         self.created_at = kwargs.get('created_at') or _now()
         self.updated_at = kwargs.get('updated_at') or _now()
 
@@ -1186,6 +1205,8 @@ class OpsEvent(BaseModel):
             severity=row.get('severity'),
             message=row.get('message'),
             metadata=_json_loads(row.get('metadata')),
+            actor_user_id=row.get('actor_user_id'),
+            request_id=row.get('request_id'),
             created_at=row.get('created_at'),
             updated_at=row.get('updated_at')
         )
@@ -1200,6 +1221,8 @@ class OpsEvent(BaseModel):
             'severity': self.severity,
             'message': self.message,
             'metadata': self.metadata,
+            'actor_user_id': self.actor_user_id,
+            'request_id': self.request_id,
             'created_at': self.created_at,
             'updated_at': self.updated_at
         }
@@ -1214,6 +1237,8 @@ class OpsEvent(BaseModel):
             'severity': self.severity,
             'message': self.message,
             'metadata': _json_dumps(self.metadata),
+            'actor_user_id': self.actor_user_id,
+            'request_id': self.request_id,
             'created_at': self.created_at,
             'updated_at': self.updated_at
         }
@@ -1323,6 +1348,7 @@ class StoryboardShot(BaseModel):
     STATUS_GENERATING_IMAGE = 'generating_image'
     STATUS_GENERATING_VIDEO = 'generating_video'
     STATUS_READY = 'ready'
+    STATUS_CONFIRMED = 'confirmed'
     STATUS_FAILED = 'failed'
 
     COLUMNS = [
@@ -1331,7 +1357,7 @@ class StoryboardShot(BaseModel):
         'voice_id', 'camera_movement', 'lighting_mood',
         'environment_detail', 'character_action', 'visual_style',
         'prompt_cn', 'prompt_en', 'negative_prompt',
-        'primary_image_asset_id', 'video_asset_id', 'audio_asset_id',
+        'primary_image_asset_id', 'keyframe_asset_id', 'video_asset_id', 'audio_asset_id',
         'srt_path', 'video_url', 'status', 'metadata',
         'created_at', 'updated_at'
     ]
@@ -1355,6 +1381,7 @@ class StoryboardShot(BaseModel):
         self.prompt_en = kwargs.get('prompt_en')
         self.negative_prompt = kwargs.get('negative_prompt')
         self.primary_image_asset_id = kwargs.get('primary_image_asset_id')
+        self.keyframe_asset_id = kwargs.get('keyframe_asset_id')
         self.video_asset_id = kwargs.get('video_asset_id')
         self.audio_asset_id = kwargs.get('audio_asset_id')
         self.srt_path = kwargs.get('srt_path')
@@ -1387,6 +1414,7 @@ class StoryboardShot(BaseModel):
             prompt_en=row.get('prompt_en'),
             negative_prompt=row.get('negative_prompt'),
             primary_image_asset_id=row.get('primary_image_asset_id'),
+            keyframe_asset_id=row.get('keyframe_asset_id'),
             video_asset_id=row.get('video_asset_id'),
             audio_asset_id=row.get('audio_asset_id'),
             srt_path=row.get('srt_path'),
@@ -1417,6 +1445,7 @@ class StoryboardShot(BaseModel):
             'prompt_en': self.prompt_en,
             'negative_prompt': self.negative_prompt,
             'primary_image_asset_id': self.primary_image_asset_id,
+            'keyframe_asset_id': self.keyframe_asset_id,
             'video_asset_id': self.video_asset_id,
             'audio_asset_id': self.audio_asset_id,
             'srt_path': self.srt_path,
@@ -1447,6 +1476,7 @@ class StoryboardShot(BaseModel):
             'prompt_en': self.prompt_en,
             'negative_prompt': self.negative_prompt,
             'primary_image_asset_id': self.primary_image_asset_id,
+            'keyframe_asset_id': self.keyframe_asset_id,
             'video_asset_id': self.video_asset_id,
             'audio_asset_id': self.audio_asset_id,
             'srt_path': self.srt_path,
@@ -1470,17 +1500,25 @@ class GenerationTask(BaseModel):
     TYPE_EXPORT = 'export'
 
     STATUS_QUEUED = 'queued'
+    STATUS_SUBMITTING = 'submitting'
     STATUS_RUNNING = 'running'
     STATUS_SUCCEEDED = 'succeeded'
     STATUS_FAILED = 'failed'
     STATUS_CANCELLED = 'cancelled'
+    STATUS_NEEDS_REVIEW = 'needs_review'
 
     COLUMNS = [
         'id', 'creative_project_id', 'task_type', 'status', 'stage',
         'progress', 'params', 'result_payload', 'error_code',
         'error_message', 'target_shot_id', 'target_asset_id',
         'claimed_at', 'completed_at', 'created_at', 'updated_at',
-        'created_by'
+        'created_by', 'provider', 'model_id', 'provider_job_id',
+        'provider_status', 'attempt_count', 'max_attempts',
+        'next_retry_at', 'lease_expires_at', 'lease_owner',
+        'submission_uncertain', 'submission_started_at',
+        'poll_error_count', 'last_polled_at', 'output_asset_id',
+        'client_request_id', 'cost_estimate', 'currency',
+        'cancel_requested'
     ]
 
     def __init__(self, **kwargs):
@@ -1501,6 +1539,24 @@ class GenerationTask(BaseModel):
         self.created_at = kwargs.get('created_at') or _now()
         self.updated_at = kwargs.get('updated_at') or _now()
         self.created_by = kwargs.get('created_by')
+        self.provider = kwargs.get('provider')
+        self.model_id = kwargs.get('model_id')
+        self.provider_job_id = kwargs.get('provider_job_id')
+        self.provider_status = kwargs.get('provider_status')
+        self.attempt_count = kwargs.get('attempt_count', 0)
+        self.max_attempts = kwargs.get('max_attempts', 3)
+        self.next_retry_at = kwargs.get('next_retry_at')
+        self.lease_expires_at = kwargs.get('lease_expires_at')
+        self.lease_owner = kwargs.get('lease_owner')
+        self.submission_uncertain = kwargs.get('submission_uncertain', 0)
+        self.submission_started_at = kwargs.get('submission_started_at')
+        self.poll_error_count = kwargs.get('poll_error_count', 0)
+        self.last_polled_at = kwargs.get('last_polled_at')
+        self.output_asset_id = kwargs.get('output_asset_id')
+        self.client_request_id = kwargs.get('client_request_id')
+        self.cost_estimate = kwargs.get('cost_estimate')
+        self.currency = kwargs.get('currency')
+        self.cancel_requested = kwargs.get('cancel_requested', 0)
 
     @classmethod
     def from_row(cls, row):
@@ -1524,6 +1580,24 @@ class GenerationTask(BaseModel):
             created_at=row.get('created_at'),
             updated_at=row.get('updated_at'),
             created_by=row.get('created_by'),
+            provider=row.get('provider'),
+            model_id=row.get('model_id'),
+            provider_job_id=row.get('provider_job_id'),
+            provider_status=row.get('provider_status'),
+            attempt_count=row.get('attempt_count'),
+            max_attempts=row.get('max_attempts'),
+            next_retry_at=row.get('next_retry_at'),
+            lease_expires_at=row.get('lease_expires_at'),
+            lease_owner=row.get('lease_owner'),
+            submission_uncertain=row.get('submission_uncertain'),
+            submission_started_at=row.get('submission_started_at'),
+            poll_error_count=row.get('poll_error_count'),
+            last_polled_at=row.get('last_polled_at'),
+            output_asset_id=row.get('output_asset_id'),
+            client_request_id=row.get('client_request_id'),
+            cost_estimate=row.get('cost_estimate'),
+            currency=row.get('currency'),
+            cancel_requested=row.get('cancel_requested'),
         )
 
     def to_dict(self):
@@ -1545,6 +1619,23 @@ class GenerationTask(BaseModel):
             'created_at': self.created_at,
             'updated_at': self.updated_at,
             'created_by': self.created_by,
+            'provider': self.provider,
+            'model_id': self.model_id,
+            'provider_job_id': self.provider_job_id,
+            'provider_status': self.provider_status,
+            'attempt_count': self.attempt_count,
+            'max_attempts': self.max_attempts,
+            'next_retry_at': self.next_retry_at,
+            'lease_expires_at': self.lease_expires_at,
+            'submission_uncertain': self.submission_uncertain,
+            'submission_started_at': self.submission_started_at,
+            'poll_error_count': self.poll_error_count,
+            'last_polled_at': self.last_polled_at,
+            'output_asset_id': self.output_asset_id,
+            'client_request_id': self.client_request_id,
+            'cost_estimate': self.cost_estimate,
+            'currency': self.currency,
+            'cancel_requested': self.cancel_requested,
         }
 
     def to_insert_params(self):
@@ -1566,6 +1657,24 @@ class GenerationTask(BaseModel):
             'created_at': self.created_at,
             'updated_at': self.updated_at,
             'created_by': self.created_by,
+            'provider': self.provider,
+            'model_id': self.model_id,
+            'provider_job_id': self.provider_job_id,
+            'provider_status': self.provider_status,
+            'attempt_count': self.attempt_count,
+            'max_attempts': self.max_attempts,
+            'next_retry_at': self.next_retry_at,
+            'lease_expires_at': self.lease_expires_at,
+            'lease_owner': self.lease_owner,
+            'submission_uncertain': self.submission_uncertain,
+            'submission_started_at': self.submission_started_at,
+            'poll_error_count': self.poll_error_count,
+            'last_polled_at': self.last_polled_at,
+            'output_asset_id': self.output_asset_id,
+            'client_request_id': self.client_request_id,
+            'cost_estimate': self.cost_estimate,
+            'currency': self.currency,
+            'cancel_requested': self.cancel_requested,
         }
 
 

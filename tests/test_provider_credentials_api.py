@@ -185,7 +185,10 @@ def test_llm_connection_test_uses_models_endpoint_without_leaking_key(client, mo
 
 def test_connection_test_maps_network_error_without_leaking_key(client, monkeypatch):
     _user, token = support.register_and_login(client, "credapi6")
-    created = _put(client, token, "luma", api_key="luma-secret-6666")
+    created = _put(
+        client, token, "luma",
+        api_key="luma-secret-6666", base_url=PUBLIC_BASE_URL,
+    )
     assert created.status_code == 200, created.get_json()
 
     def fake_head(url, **kwargs):

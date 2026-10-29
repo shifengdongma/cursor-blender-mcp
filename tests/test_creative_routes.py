@@ -7,7 +7,7 @@ import os
 import tempfile
 
 import pytest
-from flask import Flask
+from flask import Flask, g
 
 from backend import creative_project_service
 from backend import storyboard_service
@@ -33,6 +33,7 @@ def _json_error(code, message, status_code=400, details=None):
 
 class FakeConfig(object):
     DATA_DIR = tempfile.mkdtemp(prefix="aigv_test_")
+    DEMO_MODE = False
     LLM_API_KEY = "test-llm-key"
     LLM_BASE_URL = "https://api.openai.com/v1"
     LLM_MODEL_NAME = "gpt-4o"
@@ -94,6 +95,18 @@ def app():
 
     app = Flask(__name__)
     app.testing = True
+
+    @app.before_request
+    def _inject_test_user():
+        g.current_user = {
+            "id": "u1",
+            "username": "u1",
+            "nickname": "User 1",
+            "role": "user",
+            "status": "active",
+            "tenant_id": "t1",
+            "user_id": "u1",
+        }
 
     register_creative_routes(app, FakeConfig(), _json_success, _json_error)
 

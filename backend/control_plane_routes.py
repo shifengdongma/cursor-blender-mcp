@@ -1,10 +1,13 @@
 from __future__ import absolute_import
 
-from flask import request, session
+from flask import g, request, session
 
+from .access import require_job
 from .auth_middleware import (
+    admin_required,
     login_required,
     permission_required,
+    is_admin,
     PERM_VIEW_COMPUTE,
     PERM_MANAGE_COMPUTE,
     PERM_SUBMIT_RENDER_JOB,
@@ -16,7 +19,7 @@ from .billing_service import get_billing_service
 from .database import get_database
 from .engine_service import get_engine_service
 from .http_utils import parse_json_body
-from .models import ComputeNode, NodeMetricSample, HealthCheck
+from .models import ComputeNode, NodeMetricSample, HealthCheck, Tenant, User, Project
 from .monitoring.local_collector import MetricsCollector
 from .ops_service import (
     get_ops_service,
@@ -48,35 +51,69 @@ def register_control_plane_routes(app, cfg, catalog_service, job_store, json_suc
     render_service = get_render_service(cfg.DATA_DIR, cfg)
     logger = logging.getLogger(__name__)
 
+    def _current_context():
+        user = g.current_user
+        db = get_database()
+        tenant_row = db.fetch_one('SELECT * FROM tenants WHERE id = ?', (user.get('tenant_id'),))
+        business_user_row = db.fetch_one('SELECT * FROM users WHERE id = ?', (user.get('id'),))
+        workspace_id = 'workspace_{0}'.format(user.get('id'))
+        project_row = db.fetch_one('SELECT * FROM projects WHERE id = ?', (workspace_id,))
+        project_rows = db.fetch_all(
+            'SELECT p.* FROM projects p JOIN project_memberships m '
+            'ON m.project_id = p.id AND m.tenant_id = p.tenant_id '
+            'WHERE m.user_id = ? AND m.tenant_id = ? ORDER BY p.created_at ASC',
+            (user.get('id'), user.get('tenant_id')),
+        )
+        return {
+            'tenant': Tenant.from_row(tenant_row).to_dict() if tenant_row else None,
+            'user': User.from_row(business_user_row).to_dict() if business_user_row else None,
+            'project': Project.from_row(project_row).to_dict() if project_row else None,
+            'available_users': [User.from_row(business_user_row).to_dict()] if business_user_row else [],
+            'available_projects': [Project.from_row(row).to_dict() for row in project_rows],
+        }
+
     @app.route('/api/demo/context', methods=['GET'])
     def demo_context():
-        tenant_id = request.args.get('tenant_id')
-        user_id = request.args.get('user_id')
-        project_id = request.args.get('project_id')
-        return json_success(tenant_service.get_context(tenant_id, user_id, project_id))
+        if cfg.DEMO_MODE and is_admin(g.current_user) and any(
+            request.args.get(key) for key in ('tenant_id', 'user_id', 'project_id')
+        ):
+            return json_success(tenant_service.get_context(
+                request.args.get('tenant_id'),
+                request.args.get('user_id'),
+                request.args.get('project_id'),
+            ))
+        return json_success(_current_context())
 
     @app.route('/api/demo/context/select', methods=['POST'])
+    @admin_required
     def select_demo_context():
+        if not cfg.DEMO_MODE:
+            return json_error('not_found', '演示上下文未启用', status_code=404)
         payload = parse_json_body(request)
         return json_success(tenant_service.get_context(payload.get('tenant_id'), payload.get('user_id'), payload.get('project_id')))
 
     @app.route('/api/tenants', methods=['GET'])
+    @admin_required
     def list_tenants():
         return json_success(tenant_service.list_tenants())
 
     @app.route('/api/users', methods=['GET'])
+    @admin_required
     def list_users():
         return json_success(tenant_service.list_users(request.args.get('tenant_id')))
 
     @app.route('/api/projects', methods=['GET'])
+    @admin_required
     def list_projects():
         return json_success(tenant_service.list_projects(request.args.get('tenant_id')))
 
     @app.route('/api/projects/<project_id>/members', methods=['GET'])
+    @admin_required
     def project_members(project_id):
         return json_success(tenant_service.list_project_members(project_id))
 
     @app.route('/api/permissions/check', methods=['GET'])
+    @admin_required
     def permission_check():
         allowed = tenant_service.check_permission(
             request.args.get('tenant_id'),
@@ -136,6 +173,7 @@ def register_control_plane_routes(app, cfg, catalog_service, job_store, json_suc
     @login_required
     @permission_required(PERM_MANAGE_COMPUTE)
     def job_reschedule(job_id):
+        require_job(job_store.get(job_id), demo_mode=cfg.DEMO_MODE)
         try:
             result = scheduler_service.re_schedule(job_id)
             return json_success(result)
@@ -143,64 +181,68 @@ def register_control_plane_routes(app, cfg, catalog_service, job_store, json_suc
             return json_error('reschedule_error', str(e), 400)
 
     @app.route('/api/jobs/<job_id>/schedule', methods=['GET'])
+    @login_required
     def job_schedule(job_id):
-        job = job_store.get(job_id)
-        if not job:
-            return json_error('job_not_found', '任务不存在', 404)
+        job = require_job(job_store.get(job_id), demo_mode=cfg.DEMO_MODE)
         return json_success((job.get('result') or {}).get('schedule_result'))
 
     @app.route('/api/jobs/<job_id>/monitor', methods=['GET'])
     @login_required
     @permission_required(PERM_VIEW_MONITOR)
     def job_monitor(job_id):
-        job = job_store.get(job_id)
-        if not job:
-            return json_error('job_not_found', '任务不存在', 404)
+        job = require_job(job_store.get(job_id), demo_mode=cfg.DEMO_MODE)
         monitor_summary = (job.get('result') or {}).get('monitor_summary') or {}
         return json_success(monitor_summary)
 
     @app.route('/api/engines', methods=['GET'])
+    @login_required
+    @permission_required(PERM_VIEW_COMPUTE)
     def list_engines():
         return json_success(engine_service.list_engines())
 
     @app.route('/api/engines/session/preview', methods=['POST'])
+    @login_required
+    @permission_required(PERM_VIEW_COMPUTE)
     def engine_preview():
         payload = parse_json_body(request)
         return json_success(engine_service.preview_session(payload))
 
     @app.route('/api/jobs/<job_id>/engine-session', methods=['GET'])
+    @login_required
     def job_engine_session(job_id):
-        job = job_store.get(job_id)
-        if not job:
-            return json_error('job_not_found', '任务不存在', 404)
+        job = require_job(job_store.get(job_id), demo_mode=cfg.DEMO_MODE)
         return json_success((job.get('result') or {}).get('engine_session'))
 
     @app.route('/api/jobs/<job_id>/stream-session', methods=['GET'])
+    @login_required
     def job_stream_session(job_id):
-        job = job_store.get(job_id)
-        if not job:
-            return json_error('job_not_found', '任务不存在', 404)
+        job = require_job(job_store.get(job_id), demo_mode=cfg.DEMO_MODE)
         return json_success((job.get('result') or {}).get('stream_session'))
 
     @app.route('/api/assets/<asset_id>/rights', methods=['GET'])
+    @login_required
+    @permission_required('approve_rights')
     def asset_rights(asset_id):
         return json_success(rights_service.get_asset_rights(asset_id))
 
     @app.route('/api/assets/<asset_id>/rights/validate', methods=['POST'])
+    @login_required
+    @permission_required('approve_rights')
     def validate_asset_rights(asset_id):
         payload = parse_json_body(request)
         usage_scope = payload.get('usage_scope') or 'internal_demo'
         return json_success(rights_service.validate_asset_rights(asset_id, usage_scope, payload.get('tenant_id')))
 
     @app.route('/api/assets/<asset_id>/provenance', methods=['GET'])
+    @login_required
+    @permission_required('approve_rights')
     def asset_provenance(asset_id):
         return json_success(rights_service.list_provenance(asset_id))
 
     @app.route('/api/jobs/<job_id>/rights-snapshot', methods=['GET'])
+    @login_required
     def job_rights_snapshot(job_id):
-        job = job_store.get(job_id)
-        if not job:
-            return json_error('job_not_found', '任务不存在', 404)
+        job = require_job(job_store.get(job_id), demo_mode=cfg.DEMO_MODE)
         return json_success((job.get('result') or {}).get('rights_result'))
 
     @app.route('/api/billing/summary', methods=['GET'])
@@ -210,17 +252,21 @@ def register_control_plane_routes(app, cfg, catalog_service, job_store, json_suc
         return json_success(billing_service.get_billing_summary())
 
     @app.route('/api/projects/<project_id>/usage', methods=['GET'])
+    @admin_required
     def project_usage(project_id):
         return json_success(billing_service.get_project_usage(project_id))
 
     @app.route('/api/jobs/<job_id>/billing', methods=['GET'])
+    @login_required
     def job_billing(job_id):
+        require_job(job_store.get(job_id), demo_mode=cfg.DEMO_MODE)
         return json_success(billing_service.get_job_billing(job_id))
 
     @app.route('/api/jobs/<job_id>/billing/finalize', methods=['POST'])
     @login_required
     @permission_required(PERM_VIEW_BILLING)
     def job_billing_finalize(job_id):
+        require_job(job_store.get(job_id), demo_mode=cfg.DEMO_MODE)
         try:
             return json_success(billing_service.finalize_billing(job_id))
         except ValueError as e:
@@ -232,7 +278,7 @@ def register_control_plane_routes(app, cfg, catalog_service, job_store, json_suc
     @login_required
     @permission_required(PERM_VIEW_COMPUTE)
     def list_render_jobs():
-        tenant_id = request.args.get('tenant_id')
+        tenant_id = request.args.get('tenant_id') if is_admin(g.current_user) else g.current_user.get('tenant_id')
         project_id = request.args.get('project_id')
         status = request.args.get('status')
         limit = min(int(request.args.get('limit', 50)), 200)
@@ -246,15 +292,17 @@ def register_control_plane_routes(app, cfg, catalog_service, job_store, json_suc
     @permission_required(PERM_SUBMIT_RENDER_JOB)
     def create_render_job():
         payload = parse_json_body(request)
+        tenant_id = payload.get('tenant_id') if is_admin(g.current_user) else g.current_user.get('tenant_id')
         try:
             job = render_service.create_render_job(
-                tenant_id=payload.get('tenant_id'),
+                tenant_id=tenant_id,
                 project_id=payload.get('project_id'),
                 node_id=payload.get('node_id'),
                 engine_type=payload.get('engine_type'),
                 asset_id=payload.get('asset_id'),
                 input_spec=payload.get('input_spec'),
-                output_dir=payload.get('output_dir'),
+                # output_dir is server-controlled; ignore client input.
+                output_dir=None,
             )
             return json_success(job)
         except Exception as e:
@@ -291,6 +339,11 @@ def register_control_plane_routes(app, cfg, catalog_service, job_store, json_suc
     @login_required
     @permission_required(PERM_VIEW_COMPUTE)
     def serve_render_output(job_id, filename):
+        job = render_service.get_render_job(job_id)
+        if not job:
+            return json_error('not_found', '渲染任务不存在', 404)
+        if not is_admin(g.current_user) and job.get('tenant_id') != g.current_user.get('tenant_id'):
+            return json_error('forbidden', '无权访问该渲染结果', 403)
         try:
             filepath = render_service.get_render_output(job_id, filename)
             from flask import send_file
@@ -299,6 +352,7 @@ def register_control_plane_routes(app, cfg, catalog_service, job_store, json_suc
             return json_error('not_found', str(e), 404)
 
     @app.route('/api/ops/events', methods=['GET'])
+    @admin_required
     def ops_events():
         project_id = request.args.get('project_id')
         return json_success(ops_service.list_events(project_id=project_id, limit=50))

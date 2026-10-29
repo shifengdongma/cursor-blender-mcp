@@ -14,6 +14,78 @@ class ProviderError(RuntimeError):
         self.error_type = error_type
 
 
+class ProviderAuthError(ProviderError):
+    def __init__(self, message, error_type="provider_auth_error"):
+        ProviderError.__init__(self, message, error_type=error_type)
+
+
+class ProviderRateLimited(ProviderError):
+    def __init__(self, message, error_type="provider_rate_limited"):
+        ProviderError.__init__(self, message, error_type=error_type)
+
+
+class ProviderRejected(ProviderError):
+    def __init__(self, message, error_type="provider_rejected"):
+        ProviderError.__init__(self, message, error_type=error_type)
+
+
+class ProviderUncertain(ProviderError):
+    """The request may have reached the provider; never auto-resubmit."""
+    def __init__(self, message, error_type="submission_uncertain"):
+        ProviderError.__init__(self, message, error_type=error_type)
+
+
+class ProviderPollError(ProviderError):
+    def __init__(self, message, error_type="provider_poll_error"):
+        ProviderError.__init__(self, message, error_type=error_type)
+
+
+class ProviderDownloadError(ProviderError):
+    def __init__(self, message, error_type="provider_download_error"):
+        ProviderError.__init__(self, message, error_type=error_type)
+
+
+class GenerationRequest(object):
+    """Provider-agnostic generation request."""
+
+    def __init__(self, task_type, provider, model_id, prompt, negative_prompt=None,
+                 width=None, height=None, aspect_ratio=None, duration_s=None,
+                 resolution=None, reference_images=None, seed=None,
+                 user_id=None, project_id=None, extra=None):
+        self.task_type = task_type
+        self.provider = provider
+        self.model_id = model_id
+        self.prompt = prompt
+        self.negative_prompt = negative_prompt
+        self.width = width
+        self.height = height
+        self.aspect_ratio = aspect_ratio
+        self.duration_s = duration_s
+        self.resolution = resolution
+        self.reference_images = reference_images or []
+        self.seed = seed
+        self.user_id = user_id
+        self.project_id = project_id
+        self.extra = extra or {}
+
+
+class GenerationResult(object):
+    """Normalised provider result.  Remote URLs are transient only."""
+
+    def __init__(self, provider, status, provider_job_id=None, progress=None,
+                 output_urls=None, error_code=None, error_message=None,
+                 raw=None, provider_status=None):
+        self.provider = provider
+        self.status = status
+        self.provider_job_id = provider_job_id
+        self.progress = progress
+        self.output_urls = output_urls or []
+        self.error_code = error_code
+        self.error_message = error_message
+        self.raw = raw
+        self.provider_status = provider_status
+
+
 class BaseLLMProvider(object):
     """Abstract base for LLM (OpenAI-compatible) providers."""
 

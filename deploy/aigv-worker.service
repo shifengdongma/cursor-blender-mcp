@@ -1,0 +1,16 @@
+[Unit]
+Description=AIGV Studio generation worker
+After=network.target
+
+[Service]
+Type=simple
+User=aigv
+Group=aigv
+WorkingDirectory=/srv/aigv-studio
+EnvironmentFile=/srv/aigv-studio/.env
+ExecStart=/srv/aigv-studio/.venv/bin/python scripts/run_generation_worker.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

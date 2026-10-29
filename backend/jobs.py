@@ -51,6 +51,20 @@ def _record_task_attempt(job_id, status, node_id=None, error_message=None, metad
 
         db = get_database(os.path.join(os.environ.get('DATA_DIR', './data'), 'aigv.db'))
 
+        # task_attempts.job_id has an FK to job_history; ensure the parent row
+        # exists before recording an attempt.
+        if not db.fetch_one('SELECT id FROM job_history WHERE id = ?', (job_id,)):
+            db.insert('job_history', {
+                'id': job_id,
+                'status': 'running',
+                'stage': None,
+                'payload': json.dumps({}, ensure_ascii=False),
+                'result': None,
+                'error': None,
+                'created_at': int(time.time()),
+                'updated_at': int(time.time()),
+            })
+
         # Count previous attempts
         prev_attempts = db.count('task_attempts', 'job_id = ?', (job_id,))
         attempt_number = prev_attempts + 1
@@ -294,7 +308,7 @@ class JobStore(object):
     def _job_path(self, job_id):
         return os.path.join(self._job_dir(job_id), "job.json")
 
-    def create(self, payload, initial_result=None):
+    def create(self, payload, initial_result=None, owner_user_id=None):
         job_id = str(uuid.uuid4())
         d = self._job_dir(job_id)
         if not os.path.exists(d):
@@ -307,6 +321,7 @@ class JobStore(object):
             "created_at": _now(),
             "updated_at": _now(),
             "error": None,
+            "owner_user_id": owner_user_id,
             "result": initial_result or _empty_result(),
             "payload": normalized_payload,
         }
@@ -392,6 +407,8 @@ def _build_scene_spec(user_input, prompt_bundle, asset_bundle):
 def start_job_worker(job_store, job_id, cfg, prompt_orchestrator):
     def _run():
         result = None
+        schedule_result = None
+        ops_service = None
         try:
             job = job_store.get(job_id)
             if not job:
@@ -457,9 +474,17 @@ def start_job_worker(job_store, job_id, cfg, prompt_orchestrator):
             job_store.write_file(job_id, "monitor_ticks.json", json.dumps(monitor_ticks, ensure_ascii=False, indent=2))
 
             if not _provider_execution_allowed(preview):
+                route_mode = (preview or {}).get("route_mode") or ""
+                if route_mode == "preview-only" and not cfg.DEMO_MODE:
+                    _set_job_state(
+                        job_store, job_id, result, "error", "error",
+                        error="该模型仅用于展示，未接入真实执行通道",
+                    )
+                    return
                 billing_result = billing_service.build_job_billing(job_id, payload, schedule_result, stream_session)
                 result["billing_result"] = billing_result
                 job_store.write_file(job_id, "billing_snapshot.json", json.dumps(billing_result, ensure_ascii=False, indent=2))
+                result["warnings"].append("演示模式：未调用真实 Provider，结果仅用于展示")
                 _complete_preview_only_job(job_store, job_id, preview, result)
                 return
 
@@ -535,6 +560,9 @@ def start_job_worker(job_store, job_id, cfg, prompt_orchestrator):
                             job_store, job_id, result, "queued", "queued",
                             error=None,
                         )
+                        # A re-queued job needs a fresh worker; the original
+                        # worker is about to exit.
+                        start_job_worker(job_store, job_id, cfg, prompt_orchestrator)
                         return
                     else:
                         reason = re_schedule_result.get("reason") if re_schedule_result else "unknown"

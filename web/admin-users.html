@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>用户管理 - AIGV Studio</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body class="compute-platform-page admin-page">
+    <div class="page-bg" aria-hidden="true"></div>
+
+    <nav class="navbar" aria-label="主导航">
+      <div class="nav-container">
+        <a href="/" class="nav-brand">
+          <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span>
+          <span class="brand-text">AIGV Studio</span>
+        </a>
+        <div class="nav-links">
+          <a href="/">工作台</a>
+          <a href="/creative-studio">创意生产</a>
+          <a href="/assets">素材库</a>
+          <a href="/compute-platform">算力调度</a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="compute-platform-shell admin-shell">
+      <header class="page-header page-header-curated admin-header">
+        <div class="page-header-text page-header-grid">
+          <div class="page-header-copy">
+            <div class="hero-badge">Platform Administration</div>
+            <h1 class="page-title">用户管理</h1>
+            <p class="page-desc">查看真实注册用户、平台角色、账户状态与生成统计。</p>
+          </div>
+        </div>
+      </header>
+
+      <section class="admin-stats" id="admin-stats" aria-label="平台统计"></section>
+
+      <section class="admin-section" aria-labelledby="admin-users-title">
+        <div class="cp-section-header admin-section-header">
+          <h2 class="cp-section-title" id="admin-users-title">注册用户</h2>
+          <button type="button" class="btn-outline btn-sm" id="admin-refresh">刷新</button>
+        </div>
+        <div class="admin-filter-bar">
+          <input id="admin-search" class="ch-search-input" type="search" placeholder="搜索用户名、昵称或邮箱" />
+          <select id="admin-role-filter" class="ch-filter-select">
+            <option value="">全部角色</option>
+            <option value="admin">管理员</option>
+            <option value="user">普通用户</option>
+          </select>
+          <select id="admin-status-filter" class="ch-filter-select">
+            <option value="">全部状态</option>
+            <option value="active">正常</option>
+            <option value="disabled">已禁用</option>
+          </select>
+        </div>
+        <div class="cp-table-container" id="admin-user-table">
+          <p class="empty-state">加载中...</p>
+        </div>
+        <div class="ch-pagination" id="admin-pagination"></div>
+      </section>
+
+      <section class="admin-section" aria-labelledby="admin-tasks-title">
+        <div class="cp-section-header admin-section-header">
+          <h2 class="cp-section-title" id="admin-tasks-title">全平台生成任务</h2>
+          <button type="button" class="btn-outline btn-sm" id="admin-task-refresh">刷新</button>
+        </div>
+        <div class="admin-filter-bar">
+          <select id="admin-task-type-filter" class="ch-filter-select">
+            <option value="">全部类型</option>
+            <option value="image">图片</option>
+            <option value="video">视频</option>
+          </select>
+          <select id="admin-task-status-filter" class="ch-filter-select">
+            <option value="">全部状态</option>
+            <option value="queued">排队中</option>
+            <option value="submitting">提交中</option>
+            <option value="running">生成中</option>
+            <option value="succeeded">已完成</option>
+            <option value="failed">失败</option>
+            <option value="cancelled">已取消</option>
+            <option value="needs_review">待人工确认</option>
+          </select>
+        </div>
+        <div class="cp-table-container" id="admin-task-table">
+          <p class="empty-state">加载中...</p>
+        </div>
+        <div class="ch-pagination" id="admin-task-pagination"></div>
+      </section>
+
+      <section class="admin-section" aria-labelledby="admin-audit-title">
+        <div class="cp-section-header admin-section-header">
+          <h2 class="cp-section-title" id="admin-audit-title">最近审计事件</h2>
+        </div>
+        <div class="cp-table-container" id="admin-audit-table">
+          <p class="empty-state">加载中...</p>
+        </div>
+      </section>
+    </main>
+
+    <div class="admin-modal-overlay" id="admin-modal" aria-hidden="true">
+      <div class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-modal-title">
+        <div class="admin-modal-header">
+          <h2 id="admin-modal-title">编辑用户</h2>
+          <button type="button" class="admin-modal-close" id="admin-modal-close" aria-label="关闭">&times;</button>
+        </div>
+        <form id="admin-edit-form">
+          <div class="form-group">
+            <label for="admin-edit-username">用户名</label>
+            <input id="admin-edit-username" type="text" disabled />
+          </div>
+          <div class="form-group">
+            <label for="admin-edit-nickname">昵称</label>
+            <input id="admin-edit-nickname" type="text" maxlength="40" />
+          </div>
+          <div class="form-group">
+            <label for="admin-edit-email">邮箱</label>
+            <input id="admin-edit-email" type="email" />
+          </div>
+          <div class="form-group">
+            <label for="admin-edit-bio">简介</label>
+            <textarea id="admin-edit-bio" rows="3" maxlength="500"></textarea>
+          </div>
+          <div class="admin-modal-actions">
+            <button type="button" class="btn-outline" id="admin-edit-cancel">取消</button>
+            <button type="submit" class="btn-primary">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="toast-container" id="admin-toast-container"></div>
+
+    <script src="/web/runtime-config.js"></script>
+    <script src="/web/api-client.js"></script>
+    <script src="/web/admin-users.js"></script>
+    <script src="/web/session-nav.js"></script>
+  </body>
+</html>

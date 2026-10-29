@@ -40,6 +40,7 @@ data/users.json
 
 # Logs
 *.log
+logs/
 
 # Virtual environment
 .venv/
@@ -52,5 +53,13 @@ data/users.json
 data/aigv.db-shm
 data/aigv.db-wal
 
+# Local development secret + migration backups
+data/.secret_key
+data/users.json.migrated.*
+data/backups/
+
 # Claude Code machine-local settings
 .claude/settings.local.json
+
+# Local database/runtime backups
+/backups/

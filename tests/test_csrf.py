@@ -1,30 +1,68 @@
 # -*- coding: utf-8 -*-
-"""
-Tests for CSRF protection.
-"""
+"""CSRF token lifecycle through real HTTP routes."""
 from __future__ import absolute_import
 
-import os
-import sys
-
-import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from backend.csrf import generate_csrf_token, get_csrf_token
+from tests import support
 
 
-class TestCSRF:
-    """Test CSRF token generation and validation."""
+def test_csrf_endpoint_issues_and_accepts_token(client):
+    response = client.get("/api/auth/csrf")
+    assert response.status_code == 200
+    token = response.get_json()["data"]["csrf_token"]
+    assert isinstance(token, str)
+    assert len(token) == 32
 
-    def test_token_generation_is_unique(self):
-        """Test that generated tokens are unique."""
-        token1 = os.urandom(12).hex()
-        token2 = os.urandom(12).hex()
-        assert token1 != token2
+    # The same session token is returned until it is rotated.
+    assert client.get("/api/auth/csrf").get_json()["data"]["csrf_token"] == token
 
-    def test_token_is_hex_string(self):
-        """Test that tokens are hex strings."""
-        token = os.urandom(12).hex()
-        assert isinstance(token, str)
-        assert len(token) == 24
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "username": "csrfflow",
+            "password": "password123",
+            "confirm_password": "password123",
+            "nickname": "CSRF",
+            "terms_accepted": True,
+        },
+        headers=support.auth_headers(token),
+    )
+    assert response.status_code == 201
+
+
+def test_missing_or_wrong_csrf_is_rejected(client):
+    response = client.post("/api/auth/login", json={"username": "x", "password": "y"})
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "csrf_invalid"
+
+    token = support.csrf(client)
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "x", "password": "y"},
+        headers=support.auth_headers(token + "tampered"),
+    )
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "csrf_invalid"
+
+
+def test_login_rotates_token(client):
+    old = support.csrf(client)
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "username": "rotateuser",
+            "password": "password123",
+            "confirm_password": "password123",
+            "nickname": "Rotate",
+            "terms_accepted": True,
+        },
+        headers=support.auth_headers(old),
+    )
+    new = response.get_json()["data"]["csrf_token"]
+    assert new and new != old
+    # The pre-login token is no longer valid for this session.
+    assert client.post(
+        "/api/auth/logout", headers=support.auth_headers(old)
+    ).status_code == 403
+    assert client.post(
+        "/api/auth/logout", headers=support.auth_headers(new)
+    ).status_code == 200

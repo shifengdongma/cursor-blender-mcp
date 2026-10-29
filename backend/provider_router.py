@@ -37,6 +37,17 @@ class ProviderRouter(object):
                 model_name=getattr(self.cfg, "SEEDANCE_MODEL_NAME", None),
             )
 
+        if provider_name == "ark_seedance":
+            if not self.cfg.ARK_API_KEY:
+                raise ProviderRoutingError("未配置 Ark API Key", error_type="missing_api_key")
+            from .providers.volcengine_video import VolcengineVideoProvider
+            return VolcengineVideoProvider(
+                api_key=self.cfg.ARK_API_KEY,
+                base_url=self.cfg.ARK_BASE_URL,
+                model_id=self.cfg.ARK_VIDEO_MODEL,
+                timeout_s=self.cfg.ARK_REQUEST_TIMEOUT_S,
+            )
+
         if provider_name == "luma":
             if not self.cfg.LUMA_API_KEY:
                 raise ProviderRoutingError("未配置 Luma API Key", error_type="missing_api_key")
@@ -70,7 +81,7 @@ class ProviderRouter(object):
             "aspect_ratio": "16:9",
         }
 
-        if provider_name == "seedance":
+        if provider_name in ("seedance", "ark_seedance"):
             common["duration_s"] = duration_s
             common["resolution"] = "720p"
             return common
@@ -103,6 +114,11 @@ class ProviderRouter(object):
             logger.info("Seedance job created: %s", provider_job_id)
             return provider, created, provider_job_id
 
+        if provider_name == "ark_seedance":
+            provider_job_id = created.get("id") or (created.get("data") or {}).get("id")
+            logger.info("Ark Seedance job created: %s", provider_job_id)
+            return provider, created, provider_job_id
+
         if provider_name == "luma":
             provider_job_id = created.get("id") or created.get("generation_id")
             logger.info("Luma job created: %s", provider_job_id)
@@ -117,6 +133,13 @@ class ProviderRouter(object):
             if provider_name == "seedance":
                 return provider.wait_until_done(
                     prediction_id=provider_job_id,
+                    timeout_s=900,
+                    poll_interval_s=5,
+                )
+
+            if provider_name == "ark_seedance":
+                return provider.wait_until_done(
+                    task_id=provider_job_id,
                     timeout_s=900,
                     poll_interval_s=5,
                 )

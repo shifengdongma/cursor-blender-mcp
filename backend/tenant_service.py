@@ -89,7 +89,9 @@ class TenantService(object):
         for row in rows:
             membership = ProjectMembership.from_row(row).to_dict()
             permissions = membership.get('permissions') or []
-            if permission in permissions or membership.get('role') in ('owner', 'admin'):
+            # Project ownership controls project CRUD, not platform/compute
+            # permissions.  Keep this consistent with auth_middleware.
+            if permission in permissions:
                 return True
         return False
 

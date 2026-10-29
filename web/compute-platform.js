@@ -44,16 +44,10 @@
   // ── API helper ──
   function api(path, opts) {
     opts = opts || {};
-    return fetch(path, {
+    return window.AIGV.api(path, {
       method: opts.method || 'GET',
-      headers: Object.assign({'Accept': 'application/json'}, opts.headers || {}),
+      headers: opts.headers || {},
       body: opts.body || undefined
-    }).then(function(resp) {
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      return resp.json();
-    }).then(function(data) {
-      if (data && data.success === false) throw new Error(data.error || 'API error');
-      return data && data.data !== undefined ? data.data : data;
     });
   }
   function apiSuppress() {
@@ -195,7 +189,12 @@
   var LS_KEY = 'aigv_compute_platform_v1';
   var LS_VERSION = 1;
 
+  function demoMode() {
+    return !!(window.AIGV_RUNTIME && window.AIGV_RUNTIME.demoMode);
+  }
+
   function saveToLocalStorage() {
+    if (!demoMode()) return;
     try {
       var payload = {
         version: LS_VERSION,
@@ -207,6 +206,10 @@
   }
 
   function loadFromLocalStorage() {
+    if (!demoMode()) {
+      try { localStorage.removeItem(LS_KEY); } catch (e) {}
+      return false;
+    }
     try {
       var raw = localStorage.getItem(LS_KEY);
       if (!raw) return false;
@@ -219,6 +222,7 @@
   }
 
   function saveSensingToLocalStorage() {
+    if (!demoMode()) return;
     try {
       var payload = {
         autoRefresh: state.isNetworkAutoRefresh,
@@ -231,6 +235,10 @@
   }
 
   function loadSensingFromLocalStorage() {
+    if (!demoMode()) {
+      try { localStorage.removeItem(state.sdLsKey); } catch (e) {}
+      return false;
+    }
     try {
       var raw = localStorage.getItem(state.sdLsKey);
       if (!raw) return false;
@@ -525,12 +533,17 @@
     var queuedTasks = (s.queued_render_jobs || 0);
     var avgLatency = 0;
 
-    var avgNetLatency = 0;
-    if (d && d.networkLinks) {
-      for (var l = 0; l < d.networkLinks.length; l++) {
-        avgNetLatency += d.networkLinks[l].latency || 0;
+    // Prefer real monitoring links; fall back to demo links only in demo mode.
+    var latencyLinks = (state.networkLinksCopy && state.networkLinksCopy.length)
+      ? state.networkLinksCopy
+      : (demoEnabled() && d && d.networkLinks ? d.networkLinks : []);
+    var avgNetLatency = null;
+    if (latencyLinks.length) {
+      var latencyTotal = 0;
+      for (var l = 0; l < latencyLinks.length; l++) {
+        latencyTotal += latencyLinks[l].latency || 0;
       }
-      avgNetLatency = d.networkLinks.length > 0 ? (avgNetLatency / d.networkLinks.length) : 0;
+      avgNetLatency = latencyTotal / latencyLinks.length;
     }
 
     var dailyCost = (b.total_amount || 0).toFixed(2);
@@ -552,8 +565,8 @@
       { value: queueDepth, label: '排队深度', unit: '个' },
       { value: queuedTasks, label: '排队任务', unit: '个' },
       { value: runningTasks, label: '运行任务', unit: '个' },
-      { value: avgLatency.toFixed(0), label: '平均渲染时延', unit: 'ms' },
-      { value: avgNetLatency.toFixed(0), label: '平均网络时延', unit: 'ms' },
+      { value: avgLatency ? avgLatency.toFixed(0) : '—', label: '平均渲染时延', unit: 'ms' },
+      { value: avgNetLatency === null ? '—' : avgNetLatency.toFixed(0), label: '平均网络时延', unit: 'ms' },
       { value: dailyCost, label: '累计费用', unit: '元' },
       { value: activeAlerts, label: '当前告警', unit: '条' }
     ];
@@ -576,91 +589,98 @@
   function renderMiniCharts(d) {
     var grid = $('cp-charts-grid');
     if (!grid) return;
+    var demoMode = !!(window.AIGV_RUNTIME && window.AIGV_RUNTIME.demoMode);
+    var emptyChart = '<div class="cp-chart-empty">暂无真实采集数据</div>';
 
     // Chart 1: GPU Utilization bar chart
-    var pools = d.resourcePools;
+    var pools = (d && d.resourcePools) ? d.resourcePools : [];
     var barColors = ['#78bfd2', '#94ddf1', '#5fa8b8', '#78bfd2', '#d7a84f'];
-    var barW = 280, barH = 120, barGap = 8;
+    var barW = 280, barGap = 8;
     var barCount = pools.length;
-    var barWidth = Math.max(10, (barW - (barCount - 1) * barGap - 40) / barCount);
-    var chart1 = '<svg viewBox="0 0 280 150" xmlns="http://www.w3.org/2000/svg">' +
-      '<line x1="38" y1="10" x2="38" y2="120" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
-      '<line x1="38" y1="120" x2="275" y2="120" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>';
-    for (var i = 0; i < barCount; i++) {
-      var x = 42 + i * (barWidth + barGap);
-      var h = (pools[i].avgUtil / 100) * 108;
-      chart1 += '<rect x="' + x + '" y="' + (120 - h) + '" width="' + barWidth + '" height="' + h + '" rx="3" fill="' + barColors[i] + '"/>' +
-        '<text x="' + (x + barWidth/2) + '" y="135" text-anchor="middle" fill="rgba(255,255,255,0.45)" font-size="8">' +
-        escapeHtml(pools[i].name) + '</text>';
+    var chart1 = emptyChart;
+    if (barCount) {
+      var barWidth = Math.max(10, (barW - (barCount - 1) * barGap - 40) / barCount);
+      chart1 = '<svg viewBox="0 0 280 150" xmlns="http://www.w3.org/2000/svg">' +
+        '<line x1="38" y1="10" x2="38" y2="120" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
+        '<line x1="38" y1="120" x2="275" y2="120" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>';
+      for (var i = 0; i < barCount; i++) {
+        var x = 42 + i * (barWidth + barGap);
+        var h = ((pools[i].avgUtil || 0) / 100) * 108;
+        chart1 += '<rect x="' + x + '" y="' + (120 - h) + '" width="' + barWidth + '" height="' + h + '" rx="3" fill="' + barColors[i % barColors.length] + '"/>' +
+          '<text x="' + (x + barWidth/2) + '" y="135" text-anchor="middle" fill="rgba(255,255,255,0.45)" font-size="8">' +
+          escapeHtml(pools[i].name || '') + '</text>';
+      }
+      chart1 += '</svg>';
     }
-    chart1 += '</svg>';
 
-    // Chart 2: Task count trend (SVG polyline)
-    var pts = [[8,110],[52,95],[96,108],[140,88],[184,72],[228,82],[272,58]];
-    var polyPoints = '';
-    for (var p = 0; p < pts.length; p++) {
-      polyPoints += pts[p][0] + ',' + pts[p][1] + ' ';
+    // Chart 2: Task count trend. Only show the historical demo curve in demo mode.
+    var chart2 = emptyChart;
+    if (demoMode) {
+      var pts = [[8,110],[52,95],[96,108],[140,88],[184,72],[228,82],[272,58]];
+      var polyPoints = '';
+      for (var p = 0; p < pts.length; p++) {
+        polyPoints += pts[p][0] + ',' + pts[p][1] + ' ';
+      }
+      chart2 = '<svg viewBox="0 0 280 150" xmlns="http://www.w3.org/2000/svg">' +
+        '<line x1="8" y1="120" x2="275" y2="120" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
+        '<line x1="8" y1="60" x2="275" y2="60" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>' +
+        '<polyline points="' + polyPoints + '" fill="none" stroke="#78bfd2" stroke-width="2" stroke-linejoin="round"/>' +
+        '<polygon points="8,120 ' + polyPoints + ' 272,120" fill="rgba(120,191,210,0.1)"/>';
+      for (var q = 0; q < pts.length; q++) {
+        chart2 += '<circle cx="' + pts[q][0] + '" cy="' + pts[q][1] + '" r="3" fill="#78bfd2"/>';
+      }
+      chart2 += '</svg>';
     }
-    var chart2 = '<svg viewBox="0 0 280 150" xmlns="http://www.w3.org/2000/svg">' +
-      '<line x1="8" y1="120" x2="275" y2="120" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
-      '<line x1="8" y1="60" x2="275" y2="60" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>' +
-      '<polyline points="' + polyPoints + '" fill="none" stroke="#78bfd2" stroke-width="2" stroke-linejoin="round"/>' +
-      '<polygon points="8,120 ' + polyPoints + ' 272,120" fill="rgba(120,191,210,0.1)"/>';
-    for (var q = 0; q < pts.length; q++) {
-      chart2 += '<circle cx="' + pts[q][0] + '" cy="' + pts[q][1] + '" r="3" fill="#78bfd2"/>';
-    }
-    var labels2 = ['0:00','4:00','8:00','12:00','16:00','20:00','现在'];
-    for (var r = 0; r < labels2.length; r++) {
-      chart2 += '<text x="' + (8 + r * 44) + '" y="140" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="7">' + labels2[r] + '</text>';
-    }
-    chart2 += '</svg>';
 
     // Chart 3: Resource pool distribution donut
-    var radii = [16, 14, 11, 9, 5]; // proportional
     var donutColors = ['#78bfd2', '#94ddf1', '#5fa8b8', '#d7a84f', '#c9876e'];
     var cx = 140, cy = 80;
     var total = 0;
-    for (var u = 0; u < pools.length; u++) { total += pools[u].nodeCount; }
+    for (var u = 0; u < pools.length; u++) { total += (pools[u].nodeCount || 0); }
+    var chart3 = total ? '<svg viewBox="0 0 280 160" xmlns="http://www.w3.org/2000/svg">' : emptyChart;
     var cumulative = 0;
-    var chart3 = '<svg viewBox="0 0 280 160" xmlns="http://www.w3.org/2000/svg">';
-    for (var v = 0; v < pools.length; v++) {
-      var startAngle = (cumulative / total) * 2 * Math.PI - Math.PI / 2;
-      var sliceAngle = (pools[v].nodeCount / total) * 2 * Math.PI;
-      var endAngle = startAngle + sliceAngle;
-      cumulative += pools[v].nodeCount;
-      var r1 = 20, r2 = 32;
-      var x1 = cx + r1 * Math.cos(startAngle), y1 = cy + r1 * Math.sin(startAngle);
-      var x2 = cx + r2 * Math.cos(startAngle), y2 = cy + r2 * Math.sin(startAngle);
-      var x3 = cx + r2 * Math.cos(endAngle), y3 = cy + r2 * Math.sin(endAngle);
-      var x4 = cx + r1 * Math.cos(endAngle), y4 = cy + r1 * Math.sin(endAngle);
-      var largeArc = sliceAngle > Math.PI ? 1 : 0;
-      var d = 'M' + x1 + ',' + y1 + ' L' + x2 + ',' + y2 +
-        ' A' + r2 + ',' + r2 + ' 0 ' + largeArc + ' 1 ' + x3 + ',' + y3 +
-        ' L' + x4 + ',' + y4 +
-        ' A' + r1 + ',' + r1 + ' 0 ' + largeArc + ' 0 ' + x1 + ',' + y1 + ' Z';
-      chart3 += '<path d="' + d + '" fill="' + donutColors[v] + '"/>';
+    if (total) {
+      for (var v = 0; v < pools.length; v++) {
+        var startAngle = (cumulative / total) * 2 * Math.PI - Math.PI / 2;
+        var sliceAngle = ((pools[v].nodeCount || 0) / total) * 2 * Math.PI;
+        var endAngle = startAngle + sliceAngle;
+        cumulative += (pools[v].nodeCount || 0);
+        var r1 = 20, r2 = 32;
+        var x1 = cx + r1 * Math.cos(startAngle), y1 = cy + r1 * Math.sin(startAngle);
+        var x2 = cx + r2 * Math.cos(startAngle), y2 = cy + r2 * Math.sin(startAngle);
+        var x3 = cx + r2 * Math.cos(endAngle), y3 = cy + r2 * Math.sin(endAngle);
+        var x4 = cx + r1 * Math.cos(endAngle), y4 = cy + r1 * Math.sin(endAngle);
+        var largeArc = sliceAngle > Math.PI ? 1 : 0;
+        var d = 'M' + x1 + ',' + y1 + ' L' + x2 + ',' + y2 +
+          ' A' + r2 + ',' + r2 + ' 0 ' + largeArc + ' 1 ' + x3 + ',' + y3 +
+          ' L' + x4 + ',' + y4 +
+          ' A' + r1 + ',' + r1 + ' 0 ' + largeArc + ' 0 ' + x1 + ',' + y1 + ' Z';
+        chart3 += '<path d="' + d + '" fill="' + donutColors[v % donutColors.length] + '"/>';
+      }
+      for (var w = 0; w < pools.length; w++) {
+        chart3 += '<rect x="10" y="' + (122 + w * 14) + '" width="8" height="8" rx="2" fill="' + donutColors[w % donutColors.length] + '"/>' +
+          '<text x="22" y="' + (130 + w * 14) + '" fill="rgba(255,255,255,0.55)" font-size="8">' + escapeHtml(pools[w].name || '') + '</text>';
+      }
+      chart3 += '</svg>';
     }
-    // Legend
-    for (var w = 0; w < pools.length; w++) {
-      chart3 += '<rect x="10" y="' + (122 + w * 14) + '" width="8" height="8" rx="2" fill="' + donutColors[w] + '"/>' +
-        '<text x="22" y="' + (130 + w * 14) + '" fill="rgba(255,255,255,0.55)" font-size="8">' + escapeHtml(pools[w].name) + '</text>';
-    }
-    chart3 += '</svg>';
 
-    // Chart 4: Network latency bars
-    var chart4 = '<svg viewBox="0 0 280 150" xmlns="http://www.w3.org/2000/svg">' +
-      '<line x1="8" y1="120" x2="275" y2="120" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>';
-    var labels4 = ['本地', '阿里云', '腾讯云', '边缘'];
-    var vals4 = [3, 18, 22, 8];
-    var col4 = ['#74c798', '#78bfd2', '#78bfd2', '#d7a84f'];
-    for (var n = 0; n < 4; n++) {
-      var bw = 40, bx = 22 + n * 62;
-      var bh = Math.min(vals4[n] * 4, 100);
-      chart4 += '<rect x="' + bx + '" y="' + (120 - bh) + '" width="' + bw + '" height="' + bh + '" rx="3" fill="' + col4[n] + '"/>' +
-        '<text x="' + (bx + bw/2) + '" y="' + (118 - bh) + '" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="9">' + vals4[n] + 'ms</text>' +
-        '<text x="' + (bx + bw/2) + '" y="135" text-anchor="middle" fill="rgba(255,255,255,0.45)" font-size="8">' + labels4[n] + '</text>';
+    // Chart 4: Network latency bars. Demo values are never shown in production.
+    var chart4 = emptyChart;
+    if (demoMode) {
+      chart4 = '<svg viewBox="0 0 280 150" xmlns="http://www.w3.org/2000/svg">' +
+        '<line x1="8" y1="120" x2="275" y2="120" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>';
+      var labels4 = ['本地', '阿里云', '腾讯云', '边缘'];
+      var vals4 = [3, 18, 22, 8];
+      var col4 = ['#74c798', '#78bfd2', '#78bfd2', '#d7a84f'];
+      for (var n = 0; n < 4; n++) {
+        var bw = 40, bx = 22 + n * 62;
+        var bh = Math.min(vals4[n] * 4, 100);
+        chart4 += '<rect x="' + bx + '" y="' + (120 - bh) + '" width="' + bw + '" height="' + bh + '" rx="3" fill="' + col4[n] + '"/>' +
+          '<text x="' + (bx + bw/2) + '" y="' + (118 - bh) + '" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="9">' + vals4[n] + 'ms</text>' +
+          '<text x="' + (bx + bw/2) + '" y="135" text-anchor="middle" fill="rgba(255,255,255,0.45)" font-size="8">' + labels4[n] + '</text>';
+      }
+      chart4 += '</svg>';
     }
-    chart4 += '</svg>';
 
     grid.innerHTML =
       '<div class="cp-chart-container"><div class="cp-chart-title">GPU 利用率</div>' + chart1 + '</div>' +
@@ -681,6 +701,13 @@
   // ══════════════════════════════════════════════════
   function renderFilmSubTab() {
     var placeholder = document.getElementById('cp-film-placeholder');
+    if (!demoEnabled()) {
+      if (placeholder) {
+        placeholder.textContent = '影视动画关键帧仅为演示模块，生产模式未接入实时渲染数据';
+        placeholder.style.display = 'block';
+      }
+      return;
+    }
     if (placeholder) placeholder.style.display = 'block';
 
     // Init scene if not already
@@ -1002,6 +1029,13 @@
   // ══════════════════════════════════════════════════
   function renderArchitectureSubTab() {
     var placeholder = document.getElementById('cp-arch-placeholder');
+    if (!demoEnabled()) {
+      if (placeholder) {
+        placeholder.textContent = '建筑/工业渲染仅为演示模块，生产模式未接入实时渲染数据';
+        placeholder.style.display = 'block';
+      }
+      return;
+    }
     if (placeholder) placeholder.style.display = 'block';
 
     setTimeout(function() {
@@ -1217,6 +1251,10 @@
   }
 
   function submitArchRenderTask() {
+    if (!demoEnabled()) {
+      showToast('云渲染动画仅为演示功能，生产模式不可用', 'warning');
+      return;
+    }
     if (state.archTaskRunning) return;
     state.archTaskRunning = true;
 
@@ -1335,6 +1373,13 @@
   // ══════════════════════════════════════════════════
   function renderGamingSubTab() {
     var placeholder = document.getElementById('cp-game-placeholder');
+    if (!demoEnabled()) {
+      if (placeholder) {
+        placeholder.textContent = '云游戏互动仅为演示模块，生产模式未接入实时串流';
+        placeholder.style.display = 'block';
+      }
+      return;
+    }
     if (placeholder) placeholder.style.display = 'block';
 
     setTimeout(function() {
@@ -1700,6 +1745,15 @@
     var sessions = state.renderSessions;
     var d = state.demoData;
     var projects = d ? d.creativeProjects : [];
+    if (!sessions || !sessions.length) {
+      var emptyContainer = document.getElementById('cp-render-table');
+      if (emptyContainer) {
+        emptyContainer.innerHTML = '<div class="empty-state-container">' +
+          '<h3 class="empty-title">暂无渲染会话</h3>' +
+          '<p class="empty-desc">提交渲染任务后可在这里查看真实会话状态。</p></div>';
+      }
+      return;
+    }
 
     function projName(pid) {
       for (var i = 0; i < projects.length; i++) {
@@ -1840,6 +1894,53 @@
   // ══════════════════════════════════════════════════
   // Tab 3: GPU Resource Pools
   // ══════════════════════════════════════════════════
+  function demoEnabled() {
+    return !!(window.AIGV_RUNTIME && window.AIGV_RUNTIME.demoMode);
+  }
+
+  function getGpuPools() {
+    var d = state.demoData || {};
+    if (demoEnabled() && d.resourcePools) return d.resourcePools;
+    var hosts = (state.apiHosts && state.apiHosts.items) || [];
+    var seen = {};
+    var pools = [];
+    for (var i = 0; i < hosts.length; i++) {
+      var key = hosts[i].provider_type || 'cloud';
+      if (!seen[key]) {
+        seen[key] = true;
+        pools.push({ id: key, name: key, region: hosts[i].region || '—', nodeCount: 0, onlineCount: 0, availGpu: 0, unitPrice: null, avgUtil: null, status: 'unknown' });
+      }
+      var pool = pools[seen[key] ? pools.length - 1 : 0];
+      for (var p = 0; p < pools.length; p++) {
+        if (pools[p].id === key) { pool = pools[p]; break; }
+      }
+      pool.nodeCount += 1;
+      if (hosts[i].status === 'online' || hosts[i].status === 'running') pool.onlineCount += 1;
+      pool.availGpu += hosts[i].gpu_count || 0;
+    }
+    return pools;
+  }
+
+  function getGpuNodes() {
+    var d = state.demoData || {};
+    if (demoEnabled() && d.gpuNodes) return d.gpuNodes;
+    var hosts = (state.apiHosts && state.apiHosts.items) || [];
+    return hosts.map(function (h) {
+      return {
+        id: h.id,
+        name: h.node_name || h.id,
+        pool: h.provider_type || 'cloud',
+        gpuModel: h.gpu_type || '—',
+        gpuCount: h.gpu_count || 0,
+        totalVram: h.gpu_memory_mb ? (h.gpu_memory_mb / 1024).toFixed(0) : 0,
+        usedVram: 0,
+        utilization: '—',
+        currentTask: '—',
+        status: h.status || 'unknown'
+      };
+    });
+  }
+
   function renderGPU() {
     renderPoolCards();
     renderCloudEntry();
@@ -1848,11 +1949,13 @@
   }
 
   function renderPoolCards() {
-    var d = state.demoData;
-    if (!d) return;
-    var pools = d.resourcePools;
+    var pools = getGpuPools();
     var grid = $('cp-pool-grid');
     if (!grid) return;
+    if (!pools.length) {
+      grid.innerHTML = '<div class="cp-chart-empty">暂无真实 GPU 资源池数据</div>';
+      return;
+    }
     var poolNodeCount = {};
     for (var i = 0; i < pools.length; i++) {
       poolNodeCount[pools[i].id] = pools[i].nodeCount;
@@ -1891,8 +1994,8 @@
           '<div class="cp-cloud-entry-title">公有云</div>' +
           '<div class="cp-cloud-entry-desc">阿里云 · 腾讯云 · AWS · Azure</div>' +
           '<div class="cp-cloud-entry-stats">' +
-            '<span>120 台主机</span>' +
-            '<span>4 区域</span>' +
+            '<span>主机以实时列表为准</span>' +
+            '<span>需配置云账号</span>' +
           '</div>' +
         '</div>' +
         '<button class="cp-cloud-entry-link">查看列表 &rarr;</button>' +
@@ -1901,10 +2004,10 @@
         '<div class="cp-cloud-entry-icon">&#127970;</div>' +
         '<div class="cp-cloud-entry-body">' +
           '<div class="cp-cloud-entry-title">私有云</div>' +
-          '<div class="cp-cloud-entry-desc">武汉五大区域 · 超算中心集群</div>' +
+          '<div class="cp-cloud-entry-desc">私有云 / VMware / 通用 REST</div>' +
           '<div class="cp-cloud-entry-stats">' +
-            '<span>100 台主机</span>' +
-            '<span>5 区域</span>' +
+            '<span>主机以实时列表为准</span>' +
+            '<span>需配置私有云凭据</span>' +
           '</div>' +
         '</div>' +
         '<button class="cp-cloud-entry-link">查看列表 &rarr;</button>' +
@@ -1917,9 +2020,7 @@
   }
 
   function renderNodeFilters() {
-    var d = state.demoData;
-    if (!d) return;
-    var pools = d.resourcePools;
+    var pools = getGpuPools();
     var filterBar = $('cp-node-filter-bar');
     if (!filterBar) return;
 
@@ -1947,24 +2048,23 @@
   }
 
   function renderNodeTable() {
-    var d = state.demoData;
-    if (!d) return;
-    var nodes = d.gpuNodes.slice();
+    var nodes = getGpuNodes();
     var f = state.gpuNodeFilter;
 
     // Filter
     var filtered = [];
     for (var i = 0; i < nodes.length; i++) {
       var n = nodes[i];
-      if (f.search && n.name.toLowerCase().indexOf(f.search) === -1) continue;
+      if (f.search && String(n.name || '').toLowerCase().indexOf(f.search) === -1) continue;
       if (f.pool !== 'all' && n.pool !== f.pool) continue;
       if (f.status !== 'all' && n.status !== f.status) continue;
       filtered.push(n);
     }
 
     var poolNames = {};
-    for (var j = 0; j < d.resourcePools.length; j++) {
-      poolNames[d.resourcePools[j].id] = d.resourcePools[j].name;
+    var pools = getGpuPools();
+    for (var j = 0; j < pools.length; j++) {
+      poolNames[pools[j].id] = pools[j].name;
     }
 
     var h = '<table class="cp-table"><thead><tr>' +
@@ -1973,18 +2073,24 @@
       '<th>当前任务</th><th>状态</th><th>操作</th>' +
       '</tr></thead><tbody>';
 
+    if (!filtered.length) {
+      h += '<tr><td colspan="10"><div class="cp-chart-empty">暂无真实 GPU 节点数据</div></td></tr>';
+    }
     for (var k = 0; k < filtered.length; k++) {
       var node = filtered[k];
-      var vramPct = ((node.usedVram / node.totalVram) * 100).toFixed(1);
+      var totalVram = Number(node.totalVram) || 0;
+      var usedVram = Number(node.usedVram) || 0;
+      var vramPct = totalVram ? ((usedVram / totalVram) * 100).toFixed(1) : '—';
+      var util = node.utilization === null || node.utilization === undefined ? '—' : node.utilization;
       h += '<tr>' +
         '<td>' + escapeHtml(node.name) + '</td>' +
         '<td>' + escapeHtml(poolNames[node.pool] || node.pool) + '</td>' +
         '<td>' + escapeHtml(node.gpuModel) + '</td>' +
-        '<td>' + node.gpuCount + '</td>' +
-        '<td>' + node.totalVram + ' GB</td>' +
-        '<td>' + node.usedVram + ' GB (' + vramPct + '%)</td>' +
-        '<td>' + node.utilization + '%</td>' +
-        '<td>' + escapeHtml(node.currentTask) + '</td>' +
+        '<td>' + (node.gpuCount || 0) + '</td>' +
+        '<td>' + (totalVram || '—') + ' GB</td>' +
+        '<td>' + (vramPct === '—' ? '—' : usedVram + ' GB (' + vramPct + '%)') + '</td>' +
+        '<td>' + util + (util === '—' ? '' : '%') + '</td>' +
+        '<td>' + escapeHtml(node.currentTask || '—') + '</td>' +
         '<td>' + badge(node.status, node.status) + '</td>' +
         '<td><button class="cp-action-btn" onclick="ComputePlatform.handleNodeDetail(\'' + escapeHtml(node.id) + '\')">详情</button></td>' +
         '</tr>';
@@ -1996,34 +2102,39 @@
   }
 
   function handleNodeDetail(id) {
-    var d = state.demoData;
-    if (!d || !d.gpuNodes) return;
+    var nodes = getGpuNodes();
     var node = null;
-    for (var i = 0; i < d.gpuNodes.length; i++) {
-      if (d.gpuNodes[i].id === id) { node = d.gpuNodes[i]; break; }
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].id === id) { node = nodes[i]; break; }
     }
     if (!node) return;
 
-    var poolName = id;
-    for (var j = 0; j < d.resourcePools.length; j++) {
-      if (d.resourcePools[j].id === node.pool) { poolName = d.resourcePools[j].name; break; }
+    var poolName = node.pool;
+    var pools = getGpuPools();
+    for (var j = 0; j < pools.length; j++) {
+      if (pools[j].id === node.pool) { poolName = pools[j].name; break; }
     }
 
-    var vramPct = ((node.usedVram / node.totalVram) * 100).toFixed(1);
-    var vramCls = parseFloat(vramPct) > 80 ? 'danger' : (parseFloat(vramPct) > 60 ? 'warning' : '');
+    var totalVram = Number(node.totalVram) || 0;
+    var usedVram = Number(node.usedVram) || 0;
+    var vramPct = totalVram ? ((usedVram / totalVram) * 100).toFixed(1) : '—';
+    var vramCls = vramPct !== '—' && parseFloat(vramPct) > 80 ? 'danger' :
+      (vramPct !== '—' && parseFloat(vramPct) > 60 ? 'warning' : '');
+    var util = node.utilization === null || node.utilization === undefined ? '—' : node.utilization;
+    var vramWidth = vramPct === '—' ? 0 : vramPct;
 
     var html =
       '<div class="cp-detail-grid">' +
       '<div class="cp-detail-group"><div class="cp-detail-label">节点名称</div><div class="cp-detail-value">' + escapeHtml(node.name) + '</div></div>' +
       '<div class="cp-detail-group"><div class="cp-detail-label">所属资源池</div><div class="cp-detail-value">' + escapeHtml(poolName) + '</div></div>' +
       '<div class="cp-detail-group"><div class="cp-detail-label">GPU 型号</div><div class="cp-detail-value">' + escapeHtml(node.gpuModel) + '</div></div>' +
-      '<div class="cp-detail-group"><div class="cp-detail-label">GPU 数量</div><div class="cp-detail-value">' + node.gpuCount + '</div></div>' +
-      '<div class="cp-detail-group"><div class="cp-detail-label">总显存</div><div class="cp-detail-value">' + node.totalVram + ' GB</div></div>' +
-      '<div class="cp-detail-group"><div class="cp-detail-label">利用率</div><div class="cp-detail-value">' + node.utilization + '%</div></div>' +
+      '<div class="cp-detail-group"><div class="cp-detail-label">GPU 数量</div><div class="cp-detail-value">' + (node.gpuCount || 0) + '</div></div>' +
+      '<div class="cp-detail-group"><div class="cp-detail-label">总显存</div><div class="cp-detail-value">' + (totalVram || '—') + ' GB</div></div>' +
+      '<div class="cp-detail-group"><div class="cp-detail-label">利用率</div><div class="cp-detail-value">' + util + (util === '—' ? '' : '%') + '</div></div>' +
       '</div>' +
-      '<div class="cp-progress-bar-wrap" style="margin-top:16px"><div class="cp-detail-label">显存使用率 ' + vramPct + '%</div>' +
-      '<div class="cp-progress-bar"><div class="cp-progress-bar-fill ' + vramCls + '" style="width:' + vramPct + '%"></div></div></div>' +
-      '<div class="cp-detail-group" style="margin-top:12px"><div class="cp-detail-label">当前任务</div><div class="cp-detail-value">' + escapeHtml(node.currentTask) + '</div></div>' +
+      '<div class="cp-progress-bar-wrap" style="margin-top:16px"><div class="cp-detail-label">显存使用率 ' + vramPct + (vramPct === '—' ? '' : '%') + '</div>' +
+      '<div class="cp-progress-bar"><div class="cp-progress-bar-fill ' + vramCls + '" style="width:' + vramWidth + '%"></div></div></div>' +
+      '<div class="cp-detail-group" style="margin-top:12px"><div class="cp-detail-label">当前任务</div><div class="cp-detail-value">' + escapeHtml(node.currentTask || '—') + '</div></div>' +
       '<div class="cp-detail-group" style="margin-top:12px"><div class="cp-detail-label">状态</div><div class="cp-detail-value">' + badge(node.status, node.status) + '</div></div>' +
       '';
 
@@ -2099,24 +2210,25 @@
 
     state.schedulingForm = { taskName: taskName, taskType: taskType, priority: priority, minVram: minVram, gpuCount: gpuCount, maxCost: maxCost, maxLatency: maxLatency, strategy: strategy };
 
-    var d = state.demoData;
-    if (!d || !d.gpuNodes) {
-      showToast('演示数据未加载', 'error');
+    var nodes = getGpuNodes();
+    if (!nodes.length) {
+      showToast('暂无真实 GPU 节点数据', 'warning');
       return;
     }
 
     // Filter GPU nodes by VRAM requirement
     var candidates = [];
-    for (var i = 0; i < d.gpuNodes.length; i++) {
-      var node = d.gpuNodes[i];
-      var vramPerGpu = node.totalVram / node.gpuCount;
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      var vramPerGpu = (Number(node.totalVram) || 0) / Math.max(1, Number(node.gpuCount) || 1);
       if (vramPerGpu >= minVram) candidates.push(node);
     }
 
     // Get pool info for latency/cost
     var poolMap = {};
-    for (var j = 0; j < d.resourcePools.length; j++) {
-      var p = d.resourcePools[j];
+    var pools = getGpuPools();
+    for (var j = 0; j < pools.length; j++) {
+      var p = pools[j];
       poolMap[p.id] = p;
     }
 
@@ -2134,11 +2246,13 @@
       var pinfo = poolMap[n.pool] || { unitPrice: 15, latency: 20 };
 
       // Base score components (lower = better)
-      var utilScore = (100 - n.utilization) / 100;  // lower utilization = better
-      var statusScore = n.status === 'online' ? 1 : 0.4;
+      var util = Number(n.utilization);
+      if (isNaN(util)) util = 0;
+      var utilScore = (100 - util) / 100;  // lower utilization = better
+      var statusScore = (n.status === 'online' || n.status === 'running') ? 1 : 0.4;
       var costScore = pinfo.unitPrice > 0 ? (30 / pinfo.unitPrice) : 2;  // cheaper = better, free = max
       var latencyScore = pinfo.latency > 0 ? (50 / pinfo.latency) : 2;  // lower latency = better
-      var vramScore = ((n.totalVram / n.gpuCount) / minVram);  // more vram headroom = better
+      var vramScore = (((Number(n.totalVram) || 0) / Math.max(1, Number(n.gpuCount) || 1)) / minVram);  // more vram headroom = better
 
       // Strategy multiplier
       var strategyMult = { lowest_cost: [2, 0.5, 0.5, 0.5], lowest_latency: [0.5, 0.5, 0.5, 2], shortest_queue: [2, 0.5, 0.5, 0.5], highest_performance: [0.5, 1, 0.5, 0.5], local_first: [1, 1, 0, 2] };
@@ -2167,8 +2281,9 @@
       local_first: '根据"本地优先"策略，优先选择本地/私有集群的满足要求的GPU节点，综合评分 ' + best.score.toFixed(2)
     };
 
-    // Estimated wait time based on utilization
-    var estimatedWait = bestNode.utilization > 70 ? '5-10 分钟' : (bestNode.utilization > 40 ? '1-5 分钟' : '<1 分钟');
+    // Estimated wait time is only meaningful when a real utilization metric exists.
+    var bestUtil = Number(bestNode.utilization);
+    var estimatedWait = isNaN(bestUtil) ? '未知（缺少实时利用率）' : (bestUtil > 70 ? '5-10 分钟' : (bestUtil > 40 ? '1-5 分钟' : '<1 分钟'));
 
     state.schedulingResult = {
       nodeName: bestNode.name,
@@ -2332,6 +2447,12 @@
     var grid = $('sd-nodes-grid');
     if (!grid) return;
     var nodes = state.sensingNodesCopy;
+    if (!nodes || !nodes.length) {
+      grid.innerHTML = '<div class="empty-state-container">' +
+        '<h3 class="empty-title">暂无采集节点</h3>' +
+        '<p class="empty-desc">尚未接入节点采集数据源。</p></div>';
+      return;
+    }
     var h = '';
     for (var i = 0; i < nodes.length; i++) {
       var n = nodes[i];
@@ -2354,6 +2475,10 @@
     var list = $('sd-links-list');
     if (!list) return;
     var links = state.networkLinksCopy;
+    if (!links || !links.length) {
+      list.innerHTML = '<div class="sd-alerts-empty">暂无网络链路采集数据</div>';
+      return;
+    }
     var h = '';
     for (var i = 0; i < links.length; i++) {
       var l = links[i];
@@ -2697,6 +2822,10 @@
 
   // ── Fault Simulation ──
   function showFaultSimModal() {
+    if (!demoEnabled()) {
+      showToast('故障模拟仅为演示功能，生产模式不可用', 'warning');
+      return;
+    }
     var overlay = document.getElementById('sd-fault-modal');
     if (!overlay) {
       overlay = document.createElement('div');
@@ -2990,88 +3119,113 @@
   // Tab 6: Permissions & Security
   // ══════════════════════════════════════════════════
   function renderPermissions() {
-    // Load from API
-    loadPermissions().then(function(members) {
-      renderPermsTable(members);
-      renderSecurityCards();
+    var container = $('cp-perms-table');
+    if (container) {
+      container.innerHTML = '<p class="empty-state">加载中...</p>';
+    }
+    window.AIGV.getCurrentUser().then(function (user) {
+      var caps = (user && user.capabilities) || {};
+      if (!user || !caps.is_admin) {
+        if (container) {
+          container.innerHTML = '<div class="empty-state-container">' +
+            '<h3 class="empty-title">仅平台管理员可查看成员权限</h3>' +
+            '<p class="empty-desc">项目成员权限由管理员在服务端管理；普通用户只能管理自己的项目。</p>' +
+            '</div>';
+        }
+        renderSecurityCards();
+        return;
+      }
+      loadPermissions().then(function (result) {
+        renderPermsTable(result.members, result.project);
+        renderSecurityCards();
+      }).catch(function (error) {
+        if (container) {
+          container.innerHTML = '<div class="empty-state-container">' +
+            '<h3 class="empty-title">权限数据加载失败</h3>' +
+            '<p class="empty-desc">' + escapeHtml((error && error.message) || '请稍后重试') + '</p>' +
+            '</div>';
+        }
+        renderSecurityCards();
+      });
+    }).catch(function () {
+      if (container) {
+        container.innerHTML = '<p class="empty-state">无法获取当前账户信息</p>';
+      }
     });
   }
 
   function loadPermissions() {
-    return api('/api/projects/' + (state.demoProjectId || 'demo-proj-001') + '/members')
-      .then(function(data) {
-        return data.members || data || [];
-      }).catch(function(err) {
-        console.error('权限数据加载失败:', err);
-        showToast('权限数据加载失败', 'warning');
-        // Fallback to demo data
-        var d = state.demoData;
-        if (d && d.roles) return d.roles;
-        return [];
-      });
+    return api('/api/demo/context').then(function (context) {
+      var projects = (context && context.available_projects) || [];
+      var project = (context && context.project) || projects[0] || null;
+      if (!project || !project.id) {
+        return { members: [], project: null };
+      }
+      return api('/api/projects/' + encodeURIComponent(project.id) + '/members')
+        .then(function (data) {
+          return {
+            members: (data && data.members) || data || [],
+            project: project
+          };
+        });
+    });
   }
 
-  function renderPermsTable(members) {
-    var roles = members;
-    if (!roles || roles.length === 0) {
-      var d = state.demoData;
-      if (d && d.roles) roles = d.roles;
+  function renderPermsTable(members, project) {
+    var container = $('cp-perms-table');
+    if (!container) return;
+    members = members || [];
+    if (!members.length) {
+      container.innerHTML = '<div class="empty-state-container">' +
+        '<h3 class="empty-title">暂无项目成员</h3>' +
+        '<p class="empty-desc">当前账户还没有可查看的项目成员记录。</p></div>';
+      return;
     }
-    if (!roles || roles.length === 0) return;
 
-    // All possible permissions
-    var allPerms = ['manageUsers', 'manageNodes', 'viewAll', 'manageBilling', 'configureSystem', 'manageAssets', 'editProjects', 'approveOutput'];
     var permLabels = {
-      manageUsers: '用户管理', manageNodes: '节点管理', viewAll: '全局查看',
-      manageBilling: '费用管理', configureSystem: '系统配置', manageAssets: '素材管理',
-      editProjects: '项目编辑', approveOutput: '成果审核'
+      submit_job: '提交任务', generate_media: '生成素材', manage_own_projects: '管理个人项目',
+      view_compute: '查看算力', manage_compute: '管理算力', submit_render_job: '提交渲染',
+      manage_cloud_accounts: '云账户管理', view_billing: '查看费用', view_monitor: '查看监控',
+      approve_rights: '版权审批', view_billing_global: '全局费用', admin: '平台管理员'
     };
+    var roleLabels = { owner: '项目所有者', admin: '项目管理员', editor: '编辑', viewer: '只读' };
 
-    var h = '<table class="cp-table cp-perms-table"><thead><tr><th>角色</th>';
-    for (var k = 0; k < allPerms.length; k++) {
-      h += '<th>' + escapeHtml(permLabels[allPerms[k]] || allPerms[k]) + '</th>';
-    }
-    h += '</tr></thead><tbody>';
-
-    for (var r = 0; r < mergedRoles.length; r++) {
-      var role = mergedRoles[r];
-      h += '<tr><td style="font-weight:500">' + escapeHtml(role.name) + '</td>';
-      for (var p = 0; p < allPerms.length; p++) {
-        var pk = allPerms[p];
-        var checked = role.permissions[pk] ? ' checked' : '';
-        h += '<td><input type="checkbox" class="cp-perm-checkbox"' + checked +
-          ' onclick="ComputePlatform.handleTogglePermission(\'' + escapeHtml(role.id) + '\',\'' + escapeHtml(pk) + '\')"></td>';
+    var h = '<div class="cp-detail-label" style="margin-bottom:8px">项目：' +
+      escapeHtml((project && project.name) || '—') + '</div>';
+    h += '<table class="cp-table cp-perms-table"><thead><tr>' +
+      '<th>成员</th><th>用户名</th><th>项目角色</th><th>权限</th><th>加入时间</th>' +
+      '</tr></thead><tbody>';
+    for (var i = 0; i < members.length; i += 1) {
+      var member = members[i] || {};
+      var user = member.user || {};
+      var permissions = member.permissions || [];
+      if (typeof permissions === 'string') {
+        try { permissions = JSON.parse(permissions); } catch (e) { permissions = []; }
       }
-      h += '</tr>';
+      var permissionText = permissions.length
+        ? permissions.map(function (permission) { return permLabels[permission] || permission; }).join('、')
+        : '—';
+      h += '<tr>' +
+        '<td>' + escapeHtml(user.nickname || user.name || member.user_id || '—') + '</td>' +
+        '<td>' + escapeHtml(user.username || '—') + '</td>' +
+        '<td>' + escapeHtml(roleLabels[member.role] || member.role || '—') + '</td>' +
+        '<td>' + escapeHtml(permissionText) + '</td>' +
+        '<td>' + escapeHtml(AIGV.formatTime(member.created_at)) + '</td>' +
+        '</tr>';
     }
     h += '</tbody></table>';
-
-    var container = $('cp-perms-table');
-    if (container) container.innerHTML = h;
-  }
-
-  function handleTogglePermission(roleId, permKey) {
-    // Send permission toggle to API
-    api('/api/projects/' + (state.demoProjectId || 'demo-proj-001') + '/permissions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role_id: roleId, permission: permKey, action: 'toggle' })
-    }).then(function() {
-      showToast('权限已更新', 'success');
-    }).catch(function(err) {
-      console.error('权限更新失败:', err);
-      showToast('权限更新失败: ' + (err.message || '未知错误'), 'warning');
-    });
+    h += '<p class="field-hint">权限为只读展示；尚无可用的在线编辑接口，请在服务端管理。</p>';
+    container.innerHTML = h;
   }
 
   function renderSecurityCards() {
     var cards = [
-      { icon: '&#9679;', status: 'safe', label: '登录安全', desc: '已启用双因素认证' },
-      { icon: '&#9679;', status: 'safe', label: 'API 密钥', desc: '密钥轮换周期: 30天' },
-      { icon: '&#9679;', status: 'safe', label: '数据加密', desc: '传输/存储均加密' },
-      { icon: '&#9679;', status: 'warn', label: '操作审计', desc: '审计日志保留中 (89天)' },
-      { icon: '&#9679;', status: 'safe', label: '素材版权', desc: '版权检测已启用' },
-      { icon: '&#9679;', status: 'safe', label: '数据备份', desc: '上次备份: 2小时前' }
+      { icon: '&#9679;', status: 'safe', label: '登录安全', desc: '服务端 Session + CSRF 保护' },
+      { icon: '&#9679;', status: 'safe', label: 'API 密钥', desc: '仅通过服务端环境变量配置' },
+      { icon: '&#9679;', status: 'warn', label: '传输加密', desc: '是否启用取决于 HTTPS/反向代理配置' },
+      { icon: '&#9679;', status: 'safe', label: '操作审计', desc: '认证与管理员操作写入 ops_events' },
+      { icon: '&#9679;', status: 'warn', label: '素材版权', desc: '版权数据需配置后使用' },
+      { icon: '&#9679;', status: 'warn', label: '数据备份', desc: '未接入自动备份状态展示' }
     ];
 
     var statusLabels = { safe: '正常', warn: '关注', danger: '异常' };
@@ -3102,7 +3256,12 @@
   function renderCostSummary() {
     var d = state.demoData;
     var b = state.apiBilling || {};
-    var total = b.total_amount || (d && d.billingRecords && d.billingRecords.length > 0 ? d.billingRecords[0].dailyCost : 0);
+    var demoMode = !!(window.AIGV_RUNTIME && window.AIGV_RUNTIME.demoMode);
+    var total = b.total_amount;
+    if ((total === undefined || total === null) && demoMode && d && d.billingRecords && d.billingRecords.length) {
+      total = d.billingRecords[0].dailyCost;
+    }
+    if (total === undefined || total === null) total = 0;
     var accounts = b.accounts || [];
 
     var grid = $('cp-cost-grid');
@@ -3282,6 +3441,15 @@
       console.error('账单摘要加载失败:', err);
     });
 
+    // Load alerts (real data only; no demo fallback in production)
+    api('/api/alerts?limit=50').then(function(alerts) {
+      state.alerts = (alerts && alerts.items) || [];
+      if (state.activeTab === 'billing') renderBilling();
+    }).catch(function(err) {
+      console.error('告警数据加载失败:', err);
+      state.alerts = [];
+    });
+
     // Load ops events
     api('/api/ops/events?limit=50').then(function(events) {
       state.apiOpsEvents = events || [];
@@ -3317,8 +3485,10 @@
   // Initialization
   // ══════════════════════════════════════════════════
   function init() {
-    // Keep demo data for Three.js sub-tabs (film, architecture, gaming visuals)
-    var data = window.AIGV_DEMO_DATA || {};
+    // Demo datasets are only used for clearly-labelled visual modules.  In
+    // production they must never populate nodes, sessions or metrics.
+    var demoMode = !!(window.AIGV_RUNTIME && window.AIGV_RUNTIME.demoMode);
+    var data = demoMode ? (window.AIGV_DEMO_DATA || {}) : {};
     state.demoData = data;
     state.renderSessions = JSON.parse(JSON.stringify(data.renderSessions || []));
     state.networkLinksCopy = JSON.parse(JSON.stringify(data.networkLinks || []));
@@ -3452,9 +3622,6 @@
     startFaultSimulation: startFaultSimulation,
     confirmAlertRecovery: confirmAlertRecovery,
     resolveAlert: resolveAlert,
-
-    // Tab 6
-    handleTogglePermission: handleTogglePermission,
 
     // Tab 7
     handleAcknowledgeAlert: handleAcknowledgeAlert,

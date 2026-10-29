@@ -8,7 +8,7 @@ AIGV Studio（AI Generated Video Studio，AI 视频生成工坊）是一个面�
 2. **Blender 空间锚点系统** —— 基于 3D 场景约束的相机轨迹生成与 GLB 资产导出
 3. **多模型路由机制** —— 支持 Seedance、Luma 等视频生成服务商的智能路由与透明切换
 
-项目技术栈：**Python 3.10+ + Flask 2.0.3（后端） + 原生 JavaScript（前端） + SQLite（持久化） + Blender（3D 引擎）**
+项目技术栈：**Python 3.10+ + Flask 3.x（后端） + 原生 JavaScript（前端） + SQLite（持久化） + Blender / ComfyUI（可选）**
 
 ---
 
@@ -178,7 +178,7 @@ AIGV Studio（AI Generated Video Studio，AI 视频生成工坊）是一个面�
 | 文件 | 行数 | 职责 |
 |------|------|------|
 | `app.py` | 421 | Flask 应用工厂入口 `create_app()`，注册全部路由模块与错误处理 |
-| `requirements.txt` | - | Python 依赖：Flask 2.0.3, Werkzeug 2.0.3, requests, python-dotenv, gunicorn |
+| `requirements.txt` | - | Python 依赖：Flask 3.x, Werkzeug 3.x, requests, python-dotenv, gunicorn, Pillow 等（以文件为准） |
 | `.env.example` | - | 环境变量模板：API Keys、Blender 路径、功能开关 |
 | `CLAUDE.md` | - | 项目开发指南（供 AI 辅助开发用） |
 | `SKILL.md` | - | Claude Code 技能定义（"cultural-aigv-director"） |
@@ -1174,3 +1174,87 @@ Blender MCP（可选）:
 
 *文档基于 AIGV Studio 代码实际分析生成*
 *最后更新: 2026-07-23*
+
+---
+
+# 附录：生产化改造更新（2026-10-29）
+
+> 本节记录当前代码的实际架构。若前文与本节冲突，以本节和代码为准。
+
+## A. 认证与全站访问控制
+
+- 登录账户唯一来源为 SQLite `auth_users`（`backend/auth_service.py`）。`users.json` 只在 `scripts/migrate_auth_v2.py` 中一次性迁移，运行时不再作为认证回退。
+- `auth_users` 关键字段：`role`（admin/user）、`status`（active/disabled）、`session_version`、`failed_login_count`、`locked_until`、`last_login_at`、`nickname`、`avatar_path`、`bio`、`tenant_id`、`user_id`。变更通过 `database.py` 的增量 `_ensure_column` 完成，不清空旧数据。
+- `backend/identity_service.py` 在注册事务内创建平台租户、业务 `users` 行、个人工作区 `workspace_<uid>` 与 owner 成员关系。项目角色与平台角色严格分离。
+- `backend/web_security.py` 是统一入口：
+  - 公开白名单仅登录/注册/状态/CSRF/健康检查与静态 JS/CSS/媒体；
+  - 未登录 API → 401 JSON，页面 → 302 `/login?next=`；
+  - 先鉴权后 CSRF；登录/注册仍受 CSRF 保护；
+  - `/web/*.html` 直接 404；`/admin*` 需平台管理员；`/compute-platform*` 需 `view_compute`；
+  - Cookie `HttpOnly`、`SameSite=Lax`、生产 `Secure`；生产强制稳定 `SECRET_KEY`。
+- 会话每次请求重新读取数据库并校验 `session_version`、状态与锁定；改密/改角色/禁用/撤销会话立即失效。
+- 个人中心：`backend/profile_routes.py` + `web/profile.html/js`；管理员：`backend/admin_routes.py` + `web/admin-users.html/js`（用户分页/搜索/筛选、角色、状态、会话撤销、统计、审计、全平台生成任务）。
+- 登录/注册的 `next` 由服务端 `safe_redirect_target()` 清洗；管理员初始化使用 `scripts/create_admin.py`，无硬编码密码。
+
+## B. 真实生成任务架构
+
+新链路（创意工作台与独立生成 API 共用）：
+
+```
+create_generation_task()
+  → generation_tasks(queued)
+  → GenerationWorker.claim_generation_submission()  [BEGIN IMMEDIATE + 租约]
+  → Provider.submit() → provider_job_id, running
+  → GenerationWorker.claim_generation_poll() → Provider.get_status()
+  → 下载临时 URL 到 data/assets/generated/<user>/<task>/
+  → 单事务：任务结果 + assets + task_artifacts + 分镜关联
+```
+
+- 表：`generation_tasks` 在原有基础上增加 `provider`、`model_id`、`provider_job_id`、`provider_status`、`attempt_count`、`next_retry_at`、`lease_owner/lease_expires_at`、`submission_uncertain`、`poll_error_count`、`output_asset_id`、`client_request_id`、`cancel_requested`、`target_asset_id` 等字段；唯一幂等索引 `(created_by, client_request_id)`。
+- 原子性：任务领取/租约使用 SQLite `BEGIN IMMEDIATE` 与条件 UPDATE；多 Worker 不会重复领取。配额检查与任务插入在同一事务内。
+- 可恢复：Worker 重启后清理过期租约，`submitting` 且无第三方 ID 的任务转 `needs_review`；有 `provider_job_id` 的任务恢复轮询。
+- 截止时间：`GENERATION_IMAGE_DEADLINE_S` / `GENERATION_VIDEO_DEADLINE_S`；超时 `task_timeout`，保留第三方 ID 供管理员恢复。
+- 结果安全：`backend/media_fetcher.py` 校验 http/https、公网 DNS、端口、重定向、内容类型、魔数与大小上限；临时签名 URL 立即转存本地。
+- 序列化：`backend/task_serializer.py` 统一剔除 `provider_job_id/lease_owner/client_request_id` 等内部字段。
+- 引用完整性：参考图写入 `target_asset_id` 并阻止排队期间删除；删除生成作品时，仅清理自身 artifact/任务输出指针，仍被分镜/时间线引用时返回 409。
+
+## C. Provider 抽象
+
+- `backend/generation_models.py`：服务端模型注册表与能力矩阵（尺寸/比例/时长/分辨率/音频/种子/参考图/取消），模型 ID 可由环境变量覆盖，未配置模型返回 `available=false` 与原因。
+- `backend/providers/volcengine_image.py`：方舟 Seedream 同步接口。
+- `backend/providers/volcengine_video.py`：方舟 Seedance 异步任务（创建/查询/取消）。
+- `backend/providers/image_provider.py`：ComfyUI，已改为异步（提交 `prompt_id`，轮询 history 后下载），文件名不可信、内容做魔数校验。
+- `backend/providers/seedance.py`、`luma.py`：旧 Atlas/Luma 适配，超时映射为 `ProviderUncertain`，不自动重复扣费。
+- `backend/providers/mock_provider.py`：仅测试使用，生产注册表不包含。
+
+## D. 前端结构更新
+
+- 统一请求层 `web/api-client.js`：CSRF 预热/重试、401 跳转登录、统一错误对象、用户与 `capabilities` 缓存。
+- `web/session-nav.js`：头像/昵称菜单、个人中心、管理员入口、退出；根据 `view_compute` 隐藏算力入口；演示模式标识。
+- 新增 `web/profile.html/js`、`web/admin-users.html/js`、`web/403.html`。
+- 创意工作台：项目/分镜/任务全部走后端 API；分镜编辑/复制/删除/排序、保存项目、图生图参考图、模型能力驱动的参数、真实预览/参数、任务 ID 与项目 ID 持久化、刷新恢复轮询、取消状态处理。
+- 素材库新增“生成历史”Tab：类型/状态/日期筛选、分页、图片/视频预览、下载、参数、取消、删除、重新生成、“用此图生成视频”。
+- 算力平台：权限页改为真实项目成员只读展示；演示数据仅在 `DEMO_MODE` 使用并标注；会话/节点/链路空状态；网络时延优先真实监控数据。
+
+## E. 部署架构
+
+```
+Browser → Nginx/HTTPS → Gunicorn (wsgi:app, 多 worker)
+                          │
+                          ├── SQLite data/aigv.db
+                          ├── data/assets（本地素材）
+                          └── 独立进程 scripts/run_generation_worker.py
+                                  ├── Ark Seedream / Seedance
+                                  ├── ComfyUI（可选）
+                                  └── Atlas / Luma（旧通道，可选）
+```
+
+- 生产 `START_TASK_WORKER=false`，生成 Worker 独立运行；样例见 `deploy/`。
+- `scripts/backup_data.py` 使用 SQLite backup API 生成一致性备份，不复制 `.env`。
+- 演示数据 `DEMO_MODE=false` 默认关闭；演示模式仍只用于明确标注的视觉模块。
+
+## F. 验证状态
+
+- 自动化：`python3 -m pytest tests/`（当前全量通过；具体数字见交付报告）。
+- 真实 Ark/ComfyUI/Atlas/Luma 调用**未验证**（未使用付费密钥）；详见 `docs/AI-Provider-Integration.md`。
+- 未在本机之外的服务器执行部署；`deploy/` 为可执行样例，不代表已上线。

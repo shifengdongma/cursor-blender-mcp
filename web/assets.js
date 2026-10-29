@@ -505,6 +505,37 @@
     return !(from && to && from > to);
   }
 
+  function resetAssetDateControls() {
+    assetDatePreset = 'all';
+    if (assetDatePresetSelect) assetDatePresetSelect.value = 'all';
+    assetDateFrom = '';
+    assetDateTo = '';
+    if (assetDateFromInput) assetDateFromInput.value = '';
+    if (assetDateToInput) assetDateToInput.value = '';
+    if (assetDateRange) assetDateRange.hidden = true;
+  }
+
+  // An inverted range must never block a request: reset it to 全部时间,
+  // notify once, and let the request proceed with matching content.
+  function sanitizeAssetDateRange() {
+    resetAssetDateControls();
+    showToast('开始日期不能晚于结束日期', 'warning');
+  }
+
+  function resetHistoryDateControls() {
+    historyDatePreset = 'all';
+    if (historyDatePresetSelect) historyDatePresetSelect.value = 'all';
+    historyDateFrom = '';
+    historyDateTo = '';
+    if (historyDateFromInput) historyDateFromInput.value = '';
+    if (historyDateToInput) historyDateToInput.value = '';
+  }
+
+  function sanitizeHistoryDateRange() {
+    resetHistoryDateControls();
+    showToast('开始日期不能晚于结束日期', 'warning');
+  }
+
   function validateAssetDateRange() {
     if (!isDateRangeValid(assetDateFrom, assetDateTo)) {
       showToast('开始日期不能晚于结束日期', 'warning');
@@ -546,15 +577,9 @@
     if (searchInput) searchInput.value = '';
     venueFilter = '';
     if (venueFilterSelect) venueFilterSelect.value = '';
-    assetDatePreset = 'all';
-    if (assetDatePresetSelect) assetDatePresetSelect.value = 'all';
-    assetDateFrom = '';
-    assetDateTo = '';
-    if (assetDateFromInput) assetDateFromInput.value = '';
-    if (assetDateToInput) assetDateToInput.value = '';
+    resetAssetDateControls();
     assetSort = 'newest';
     if (assetSortSelect) assetSortSelect.value = 'newest';
-    if (assetDateRange) assetDateRange.hidden = true;
     currentPage = 1;
     requestAssets();
   }
@@ -566,9 +591,11 @@
     }
     if (!assetGrid) return;
 
-    // Never issue a request with an inverted date range (e.g. after another
-    // filter changed while the invalid dates are still in the inputs).
-    if (isAssetTab(currentTab) && !isDateRangeValid(assetDateFrom, assetDateTo)) return;
+    // An inverted range must not block tab switches or filter changes; reset
+    // it to 全部时间 and continue so the rendered content always matches the tab.
+    if (isAssetTab(currentTab) && !isDateRangeValid(assetDateFrom, assetDateTo)) {
+      sanitizeAssetDateRange();
+    }
 
     var seq = ++loadSeq;
     var tab = currentTab;
@@ -631,7 +658,9 @@
 
   function loadGenerationHistory() {
     if (!assetGrid) return;
-    if (!isDateRangeValid(historyDateFrom, historyDateTo)) return;
+    if (!isDateRangeValid(historyDateFrom, historyDateTo)) {
+      sanitizeHistoryDateRange();
+    }
 
     var seq = ++loadSeq;
     resetPreviewState();

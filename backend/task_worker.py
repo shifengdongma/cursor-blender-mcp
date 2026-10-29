@@ -10,12 +10,14 @@ import logging
 import os
 import subprocess
 import threading
+import time
 
 from .asset_service import get_asset_service
 from .config import Config
 from .creative_project_service import get_creative_project_service
+from .credential_service import CredentialService
 from .media_service import get_media_service, MediaServiceError
-from .models import GenerationTask, StoryboardShot, TaskArtifact, Asset, ExportPackage
+from .models import CreativeProject, GenerationTask, StoryboardShot, TaskArtifact, Asset, ExportPackage
 from .providers.base import ProviderError
 from .providers.llm_provider import LLMProvider
 from .providers.image_provider import ComfyUIProvider
@@ -108,10 +110,23 @@ def _execute_storyboard(task, cfg, db):
     # Update project status
     project_service.update_project(task.creative_project_id, status=CreativeProject.STATUS_ANALYZING)
 
+    # Resolve the credentials pinned when the task was created (user first, platform fallback).
+    eff = CredentialService(cfg.DATA_DIR, cfg).effective(
+        task.created_by,
+        "llm",
+        cfg,
+        prefer_source=(task.params or {}).get("credential_source"),
+    )
+    if not eff.get("source") or not eff.get("api_key"):
+        raise ProviderError(
+            "LLM 凭据不可用，请在 API 配置页重新配置",
+            error_type="llm_missing_key",
+        )
+
     llm = LLMProvider(
-        api_key=cfg.LLM_API_KEY,
-        base_url=cfg.LLM_BASE_URL,
-        model_name=cfg.LLM_MODEL_NAME,
+        api_key=eff["api_key"],
+        base_url=eff.get("base_url") or cfg.LLM_BASE_URL,
+        model_name=eff.get("model") or cfg.LLM_MODEL_NAME,
     )
 
     task_service.update_task(task.id, progress=30)
@@ -337,18 +352,27 @@ def _execute_compose(task, cfg, db):
     height = params.get("height", 1080)
     fps = params.get("fps", 24)
 
-    # Collect clips from shots
+    # Collect local clips/assets from shots. Remote URLs are never passed to FFmpeg.
     shots = storyboard_service.list_shots(task.creative_project_id)
     clip_specs = []
     audio_files = []
+    asset_service = get_asset_service(cfg.DATA_DIR)
 
     for shot in shots:
-        video_path = shot.video_url
+        video_path = None
+        if shot.video_asset_id:
+            asset = asset_service.get_asset(shot.video_asset_id)
+            video_path = asset_service.get_file_path_for_asset(asset) if asset else None
         if video_path:
             clip_specs.append({
                 "file_path": video_path,
                 "duration_s": shot.duration_s or 4,
             })
+        if shot.audio_asset_id:
+            audio_asset = asset_service.get_asset(shot.audio_asset_id)
+            audio_path = asset_service.get_file_path_for_asset(audio_asset) if audio_asset else None
+            if audio_path:
+                audio_files.append(audio_path)
 
     task_service.update_task(task.id, progress=40)
 
@@ -390,9 +414,14 @@ def _execute_refine(task, cfg, db):
     media_service = get_media_service(cfg.FFMPEG_BIN, cfg.FFPROBE_BIN)
     params = task.params or {}
 
-    input_path = params.get("input_path")
+    input_asset_id = params.get("input_asset_id")
+    asset_service = get_asset_service(cfg.DATA_DIR)
+    input_asset = asset_service.get_asset(input_asset_id) if input_asset_id else None
+    if not input_asset or input_asset.asset_type != "video":
+        raise ProviderError("Refine input must be an owned video asset", error_type="refine_no_input")
+    input_path = asset_service.get_file_path_for_asset(input_asset)
     if not input_path:
-        raise ProviderError("No input path for refinement", error_type="refine_no_input")
+        raise ProviderError("Refine input file not found", error_type="refine_no_input")
 
     output_dir = os.path.join(cfg.DATA_DIR, "assets", "videos", "refined")
     if not os.path.exists(output_dir):
@@ -400,16 +429,17 @@ def _execute_refine(task, cfg, db):
 
     output_path = os.path.join(output_dir, "{0}_refined.mp4".format(task.creative_project_id))
 
+    raw_filters = params.get("filters") or {}
     filters = {
-        "brightness": params.get("brightness"),
-        "contrast": params.get("contrast"),
-        "saturation": params.get("saturation"),
-        "gamma": params.get("gamma"),
-        "sharpen": params.get("sharpen"),
-        "denoise": params.get("denoise"),
-        "crop": params.get("crop"),
-        "scale": params.get("scale"),
-        "fps": params.get("fps"),
+        "brightness": raw_filters.get("brightness", params.get("brightness")),
+        "contrast": raw_filters.get("contrast", params.get("contrast")),
+        "saturation": raw_filters.get("saturation", params.get("saturation")),
+        "gamma": raw_filters.get("gamma", params.get("gamma")),
+        "sharpen": raw_filters.get("sharpen", params.get("sharpen")),
+        "denoise": raw_filters.get("denoise", params.get("denoise")),
+        "crop": raw_filters.get("crop", params.get("crop")),
+        "scale": raw_filters.get("scale", params.get("scale")),
+        "fps": raw_filters.get("fps", params.get("fps")),
     }
 
     task_service.update_task(task.id, progress=40)
@@ -466,8 +496,14 @@ def _execute_export(task, cfg, db):
             "dialogue": shot.dialogue,
         }
 
-        if shot.video_url:
-            shot_manifest["video_url"] = shot.video_url
+        if shot.video_asset_id:
+            video_asset = asset_service.get_asset(shot.video_asset_id)
+            video_path = asset_service.get_file_path_for_asset(video_asset) if video_asset else None
+            if video_path and os.path.exists(video_path):
+                arcname = "video/{0:03d}_video.mp4".format(shot.sequence_no)
+                files_to_zip.append((video_path, arcname))
+                shot_manifest["video_file"] = arcname
+                shot_manifest["video_asset_id"] = shot.video_asset_id
 
         if shot.primary_image_asset_id:
             asset = asset_service.get_asset(shot.primary_image_asset_id)
@@ -512,11 +548,15 @@ def _execute_export(task, cfg, db):
         f.write(srt_content)
     files_to_zip.append((srt_path, "subtitles.srt"))
 
-    # Generate cover thumbnail
+    # Generate cover thumbnail from the first locally stored video asset.
     cover_path = os.path.join(output_dir, "cover.png")
-    if shots and shots[0].video_url:
+    first_video_path = None
+    if shots and shots[0].video_asset_id:
+        first_video_asset = asset_service.get_asset(shots[0].video_asset_id)
+        first_video_path = asset_service.get_file_path_for_asset(first_video_asset) if first_video_asset else None
+    if first_video_path:
         try:
-            media_service.generate_thumbnail(shots[0].video_url, cover_path, width=640, height=360)
+            media_service.generate_thumbnail(first_video_path, cover_path, width=640, height=360)
             files_to_zip.append((cover_path, "cover.png"))
         except Exception as e:
             logger.warning("Failed to generate cover: %s", str(e))
@@ -529,6 +569,8 @@ def _execute_export(task, cfg, db):
     task_service.update_task(task.id, progress=95)
 
     # Create export package record
+    now = int(time.time())
+    download_url = "/api/creative/tasks/{0}/export/download".format(task.id)
     db.insert("export_packages", {
         "id": str(task.id) + "_export",
         "creative_project_id": task.creative_project_id,
@@ -538,25 +580,34 @@ def _execute_export(task, cfg, db):
         "file_size": os.path.getsize(zip_path) if os.path.exists(zip_path) else 0,
         "status": "completed",
         "manifest": json.dumps(manifest, ensure_ascii=False),
-        "download_url": "/data/exports/{0}/{1}_package.zip".format(task.creative_project_id, task.creative_project_id),
-        "created_at": int(subprocess.check_output(["date", "+%s"])) if hasattr(subprocess, "check_output") else 0,
-        "updated_at": int(subprocess.check_output(["date", "+%s"])) if hasattr(subprocess, "check_output") else 0,
+        "download_url": download_url,
+        "created_by": task.created_by,
+        "created_at": now,
+        "updated_at": now,
     })
+    task_service.add_artifact(
+        task_id=task.id,
+        creative_project_id=task.creative_project_id,
+        name=os.path.basename(zip_path),
+        artifact_type="archive",
+        file_path=os.path.relpath(zip_path, cfg.DATA_DIR),
+        file_size=os.path.getsize(zip_path) if os.path.exists(zip_path) else 0,
+        metadata={"download_url": download_url},
+    )
 
     task_service.update_task(task.id, progress=100)
-    return {"zip_path": zip_path, "manifest": manifest}
+    return {"zip_path": zip_path, "manifest": manifest, "download_url": download_url}
 
 
-# Executor map
+# Executor map. Image/video are handled by the resumable GenerationWorker.
 EXECUTOR_MAP = {
     GenerationTask.TYPE_STORYBOARD: _execute_storyboard,
-    GenerationTask.TYPE_IMAGE: _execute_image,
-    GenerationTask.TYPE_VIDEO: _execute_video,
     GenerationTask.TYPE_TTS: _execute_tts,
     GenerationTask.TYPE_COMPOSE: _execute_compose,
     GenerationTask.TYPE_REFINE: _execute_refine,
     GenerationTask.TYPE_EXPORT: _execute_export,
 }
+LEGACY_TASK_TYPES = tuple(EXECUTOR_MAP.keys())
 
 
 def start_task_worker(task_service, cfg):
@@ -574,7 +625,7 @@ def start_task_worker(task_service, cfg):
         logger.info("Creative task worker started")
         while not stop_event.is_set():
             try:
-                task = task_service.claim_next_task()
+                task = task_service.claim_next_task(task_types=LEGACY_TASK_TYPES)
                 if task is None:
                     time.sleep(2)
                     continue

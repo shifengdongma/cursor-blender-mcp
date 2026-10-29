@@ -290,14 +290,17 @@ def _register_asset_routes(app, web_root, cfg):
     def assets_summary():
         user = g.current_user
         asset_service = get_asset_service(cfg.DATA_DIR)
-        owner = None if is_admin(user) else user.get("id")
-        include_shared = not is_admin(user)
+        admin = is_admin(user)
+        owner = None if admin else user.get("id")
+        include_shared = not admin
+        tenant_id = None if admin else user.get("tenant_id")
 
         def count(asset_type=None):
             return asset_service.count_assets(
                 asset_type=asset_type,
                 owner_user_id=owner,
                 include_shared=include_shared,
+                tenant_id=tenant_id,
             )
 
         db = get_database()
@@ -325,8 +328,10 @@ def _register_asset_routes(app, web_root, cfg):
         venue_type = request.args.get("venue_type")
         q = request.args.get("q")
         user = g.current_user
-        owner = None if is_admin(user) else user.get("id")
-        include_shared = not is_admin(user)
+        admin = is_admin(user)
+        owner = None if admin else user.get("id")
+        include_shared = not admin
+        tenant_id = None if admin else user.get("tenant_id")
 
         assets = asset_service.list_assets(
             asset_type=asset_type,
@@ -335,6 +340,7 @@ def _register_asset_routes(app, web_root, cfg):
             offset=pagination.offset,
             owner_user_id=owner,
             include_shared=include_shared,
+            tenant_id=tenant_id,
             q=q,
         )
         total = asset_service.count_assets(
@@ -342,12 +348,16 @@ def _register_asset_routes(app, web_root, cfg):
             venue_type=venue_type,
             owner_user_id=owner,
             include_shared=include_shared,
+            tenant_id=tenant_id,
             q=q,
         )
 
         return _json_success(
             {
-                "items": [asset_service.public_dict(a, include_owner=is_admin(user)) for a in assets],
+                "items": [
+                    asset_service.public_dict(a, include_owner=admin, viewer=user)
+                    for a in assets
+                ],
                 "total": total,
                 "limit": pagination.limit,
                 "offset": pagination.offset,
@@ -362,7 +372,13 @@ def _register_asset_routes(app, web_root, cfg):
             raise ApiError("asset_not_found", "资产不存在", status_code=404)
         if not can_read_asset(asset, g.current_user, demo_mode=cfg.DEMO_MODE):
             raise ApiError("forbidden", "无权访问该资产", status_code=403)
-        return _json_success(asset_service.public_dict(asset, include_owner=is_admin(g.current_user)))
+        return _json_success(
+            asset_service.public_dict(
+                asset,
+                include_owner=is_admin(g.current_user),
+                viewer=g.current_user,
+            )
+        )
 
     @app.route("/api/assets", methods=["POST"])
     def create_asset():
@@ -396,8 +412,27 @@ def _register_asset_routes(app, web_root, cfg):
         if not can_write_asset(asset, g.current_user):
             raise ApiError("forbidden", "无权修改该资产", status_code=403)
         data = parse_json_body(request)
-        asset = asset_service.update_asset(asset_id, **data)
-        return _json_success(asset_service.public_dict(asset), message="资产已更新")
+        try:
+            asset = asset_service.update_asset(asset_id, **data)
+        except AssetServiceError as exc:
+            raise ApiError("invalid_asset_update", str(exc), status_code=400)
+        _audit(
+            cfg,
+            "asset_update",
+            user=g.current_user,
+            target_type="asset",
+            target_id=asset_id,
+            metadata={
+                "fields": sorted(
+                    set(data.keys())
+                    & {"name", "description", "venue_type", "visibility", "metadata"}
+                )
+            },
+        )
+        return _json_success(
+            asset_service.public_dict(asset, viewer=g.current_user),
+            message="资产已更新",
+        )
 
     @app.route("/api/assets/<asset_id>", methods=["DELETE"])
     def delete_asset(asset_id):
@@ -487,7 +522,11 @@ def _register_asset_routes(app, web_root, cfg):
         except AssetServiceError as exc:
             raise ApiError("invalid_upload", str(exc), status_code=400)
 
-        return _json_success(asset_service.public_dict(asset), message="资产上传成功", status_code=201)
+        return _json_success(
+            asset_service.public_dict(asset, viewer=user),
+            message="资产上传成功",
+            status_code=201,
+        )
 
     @app.route("/api/assets/<asset_id>/file", methods=["GET"])
     def serve_asset_file(asset_id):

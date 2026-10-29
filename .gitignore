@@ -51,3 +51,6 @@ data/users.json
 # SQLite WAL/Journal (runtime artifacts)
 data/aigv.db-shm
 data/aigv.db-wal
+
+# Claude Code machine-local settings
+.claude/settings.local.json

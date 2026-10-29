@@ -38,10 +38,11 @@ def _provider():
 def _capture(monkeypatch, payload=None, status_code=200):
     captured = {}
 
-    def fake_post(url, headers=None, json=None, timeout=None):
+    def fake_post(url, headers=None, json=None, timeout=None, **kwargs):
         captured.update(
             {"url": url, "headers": headers, "json": json, "timeout": timeout}
         )
+        captured.update(kwargs)
         return FakeResponse(status_code, payload or {"data": [{"b64_json": "aW1n"}]})
 
     monkeypatch.setattr(requests, "post", fake_post)
@@ -185,3 +186,27 @@ def test_empty_or_invalid_response_is_provider_error(monkeypatch):
     monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResponse(200, None))
     with pytest.raises(ProviderError):
         _provider().generate("a hall")
+
+
+def test_redirect_response_is_rejected_and_not_followed(monkeypatch):
+    captured = _capture(monkeypatch, status_code=302)
+    with pytest.raises(ProviderRejected) as exc:
+        _provider().generate("a hall")
+    assert exc.value.error_type == "provider_redirect_rejected"
+    assert captured["allow_redirects"] is False
+
+
+def test_error_body_echoing_key_is_scrubbed(monkeypatch):
+    key = "sk-openai-image-leak-2468"
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *a, **k: FakeResponse(
+            400, {"error": {"message": "invalid token {0}".format(key)}}
+        ),
+    )
+    provider = OpenAIImageProvider(key, "https://api.openai.example/v1", "gpt-image-1")
+    with pytest.raises(ProviderRejected) as exc:
+        provider.generate("a hall")
+    assert key not in str(exc.value)
+    assert "***" in str(exc.value)

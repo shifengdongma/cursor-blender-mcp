@@ -119,3 +119,41 @@ class TestLLMProvider(object):
             with pytest.raises(ProviderError):
                 provider.generate_structured("system", "user", SCHEMA)
             assert mock_post.call_count == 1
+
+
+def test_redirect_response_is_rejected_and_not_followed():
+    provider = LLMProvider(
+        api_key="sk-llm-redirect-42",
+        base_url="https://api.openai.com/v1",
+        model_name="gpt-4o",
+    )
+    with patch("backend.providers.llm_provider.requests.post") as mock_post:
+        redirect = MagicMock()
+        redirect.status_code = 307
+        redirect.text = "moved"
+        mock_post.return_value = redirect
+
+        with pytest.raises(ProviderError) as exc:
+            provider.generate_structured("system", "user", SCHEMA)
+        assert exc.value.error_type == "provider_redirect_rejected"
+        assert mock_post.call_count == 1
+        assert mock_post.call_args.kwargs["allow_redirects"] is False
+
+
+def test_error_body_echoing_key_is_scrubbed():
+    key = "sk-llm-leak-8675309"
+    provider = LLMProvider(
+        api_key=key,
+        base_url="https://api.openai.com/v1",
+        model_name="gpt-4o",
+    )
+    with patch("backend.providers.llm_provider.requests.post") as mock_post:
+        failure = MagicMock()
+        failure.status_code = 400
+        failure.text = "invalid Authorization: Bearer {0}".format(key)
+        mock_post.return_value = failure
+
+        with pytest.raises(ProviderError) as exc:
+            provider.generate_structured("system", "user", SCHEMA)
+        assert key not in str(exc.value)
+        assert "***" in str(exc.value)

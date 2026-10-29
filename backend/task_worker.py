@@ -15,7 +15,7 @@ import time
 from .asset_service import get_asset_service
 from .config import Config
 from .creative_project_service import get_creative_project_service
-from .credential_service import CredentialService
+from .credential_service import CredentialError, CredentialService
 from .media_service import get_media_service, MediaServiceError
 from .models import CreativeProject, GenerationTask, StoryboardShot, TaskArtifact, Asset, ExportPackage
 from .providers.base import ProviderError
@@ -95,6 +95,23 @@ def _build_storyboard_prompt(project):
 # ── Executors ──
 
 
+def _owned_asset_fields(task, db):
+    """Assets created by a legacy executor belong to the task creator.
+
+    Without this, ``create_asset`` produced ownerless rows that every user
+    could read (the legacy "shared library" semantics), leaking composed
+    videos and narrations across tenants.
+    """
+    row = db.fetch_one(
+        "SELECT tenant_id FROM auth_users WHERE id = ?", (task.created_by,)
+    ) if task.created_by else None
+    return {
+        "owner_user_id": task.created_by,
+        "tenant_id": row["tenant_id"] if row else None,
+        "visibility": "private",
+    }
+
+
 def _execute_storyboard(task, cfg, db):
     """Execute storyboard generation via LLM."""
     task_service = get_task_service()
@@ -107,11 +124,11 @@ def _execute_storyboard(task, cfg, db):
     if not project:
         raise ProviderError("Project not found: {0}".format(task.creative_project_id), error_type="project_not_found")
 
-    # Update project status
-    project_service.update_project(task.creative_project_id, status=CreativeProject.STATUS_ANALYZING)
-
-    # Resolve the credentials pinned when the task was created (user first, platform fallback).
-    eff = CredentialService(cfg.DATA_DIR, cfg).effective(
+    # Resolve the credentials pinned when the task was created (user first,
+    # platform fallback) *before* marking the project as analyzing, so a
+    # missing/invalid credential can never strand the project in that state.
+    credential_service = CredentialService(cfg.DATA_DIR, cfg)
+    eff = credential_service.effective(
         task.created_by,
         "llm",
         cfg,
@@ -123,11 +140,25 @@ def _execute_storyboard(task, cfg, db):
             error_type="llm_missing_key",
         )
 
+    base_url = eff.get("base_url") or cfg.LLM_BASE_URL
+    if eff.get("source") == "user":
+        # Re-resolve right before the request (DNS rebinding defence).
+        try:
+            base_url = credential_service.validate_base_url(base_url, cfg)
+        except CredentialError:
+            raise ProviderError(
+                "LLM Base URL 未通过安全校验，请在 API 配置页重新配置",
+                error_type="llm_missing_key",
+            )
+
     llm = LLMProvider(
         api_key=eff["api_key"],
-        base_url=eff.get("base_url") or cfg.LLM_BASE_URL,
+        base_url=base_url,
         model_name=eff.get("model") or cfg.LLM_MODEL_NAME,
     )
+
+    # Credentials and endpoint are known-good: now the project is analyzing.
+    project_service.update_project(task.creative_project_id, status=CreativeProject.STATUS_ANALYZING)
 
     task_service.update_task(task.id, progress=30)
 
@@ -203,6 +234,7 @@ def _execute_image(task, cfg, db):
             asset_type="image",
             file_path=file_path,
             file_size=file_size,
+            **_owned_asset_fields(task, db)
         )
 
         # Update shot with image reference
@@ -318,6 +350,7 @@ def _execute_tts(task, cfg, db):
             asset_type="audio",
             file_path=output_path,
             file_size=os.path.getsize(output_path),
+            **_owned_asset_fields(task, db)
         )
 
         storyboard_service.update_shot(shot.id, audio_asset_id=asset.id, srt_path=output_path)
@@ -396,6 +429,7 @@ def _execute_compose(task, cfg, db):
             asset_type="video",
             file_path=output_path,
             file_size=os.path.getsize(output_path),
+            **_owned_asset_fields(task, db)
         )
 
         task_service.update_task(task.id, progress=100)
@@ -455,6 +489,7 @@ def _execute_refine(task, cfg, db):
             asset_type="video",
             file_path=output_path,
             file_size=os.path.getsize(output_path),
+            **_owned_asset_fields(task, db)
         )
 
         task_service.update_task(task.id, progress=100)
@@ -610,17 +645,175 @@ EXECUTOR_MAP = {
 LEGACY_TASK_TYPES = tuple(EXECUTOR_MAP.keys())
 
 
+def recover_orphaned_legacy_tasks(task_service):
+    """Fail tasks left ``running`` by a previous process and unstick projects.
+
+    Legacy executors run in daemon threads without a lease: a crash or restart
+    leaves the task ``running`` forever, which also blocks credential edits
+    (``has_active_tasks``) and keeps the project in ``analyzing``.
+    """
+    now = int(time.time())
+    placeholders = ",".join("?" for _ in LEGACY_TASK_TYPES)
+    with task_service.db.transaction() as cursor:
+        cursor.execute(
+            "UPDATE generation_tasks SET status = ?, error_code = ?, error_message = ?, "
+            "completed_at = ?, updated_at = ? "
+            "WHERE task_type IN ({0}) AND status IN ('running', 'submitting')".format(
+                placeholders
+            ),
+            (
+                GenerationTask.STATUS_FAILED,
+                "worker_restarted",
+                "Worker 重启时任务尚未完成，已标记失败；请重新提交",
+                now,
+                now,
+            ) + LEGACY_TASK_TYPES,
+        )
+        recovered_tasks = cursor.rowcount
+        cursor.execute(
+            "UPDATE creative_projects SET status = CASE "
+            "WHEN EXISTS (SELECT 1 FROM storyboard_shots s "
+            "WHERE s.creative_project_id = creative_projects.id) "
+            "THEN ? ELSE ? END, updated_at = ? "
+            "WHERE status = ? AND NOT EXISTS ("
+            "SELECT 1 FROM generation_tasks t "
+            "WHERE t.creative_project_id = creative_projects.id "
+            "AND t.status IN ('queued', 'submitting', 'running'))",
+            (
+                CreativeProject.STATUS_READY,
+                CreativeProject.STATUS_DRAFT,
+                now,
+                CreativeProject.STATUS_ANALYZING,
+            ),
+        )
+        reset_projects = cursor.rowcount
+    if recovered_tasks or reset_projects:
+        logger.warning(
+            "Recovered %s orphaned legacy task(s) and reset %s analyzing project(s)",
+            recovered_tasks, reset_projects,
+        )
+    return {"tasks": recovered_tasks, "projects": reset_projects}
+
+
+def _reset_project_after_failure(task_service, task):
+    """Leave a project in a usable state when its analyzing task fails."""
+    if not task.creative_project_id:
+        return
+    db = task_service.db
+    try:
+        project = db.fetch_one(
+            "SELECT status FROM creative_projects WHERE id = ?",
+            (task.creative_project_id,),
+        )
+        if not project or project.get("status") != CreativeProject.STATUS_ANALYZING:
+            return
+        active = db.fetch_one(
+            "SELECT COUNT(*) AS total FROM generation_tasks "
+            "WHERE creative_project_id = ? AND id <> ? "
+            "AND status IN ('queued', 'submitting', 'running')",
+            (task.creative_project_id, task.id),
+        )
+        if active and int(active.get("total") or 0) > 0:
+            return
+        shots = db.fetch_one(
+            "SELECT COUNT(*) AS total FROM storyboard_shots WHERE creative_project_id = ?",
+            (task.creative_project_id,),
+        )
+        status = (
+            CreativeProject.STATUS_READY
+            if shots and int(shots.get("total") or 0) > 0
+            else CreativeProject.STATUS_DRAFT
+        )
+        db.update(
+            "creative_projects",
+            {"status": status, "updated_at": int(time.time())},
+            "id = ? AND status = ?",
+            (task.creative_project_id, CreativeProject.STATUS_ANALYZING),
+        )
+    except Exception:
+        logger.exception(
+            "Failed to reset project %s after task %s failure",
+            task.creative_project_id, task.id,
+        )
+
+
+def _process_task(task_service, cfg, db, task):
+    """Run one claimed legacy task, honouring cancellation and failures."""
+    fresh = task_service.get_task(task.id)
+    if not fresh:
+        return
+    if (
+        fresh.status == GenerationTask.STATUS_CANCELLED
+        or fresh.cancel_requested
+    ):
+        logger.info("Task %s was cancelled before execution; skipping", task.id)
+        return
+
+    executor = EXECUTOR_MAP.get(task.task_type)
+    if not executor:
+        task_service.update_task(
+            task.id,
+            status=GenerationTask.STATUS_FAILED,
+            error_code="unknown_task_type",
+            error_message="Unknown task type: {0}".format(task.task_type),
+        )
+        return
+
+    logger.info("Executing task %s (type=%s)", task.id, task.task_type)
+
+    try:
+        result = executor(task, cfg, db)
+        current = task_service.get_task(task.id)
+        if current and current.status == GenerationTask.STATUS_RUNNING:
+            task_service.update_task(
+                task.id,
+                status=GenerationTask.STATUS_SUCCEEDED,
+                result_payload=result,
+                progress=100,
+            )
+            logger.info("Task %s succeeded", task.id)
+        else:
+            logger.info(
+                "Task %s finished after cancellation (status=%s)",
+                task.id, current.status if current else "missing",
+            )
+    except ProviderError as e:
+        current = task_service.get_task(task.id)
+        if not current or current.status != GenerationTask.STATUS_CANCELLED:
+            task_service.update_task(
+                task.id,
+                status=GenerationTask.STATUS_FAILED,
+                error_code=e.error_type or "provider_error",
+                error_message=str(e),
+            )
+        _reset_project_after_failure(task_service, task)
+        logger.error("Task %s failed (provider): %s", task.id, str(e))
+    except Exception as e:
+        current = task_service.get_task(task.id)
+        if not current or current.status != GenerationTask.STATUS_CANCELLED:
+            task_service.update_task(
+                task.id,
+                status=GenerationTask.STATUS_FAILED,
+                error_message=str(e),
+            )
+        _reset_project_after_failure(task_service, task)
+        logger.exception("Task %s failed with exception", task.id)
+
+
 def start_task_worker(task_service, cfg):
     """Start a daemon thread that processes creative production tasks."""
 
     def _run():
-        # Import time here to avoid circular imports
-        import time
         # Import Database for db operations
         from .database import get_database
 
         db = get_database()
         stop_event = threading.Event()
+
+        try:
+            recover_orphaned_legacy_tasks(task_service)
+        except Exception:
+            logger.exception("Failed to recover orphaned legacy tasks")
 
         logger.info("Creative task worker started")
         while not stop_event.is_set():
@@ -630,42 +823,7 @@ def start_task_worker(task_service, cfg):
                     time.sleep(2)
                     continue
 
-                executor = EXECUTOR_MAP.get(task.task_type)
-                if not executor:
-                    task_service.update_task(
-                        task.id,
-                        status=GenerationTask.STATUS_FAILED,
-                        error_code="unknown_task_type",
-                        error_message="Unknown task type: {0}".format(task.task_type),
-                    )
-                    continue
-
-                logger.info("Executing task %s (type=%s)", task.id, task.task_type)
-
-                try:
-                    result = executor(task, cfg, db)
-                    task_service.update_task(
-                        task.id,
-                        status=GenerationTask.STATUS_SUCCEEDED,
-                        result_payload=result,
-                        progress=100,
-                    )
-                    logger.info("Task %s succeeded", task.id)
-                except ProviderError as e:
-                    task_service.update_task(
-                        task.id,
-                        status=GenerationTask.STATUS_FAILED,
-                        error_code=e.error_type or "provider_error",
-                        error_message=str(e),
-                    )
-                    logger.error("Task %s failed (provider): %s", task.id, str(e))
-                except Exception as e:
-                    logger.exception("Task %s failed with exception", task.id)
-                    task_service.update_task(
-                        task.id,
-                        status=GenerationTask.STATUS_FAILED,
-                        error_message=str(e),
-                    )
+                _process_task(task_service, cfg, db, task)
 
             except Exception as e:
                 logger.exception("Task worker loop error: %s", str(e))

@@ -44,11 +44,13 @@
     return document.getElementById(id);
   }
 
+  // Quote-safe: this helper is interpolated into HTML attributes, so it must
+  // escape both quote characters.  A textContent round-trip does not.
   function escapeHtml(text) {
-    if (!text) return '';
-    var div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    if (text === null || text === undefined) return '';
+    return String(text).replace(/[&<>"']/g, function (ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch];
+    });
   }
 
   // API helpers

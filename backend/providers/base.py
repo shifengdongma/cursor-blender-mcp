@@ -7,6 +7,30 @@ from __future__ import absolute_import
 import json
 
 
+def scrub_secret(text, secret):
+    """Return ``text`` with a bearer secret redacted.
+
+    Provider error bodies are surfaced to the task record and worker logs; a
+    reflecting proxy can echo the ``Authorization`` header into that body, so
+    every adapter must scrub its own key before building an error message.
+    """
+    if text is None:
+        return ""
+    text = str(text)
+    secret = str(secret or "")
+    if secret:
+        text = text.replace(secret, "***")
+    return text
+
+
+def is_redirect(status_code):
+    """True for HTTP redirects.  Provider calls must never follow them."""
+    try:
+        return 300 <= int(status_code) < 400
+    except (TypeError, ValueError):
+        return False
+
+
 class ProviderError(RuntimeError):
     """Base error for all provider failures."""
     def __init__(self, message, error_type="provider_error"):

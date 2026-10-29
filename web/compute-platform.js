@@ -8,11 +8,12 @@
 
   // ── DOM helpers ──
   function $(id) { return document.getElementById(id); }
+  // Quote-safe: values are used inside onclick/title attributes.
   function escapeHtml(text) {
-    if (text == null) return '';
-    var div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    if (text === null || text === undefined) return '';
+    return String(text).replace(/[&<>"']/g, function (ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch];
+    });
   }
 
   // ── Toast notification ──

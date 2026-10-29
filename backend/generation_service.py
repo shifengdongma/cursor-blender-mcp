@@ -373,8 +373,9 @@ def _provider_for_task(cfg, task):
     if not cred_provider:
         raise ApiError("invalid_model", "无法创建 Provider 客户端", status_code=400)
 
+    credential_service = CredentialService(cfg.DATA_DIR, cfg)
     try:
-        effective = CredentialService(cfg.DATA_DIR, cfg).effective(
+        effective = credential_service.effective(
             task.created_by,
             cred_provider,
             cfg,
@@ -394,6 +395,21 @@ def _provider_for_task(cfg, task):
             status_code=400,
             details={"configure_url": "/api-settings"},
         )
+    if effective.get("source") == "user":
+        # Re-resolve immediately before the outbound request: save-time
+        # validation is not enough with DNS rebinding.  Fail closed rather
+        # than calling a host that now points at the private network.
+        try:
+            effective["base_url"] = credential_service.validate_base_url(
+                effective.get("base_url"), cfg
+            )
+        except CredentialError:
+            raise ApiError(
+                "provider_credential_missing",
+                "任务使用的 Base URL 未通过安全校验，请在 API 配置页重新配置",
+                status_code=400,
+                details={"configure_url": "/api-settings"},
+            )
 
     api_key = effective["api_key"]
     base_url = effective["base_url"]

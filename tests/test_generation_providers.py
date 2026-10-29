@@ -10,6 +10,7 @@ import requests
 from backend.media_fetcher import MediaFetchError, validate_url
 from backend.providers.base import (
     ProviderAuthError,
+    ProviderError,
     ProviderRateLimited,
     ProviderRejected,
     ProviderUncertain,
@@ -21,10 +22,11 @@ from backend.providers.volcengine_video import VolcengineVideoProvider
 
 
 class FakeResponse(object):
-    def __init__(self, status_code=200, payload=None, text=""):
+    def __init__(self, status_code=200, payload=None, text="", headers=None):
         self.status_code = status_code
         self._payload = payload
         self.text = text
+        self.headers = headers or {}
 
     def json(self):
         if self._payload is None:
@@ -35,8 +37,9 @@ class FakeResponse(object):
 def test_ark_image_request_and_parse(monkeypatch):
     captured = {}
 
-    def fake_post(url, headers=None, json=None, timeout=None):
+    def fake_post(url, headers=None, json=None, timeout=None, **kwargs):
         captured.update({"url": url, "headers": headers, "json": json})
+        captured.update(kwargs)
         return FakeResponse(200, {"created": 1, "data": [
             {"url": "https://ark-result.example/a.png"},
             {"b64_json": "abc"},
@@ -82,8 +85,9 @@ def test_ark_image_timeout_is_uncertain(monkeypatch):
 def test_ark_video_request_and_parse(monkeypatch):
     captured = {}
 
-    def fake_post(url, headers=None, json=None, timeout=None):
+    def fake_post(url, headers=None, json=None, timeout=None, **kwargs):
         captured.update({"url": url, "json": json})
+        captured.update(kwargs)
         return FakeResponse(200, {"id": "task-123"})
 
     monkeypatch.setattr(requests, "post", fake_post)
@@ -113,8 +117,9 @@ def test_ark_video_request_and_parse(monkeypatch):
 def test_seedance_omits_optional_fields_and_typed_timeout(monkeypatch):
     captured = {}
 
-    def fake_post(url, headers=None, json=None, timeout=None):
+    def fake_post(url, headers=None, json=None, timeout=None, **kwargs):
         captured.update(json)
+        captured.update(kwargs)
         return FakeResponse(200, {"data": {"id": "pred-1"}})
 
     monkeypatch.setattr(requests, "post", fake_post)
@@ -134,8 +139,9 @@ def test_seedance_omits_optional_fields_and_typed_timeout(monkeypatch):
 def test_luma_payload_and_typed_timeout(monkeypatch):
     captured = {}
 
-    def fake_post(url, json=None, headers=None, timeout=None):
+    def fake_post(url, json=None, headers=None, timeout=None, **kwargs):
         captured.update(json)
+        captured.update(kwargs)
         return FakeResponse(200, {"id": "luma-1"})
 
     monkeypatch.setattr(requests, "post", fake_post)
@@ -178,3 +184,151 @@ def test_validate_url_blocks_private_and_http(monkeypatch):
     with pytest.raises(MediaFetchError):
         validate_url("https://user:pass@example.com/a.png")
     monkeypatch.setattr(socket, "getaddrinfo", real_getaddrinfo)
+
+
+# ── Redirects are rejected, never followed (C2) ──
+
+
+def test_ark_image_rejects_redirect_without_following(monkeypatch):
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse(307, text="redirect", headers={})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    provider = VolcengineImageProvider("secret-key-1", "https://ark.example/api/v3", "model")
+    with pytest.raises(ProviderRejected) as exc:
+        provider.generate("prompt")
+    assert exc.value.error_type == "provider_redirect_rejected"
+    assert captured["allow_redirects"] is False
+
+
+def test_ark_video_rejects_redirects_for_submit_and_poll(monkeypatch):
+    provider = VolcengineVideoProvider("secret-key-2", "https://ark.example/api/v3", "model")
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse(302, text="redirect")
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    with pytest.raises(ProviderRejected) as exc:
+        provider.create_generation("prompt")
+    assert exc.value.error_type == "provider_redirect_rejected"
+    assert captured["allow_redirects"] is False
+
+    def fake_get(url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse(308, text="redirect")
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    with pytest.raises(ProviderError) as exc:
+        provider.get_generation("task-1")
+    assert exc.value.error_type == "provider_redirect_rejected"
+    assert captured["allow_redirects"] is False
+
+
+def test_seedance_rejects_redirects_for_submit_and_poll(monkeypatch):
+    provider = SeedanceProvider("secret-key-3", "https://atlas.example/api/v1", "model")
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse(302, text="redirect")
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    with pytest.raises(ProviderRejected) as exc:
+        provider.create_generation("prompt")
+    assert exc.value.error_type == "provider_redirect_rejected"
+    assert captured["allow_redirects"] is False
+
+    monkeypatch.setattr(requests, "get", lambda url, **kw: (captured.update(kw), FakeResponse(307))[1])
+    with pytest.raises(ProviderError) as exc:
+        provider.get_generation("pred-1")
+    assert exc.value.error_type == "provider_redirect_rejected"
+    assert captured["allow_redirects"] is False
+
+
+def test_luma_rejects_redirects_for_submit_and_poll(monkeypatch):
+    provider = LumaProvider("secret-key-4", "https://luma.example", model_name="ray-2")
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse(302, text="redirect")
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    with pytest.raises(ProviderRejected) as exc:
+        provider.create_generation("prompt")
+    assert exc.value.error_type == "provider_redirect_rejected"
+    assert captured["allow_redirects"] is False
+
+    monkeypatch.setattr(requests, "get", lambda url, **kw: (captured.update(kw), FakeResponse(307))[1])
+    with pytest.raises(ProviderError) as exc:
+        provider.get_generation("gen-1")
+    assert exc.value.error_type == "provider_redirect_rejected"
+    assert captured["allow_redirects"] is False
+
+
+# ── Error bodies never leak the bearer key (I8) ──
+
+
+def test_ark_image_error_body_secret_is_scrubbed(monkeypatch):
+    key = "ark-secret-abc-987"
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *a, **k: FakeResponse(
+            400, {"error": {"message": "bad bearer {0}".format(key)}}
+        ),
+    )
+    provider = VolcengineImageProvider(key, "https://ark.example/api/v3", "model")
+    with pytest.raises(ProviderRejected) as exc:
+        provider.generate("prompt")
+    assert key not in str(exc.value)
+    assert "***" in str(exc.value)
+
+
+def test_ark_video_error_body_secret_is_scrubbed(monkeypatch):
+    key = "ark-video-secret-654"
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *a, **k: FakeResponse(
+            400, {"error": {"message": "rejected {0}".format(key)}}
+        ),
+    )
+    provider = VolcengineVideoProvider(key, "https://ark.example/api/v3", "model")
+    with pytest.raises(ProviderRejected) as exc:
+        provider.create_generation("prompt")
+    assert key not in str(exc.value)
+    assert "***" in str(exc.value)
+
+
+def test_seedance_error_body_secret_is_scrubbed(monkeypatch):
+    key = "seedance-secret-321"
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *a, **k: FakeResponse(400, text="bad key {0}".format(key)),
+    )
+    provider = SeedanceProvider(key, "https://atlas.example/api/v1", "model")
+    with pytest.raises(ProviderRejected) as exc:
+        provider.create_generation("prompt")
+    assert key not in str(exc.value)
+    assert "***" in str(exc.value)
+
+
+def test_luma_error_body_secret_is_scrubbed(monkeypatch):
+    key = "luma-secret-159"
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *a, **k: FakeResponse(400, text="bad key {0}".format(key)),
+    )
+    provider = LumaProvider(key, "https://luma.example", model_name="ray-2")
+    with pytest.raises(ProviderRejected) as exc:
+        provider.create_generation("prompt")
+    assert key not in str(exc.value)
+    assert "***" in str(exc.value)

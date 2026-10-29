@@ -256,12 +256,26 @@ class TaskService(object):
                 (now, now, now),
             )
 
-    def count_active_tasks(self, created_by):
-        return self.db.count(
-            "generation_tasks",
-            "created_by = ? AND status IN ('queued','submitting','running')",
-            (created_by,),
+    def count_active_tasks(self, created_by, task_types=None):
+        where = "created_by = ? AND status IN ('queued','submitting','running')"
+        params = [created_by]
+        if task_types:
+            placeholders = ",".join("?" for _ in task_types)
+            where += " AND task_type IN ({0})".format(placeholders)
+            params.extend(task_types)
+        return self.db.count("generation_tasks", where, tuple(params))
+
+    def count_active_project_tasks(self, creative_project_id, task_types=None):
+        where = (
+            "creative_project_id = ? "
+            "AND status IN ('queued','submitting','running')"
         )
+        params = [creative_project_id]
+        if task_types:
+            placeholders = ",".join("?" for _ in task_types)
+            where += " AND task_type IN ({0})".format(placeholders)
+            params.extend(task_types)
+        return self.db.count("generation_tasks", where, tuple(params))
 
     def count_tasks_since(self, created_by, since, task_type=None):
         where = "created_by = ? AND created_at >= ?"

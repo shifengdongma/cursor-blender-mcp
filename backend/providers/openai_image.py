@@ -12,6 +12,8 @@ from .base import (
     ProviderRateLimited,
     ProviderRejected,
     ProviderUncertain,
+    is_redirect,
+    scrub_secret,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,12 +69,9 @@ class OpenAIImageProvider(object):
         else:
             message = None
         message = message or payload.get("message") or response.text or ""
-        message = str(message)[:500]
         # Defence in depth: never echo the bearer token even if a provider
         # mirrors request headers into its error body.
-        if self.api_key:
-            message = message.replace(self.api_key, "***")
-        return message
+        return scrub_secret(str(message)[:500], self.api_key)
 
     def generate(self, prompt, negative_prompt=None, size="1024x1024", seed=None,
                  reference_image_urls=None, watermark=False, response_format="b64_json"):
@@ -103,7 +102,8 @@ class OpenAIImageProvider(object):
         url = self.base_url + "/images/generations"
         try:
             response = requests.post(
-                url, headers=self._headers(), json=payload, timeout=self.timeout_s
+                url, headers=self._headers(), json=payload, timeout=self.timeout_s,
+                allow_redirects=False,
             )
         except requests.exceptions.Timeout:
             raise ProviderUncertain(
@@ -116,6 +116,11 @@ class OpenAIImageProvider(object):
                 error_type="image_submission_uncertain",
             )
 
+        if is_redirect(response.status_code):
+            raise ProviderRejected(
+                "OpenAI 图片返回重定向（HTTP {0}），已拒绝跟随".format(response.status_code),
+                error_type="provider_redirect_rejected",
+            )
         if response.status_code in (401, 403):
             raise ProviderAuthError(
                 "OpenAI 图片鉴权失败: HTTP {0}".format(response.status_code),

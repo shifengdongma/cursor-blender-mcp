@@ -11,7 +11,13 @@ import time
 
 import requests
 
-from .base import BaseLLMProvider, ProviderError, validate_json_schema
+from .base import (
+    BaseLLMProvider,
+    ProviderError,
+    is_redirect,
+    scrub_secret,
+    validate_json_schema,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,18 +55,32 @@ class LLMProvider(BaseLLMProvider):
 
         for attempt in range(max_retries + 1):
             try:
-                r = requests.post(url, headers=self._headers(), json=payload, timeout=timeout_s)
+                r = requests.post(
+                    url, headers=self._headers(), json=payload, timeout=timeout_s,
+                    allow_redirects=False,
+                )
+                if is_redirect(r.status_code):
+                    # Never follow a redirect: a public endpoint could 307 the
+                    # POST (Authorization header included) to a private host.
+                    raise ProviderError(
+                        "LLM API 返回重定向（HTTP {0}），已拒绝跟随".format(r.status_code),
+                        error_type="provider_redirect_rejected",
+                    )
                 if r.status_code < 400:
                     return r.json()
                 # 4xx errors: no retry
                 if 400 <= r.status_code < 500:
                     raise ProviderError(
-                        "LLM API returned {0}: {1}".format(r.status_code, r.text[:500]),
+                        "LLM API returned {0}: {1}".format(
+                            r.status_code, scrub_secret(r.text[:500], self.api_key)
+                        ),
                         error_type="llm_client_error",
                     )
                 # 5xx errors: retry
                 last_error = ProviderError(
-                    "LLM API returned {0}: {1}".format(r.status_code, r.text[:500]),
+                    "LLM API returned {0}: {1}".format(
+                        r.status_code, scrub_secret(r.text[:500], self.api_key)
+                    ),
                     error_type="llm_server_error",
                 )
             except requests.exceptions.Timeout:

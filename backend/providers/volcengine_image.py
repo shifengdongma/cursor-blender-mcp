@@ -12,6 +12,8 @@ from .base import (
     ProviderRateLimited,
     ProviderRejected,
     ProviderUncertain,
+    is_redirect,
+    scrub_secret,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,15 +32,17 @@ class VolcengineImageProvider(object):
             "Content-Type": "application/json",
         }
 
-    @staticmethod
-    def _safe_error(response):
+    def _safe_error(self, response):
         try:
             payload = response.json() or {}
         except ValueError:
             payload = {}
         error = payload.get("error") or {}
         message = error.get("message") if isinstance(error, dict) else None
-        return (message or str(payload.get("message") or response.text or ""))[:500]
+        return scrub_secret(
+            (message or str(payload.get("message") or response.text or ""))[:500],
+            self.api_key,
+        )
 
     def generate(self, prompt, negative_prompt=None, size="2K", seed=None,
                  reference_image_urls=None, watermark=False, response_format="url"):
@@ -62,7 +66,8 @@ class VolcengineImageProvider(object):
         url = self.base_url + "/images/generations"
         try:
             response = requests.post(
-                url, headers=self._headers(), json=payload, timeout=self.timeout_s
+                url, headers=self._headers(), json=payload, timeout=self.timeout_s,
+                allow_redirects=False,
             )
         except requests.exceptions.Timeout:
             raise ProviderUncertain("Seedream 请求超时，生成结果不确定", error_type="image_submission_uncertain")
@@ -72,6 +77,11 @@ class VolcengineImageProvider(object):
                 error_type="image_submission_uncertain",
             )
 
+        if is_redirect(response.status_code):
+            raise ProviderRejected(
+                "Seedream 返回重定向（HTTP {0}），已拒绝跟随".format(response.status_code),
+                error_type="provider_redirect_rejected",
+            )
         if response.status_code in (401, 403):
             raise ProviderAuthError(
                 "Seedream 鉴权失败: HTTP {0}".format(response.status_code),

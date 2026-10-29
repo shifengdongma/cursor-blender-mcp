@@ -30,6 +30,29 @@ def register_creative_routes(app, cfg, json_success, json_error):
     task_service = get_task_service(cfg.DATA_DIR)
     asset_service = get_asset_service(cfg.DATA_DIR)
 
+    def _legacy_capacity_error(user, project_id=None, storyboard=False):
+        """Reject abusive legacy-task creation (one shared worker thread)."""
+        from .task_worker import LEGACY_TASK_TYPES
+
+        limit = getattr(cfg, "MAX_ACTIVE_LEGACY_TASKS_PER_USER", 3)
+        if limit and task_service.count_active_tasks(
+            user.get("id"), task_types=LEGACY_TASK_TYPES
+        ) >= limit:
+            return json_error(
+                "quota_exceeded",
+                "同时进行的创作任务过多，请等待完成后再提交",
+                status_code=429,
+            )
+        if storyboard and project_id and task_service.count_active_project_tasks(
+            project_id, task_types=(GenerationTask.TYPE_STORYBOARD,)
+        ):
+            return json_error(
+                "task_in_progress",
+                "该项目已有分镜分析任务正在进行，请等待完成或取消",
+                status_code=409,
+            )
+        return None
+
     # ── Project CRUD ──
 
     @app.route("/api/creative/projects", methods=["GET"])
@@ -100,6 +123,10 @@ def register_creative_routes(app, cfg, json_success, json_error):
         require_project(project_id, write=True, demo_mode=cfg.DEMO_MODE)
 
         user = current_user()
+        capacity_error = _legacy_capacity_error(user, project_id, storyboard=True)
+        if capacity_error:
+            return capacity_error
+
         credential_service = CredentialService(cfg.DATA_DIR, cfg)
         available, _reason = credential_service.has_llm(user.get("id"), cfg)
         if not available:
@@ -167,9 +194,14 @@ def register_creative_routes(app, cfg, json_success, json_error):
     def generate_shot_images(shot_id):
         shot, _project = require_shot(shot_id, write=True, demo_mode=cfg.DEMO_MODE)
         data = parse_json_body(request)
+        user = current_user()
         model_key = data.get("model_key")
         if not model_key:
-            available = [m for m in list_models(cfg, task_type="image") if m["available"]]
+            available = [
+                m
+                for m in list_models(cfg, task_type="image", user=user)
+                if m["available"]
+            ]
             if not available:
                 return json_error("provider_not_configured", "图片生成模型未配置", status_code=400)
             model_key = available[0]["key"]
@@ -178,7 +210,7 @@ def register_creative_routes(app, cfg, json_success, json_error):
         task = create_generation_task(
             cfg,
             task_service,
-            current_user(),
+            user,
             GenerationTask.TYPE_IMAGE,
             model_key,
             {
@@ -201,9 +233,14 @@ def register_creative_routes(app, cfg, json_success, json_error):
     def generate_shot_video(shot_id):
         shot, _project = require_shot(shot_id, write=True, demo_mode=cfg.DEMO_MODE)
         data = parse_json_body(request)
+        user = current_user()
         model_key = data.get("model_key")
         if not model_key:
-            available = [m for m in list_models(cfg, task_type="video") if m["available"]]
+            available = [
+                m
+                for m in list_models(cfg, task_type="video", user=user)
+                if m["available"]
+            ]
             if not available:
                 return json_error("provider_not_configured", "视频生成模型未配置", status_code=400)
             model_key = available[0]["key"]
@@ -217,7 +254,7 @@ def register_creative_routes(app, cfg, json_success, json_error):
         task = create_generation_task(
             cfg,
             task_service,
-            current_user(),
+            user,
             GenerationTask.TYPE_VIDEO,
             model_key,
             {
@@ -242,13 +279,17 @@ def register_creative_routes(app, cfg, json_success, json_error):
     def generate_project_tts(project_id):
         require_project(project_id, write=True, demo_mode=cfg.DEMO_MODE)
 
+        user = current_user()
+        capacity_error = _legacy_capacity_error(user)
+        if capacity_error:
+            return capacity_error
         if not cfg.has_piper_configured():
             return json_error("provider_not_configured", "TTS 语音合成服务未配置", status_code=400)
 
         task = task_service.create_task(
             creative_project_id=project_id,
             task_type=GenerationTask.TYPE_TTS,
-            created_by=current_user().get("id"),
+            created_by=user.get("id"),
         )
 
         return json_success(public_task_dict(task, asset_service, task_service), message="TTS 生成任务已创建", status_code=201)
@@ -257,6 +298,10 @@ def register_creative_routes(app, cfg, json_success, json_error):
     def compose_project_video(project_id):
         require_project(project_id, write=True, demo_mode=cfg.DEMO_MODE)
 
+        user = current_user()
+        capacity_error = _legacy_capacity_error(user)
+        if capacity_error:
+            return capacity_error
         if not cfg.has_ffmpeg_configured():
             return json_error("provider_not_configured", "FFmpeg 视频合成服务未配置", status_code=400)
 
@@ -269,7 +314,7 @@ def register_creative_routes(app, cfg, json_success, json_error):
                 "height": data.get("height", 1080),
                 "fps": data.get("fps", 24),
             },
-            created_by=current_user().get("id"),
+            created_by=user.get("id"),
         )
 
         return json_success(public_task_dict(task, asset_service, task_service), message="视频合成任务已创建", status_code=201)
@@ -278,6 +323,10 @@ def register_creative_routes(app, cfg, json_success, json_error):
     def refine_project_video(project_id):
         require_project(project_id, write=True, demo_mode=cfg.DEMO_MODE)
 
+        user = current_user()
+        capacity_error = _legacy_capacity_error(user)
+        if capacity_error:
+            return capacity_error
         if not cfg.has_ffmpeg_configured():
             return json_error("provider_not_configured", "FFmpeg 视频精修服务未配置", status_code=400)
 
@@ -294,7 +343,7 @@ def register_creative_routes(app, cfg, json_success, json_error):
             creative_project_id=project_id,
             task_type=GenerationTask.TYPE_REFINE,
             params={"input_asset_id": asset.id, "filters": data.get("filters") or {}},
-            created_by=current_user().get("id"),
+            created_by=user.get("id"),
         )
 
         return json_success(public_task_dict(task, asset_service, task_service), message="视频精修任务已创建", status_code=201)
@@ -303,10 +352,14 @@ def register_creative_routes(app, cfg, json_success, json_error):
     def export_project(project_id):
         require_project(project_id, write=True, demo_mode=cfg.DEMO_MODE)
 
+        user = current_user()
+        capacity_error = _legacy_capacity_error(user)
+        if capacity_error:
+            return capacity_error
         task = task_service.create_task(
             creative_project_id=project_id,
             task_type=GenerationTask.TYPE_EXPORT,
-            created_by=current_user().get("id"),
+            created_by=user.get("id"),
         )
 
         return json_success(public_task_dict(task, asset_service, task_service), message="导出任务已创建", status_code=201)

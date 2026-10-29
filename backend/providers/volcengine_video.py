@@ -13,6 +13,8 @@ from .base import (
     ProviderRateLimited,
     ProviderRejected,
     ProviderUncertain,
+    is_redirect,
+    scrub_secret,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,16 +33,17 @@ class VolcengineVideoProvider(object):
             "Content-Type": "application/json",
         }
 
-    @staticmethod
-    def _error_text(response):
+    def _error_text(self, response):
         try:
             payload = response.json() or {}
         except ValueError:
             payload = {}
         error = payload.get("error") or {}
         if isinstance(error, dict):
-            return (error.get("message") or error.get("code") or str(payload))[:500]
-        return str(payload.get("message") or response.text or "")[:500]
+            message = error.get("message") or error.get("code") or str(payload)
+        else:
+            message = payload.get("message") or response.text or ""
+        return scrub_secret(str(message)[:500], self.api_key)
 
     def create_generation(self, prompt, negative_prompt=None, reference_image_urls=None,
                           aspect_ratio="16:9", duration_s=5, resolution="720p",
@@ -79,7 +82,8 @@ class VolcengineVideoProvider(object):
         url = self.base_url + "/contents/generations/tasks"
         try:
             response = requests.post(
-                url, headers=self._headers(), json=payload, timeout=self.timeout_s
+                url, headers=self._headers(), json=payload, timeout=self.timeout_s,
+                allow_redirects=False,
             )
         except requests.exceptions.Timeout:
             raise ProviderUncertain("Seedance 提交超时，任务是否创建不确定", error_type="submission_uncertain")
@@ -89,6 +93,11 @@ class VolcengineVideoProvider(object):
                 error_type="submission_uncertain",
             )
 
+        if is_redirect(response.status_code):
+            raise ProviderRejected(
+                "Seedance 返回重定向（HTTP {0}），已拒绝跟随".format(response.status_code),
+                error_type="provider_redirect_rejected",
+            )
         if response.status_code in (401, 403):
             raise ProviderAuthError("Seedance 鉴权失败: HTTP {0}".format(response.status_code))
         if response.status_code == 429:
@@ -118,11 +127,18 @@ class VolcengineVideoProvider(object):
             raise ProviderAuthError("ARK_API_KEY 未配置")
         url = self.base_url + "/contents/generations/tasks/{0}".format(task_id)
         try:
-            response = requests.get(url, headers=self._headers(), timeout=60)
+            response = requests.get(
+                url, headers=self._headers(), timeout=60, allow_redirects=False
+            )
         except requests.exceptions.Timeout:
             raise ProviderPollError("Seedance 查询超时", error_type="provider_poll_timeout")
         except requests.exceptions.ConnectionError as exc:
             raise ProviderPollError("Seedance 查询连接失败: {0}".format(str(exc)[:160]))
+        if is_redirect(response.status_code):
+            raise ProviderPollError(
+                "Seedance 查询返回重定向（HTTP {0}），已拒绝跟随".format(response.status_code),
+                error_type="provider_redirect_rejected",
+            )
         if response.status_code in (401, 403):
             raise ProviderAuthError("Seedance 查询鉴权失败")
         if response.status_code == 429:
@@ -141,8 +157,12 @@ class VolcengineVideoProvider(object):
         """Delete/cancel a queued provider task. Returns True when accepted."""
         url = self.base_url + "/contents/generations/tasks/{0}".format(task_id)
         try:
-            response = requests.delete(url, headers=self._headers(), timeout=30)
+            response = requests.delete(
+                url, headers=self._headers(), timeout=30, allow_redirects=False
+            )
         except requests.exceptions.RequestException:
+            return False
+        if is_redirect(response.status_code):
             return False
         return response.status_code in (200, 202, 204)
 

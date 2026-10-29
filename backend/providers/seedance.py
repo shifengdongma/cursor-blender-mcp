@@ -17,6 +17,8 @@ from .base import (
     ProviderRateLimited,
     ProviderRejected,
     ProviderUncertain,
+    is_redirect,
+    scrub_secret,
 )
 
 
@@ -58,7 +60,10 @@ class SeedanceProvider(object):
 
         url = self.base_url + "/model/generateVideo"
         try:
-            response = requests.post(url, headers=self._headers(), json=payload, timeout=120)
+            response = requests.post(
+                url, headers=self._headers(), json=payload, timeout=120,
+                allow_redirects=False,
+            )
         except requests.exceptions.Timeout:
             raise ProviderUncertain("Seedance 提交超时，任务是否创建不确定", error_type="submission_uncertain")
         except requests.exceptions.ConnectionError as exc:
@@ -67,13 +72,20 @@ class SeedanceProvider(object):
                 error_type="submission_uncertain",
             )
 
+        if is_redirect(response.status_code):
+            raise ProviderRejected(
+                "Seedance 返回重定向（HTTP {0}），已拒绝跟随".format(response.status_code),
+                error_type="provider_redirect_rejected",
+            )
         if response.status_code in (401, 403):
             raise ProviderAuthError("Seedance 鉴权失败: HTTP {0}".format(response.status_code))
         if response.status_code == 429:
             raise ProviderRateLimited("Seedance 请求过于频繁")
         if 400 <= response.status_code < 500:
             raise ProviderRejected(
-                "Seedance 拒绝请求: {0}".format(response.text[:500]),
+                "Seedance 拒绝请求: {0}".format(
+                    scrub_secret(response.text[:500], self.api_key)
+                ),
                 error_type="provider_rejected",
             )
         if response.status_code >= 500:
@@ -99,6 +111,7 @@ class SeedanceProvider(object):
                 url,
                 headers={"Authorization": "Bearer {0}".format(self.api_key)},
                 timeout=60,
+                allow_redirects=False,
             )
         except requests.exceptions.Timeout:
             raise ProviderPollError("Seedance 查询超时", error_type="provider_poll_timeout")
@@ -106,6 +119,11 @@ class SeedanceProvider(object):
             raise ProviderPollError(
                 "Seedance 查询连接失败: {0}".format(str(exc)[:160]),
                 error_type="provider_poll_error",
+            )
+        if is_redirect(response.status_code):
+            raise ProviderPollError(
+                "Seedance 查询返回重定向（HTTP {0}），已拒绝跟随".format(response.status_code),
+                error_type="provider_redirect_rejected",
             )
         if response.status_code in (401, 403):
             raise ProviderAuthError("Seedance 查询鉴权失败")

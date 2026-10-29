@@ -272,6 +272,11 @@ class Config(object):
     MAX_PROMPT_LENGTH = _to_int(os.environ.get("MAX_PROMPT_LENGTH"), default=4000)
     MAX_REFERENCE_IMAGE_MB = _to_int(os.environ.get("MAX_REFERENCE_IMAGE_MB"), default=10)
     MAX_CONCURRENT_TASKS_PER_USER = _to_int(os.environ.get("MAX_CONCURRENT_TASKS_PER_USER"), default=2)
+    # Legacy creative tasks (storyboard/TTS/compose/refine/export) share one
+    # worker thread; cap them per user so one account cannot starve the queue.
+    MAX_ACTIVE_LEGACY_TASKS_PER_USER = max(
+        1, _to_int(os.environ.get("MAX_ACTIVE_LEGACY_TASKS_PER_USER"), default=3)
+    )
     DAILY_IMAGE_LIMIT = _to_int(os.environ.get("DAILY_IMAGE_LIMIT"), default=20)
     DAILY_VIDEO_LIMIT = _to_int(os.environ.get("DAILY_VIDEO_LIMIT"), default=5)
 

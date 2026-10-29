@@ -137,3 +137,53 @@ def test_storyboard_executor_fails_when_pinned_user_credential_missing(app):
     with pytest.raises(ProviderError) as exc:
         task_worker._execute_storyboard(task, cfg, get_database())
     assert exc.value.error_type == "llm_missing_key"
+
+
+def _resolver(ip):
+    import socket as _socket
+
+    def resolve(host, port, type=None, *args, **kwargs):
+        return [(_socket.AF_INET, _socket.SOCK_STREAM, 6, "", (ip, port))]
+
+    return resolve
+
+
+def test_storyboard_revalidates_user_base_url_and_fails_closed(app, monkeypatch):
+    import socket
+
+    svc, cfg, user = _setup(app, "llm_rebind")
+    monkeypatch.setattr(socket, "getaddrinfo", _resolver("93.184.216.34"))
+    svc.upsert(
+        user["id"],
+        user.get("tenant_id"),
+        "llm",
+        api_key=USER_KEY,
+        base_url="https://rebind.example/v1",
+        model=USER_MODEL,
+    )
+    project = _create_project(cfg, user)
+    task = _create_storyboard_task(cfg, project, user)
+
+    monkeypatch.setattr(socket, "getaddrinfo", _resolver("10.0.0.5"))
+    with pytest.raises(ProviderError) as exc:
+        task_worker._execute_storyboard(task, cfg, get_database())
+    assert exc.value.error_type == "llm_missing_key"
+    # Credentials are resolved before STATUS_ANALYZING: the project is untouched.
+    assert (
+        get_creative_project_service(cfg.DATA_DIR).get_project(project.id).status
+        == CreativeProject.STATUS_DRAFT
+    )
+
+
+def test_second_storyboard_task_for_same_project_returns_409(app):
+    svc, cfg, user = _setup(app, "llm_duplicate")
+    _save_user_llm(svc, user)
+    project = _create_project(cfg, user)
+    client, token = _login(app, "llm_duplicate")
+
+    first = _analyze(client, token, project.id)
+    assert first.status_code in (201, 202), first.get_json()
+
+    second = _analyze(client, token, project.id)
+    assert second.status_code == 409, second.get_json()
+    assert second.get_json()["error"] == "task_in_progress"

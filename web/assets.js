@@ -1134,12 +1134,16 @@
 
     var html = '';
     documents.forEach(function(doc, index) {
-      var categoryClass = 'category-' + (doc.category || 'other');
+      var category = doc.category || '';
+      // Categories are admin-supplied: keep the CSS token strictly alnum and
+      // escape the attribute/label (both are rendered into HTML).
+      var categoryToken = String(category || 'other').replace(/[^a-zA-Z0-9_-]/g, '') || 'other';
+      var categoryClass = 'category-' + categoryToken;
       html += '\
         <div class="prompt-doc-card card-enter ' + categoryClass + '" style="animation-delay: ' + (index * 0.05) + 's;">\
           <div class="doc-header">\
             <h3 class="doc-title">' + escapeHtml(doc.title) + '</h3>\
-            <span class="doc-category" data-category="' + (doc.category || '') + '">' + getCategoryLabel(doc.category) + '</span>\
+            <span class="doc-category" data-category="' + escapeHtml(category) + '">' + escapeHtml(getCategoryLabel(category)) + '</span>\
           </div>\
           <div class="doc-content">' + escapeHtml(doc.content || '') + '</div>\
           ' + (doc.keywords ? '\

@@ -9,11 +9,12 @@
 
   // ── DOM helpers ──
   function $(id) { return document.getElementById(id); }
+  // Quote-safe: node names are used inside single-quoted onclick arguments.
   function escapeHtml(text) {
-    if (text == null) return '';
-    var div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    if (text === null || text === undefined) return '';
+    return String(text).replace(/[&<>"']/g, function (ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch];
+    });
   }
 
   // ── API helper ──

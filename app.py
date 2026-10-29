@@ -1,5 +1,7 @@
 from __future__ import absolute_import
 
+from datetime import datetime
+
 import json
 import logging
 import os
@@ -45,6 +47,28 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _parse_date_param(value, end_of_day=False):
+    """Parse a date filter as ``YYYY-MM-DD`` in server-local time.
+
+    Digits-only values are treated as Unix timestamps and pass through.
+    ``end_of_day`` extends a plain date to 23:59:59 of that local day.
+    """
+    if value is None:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    if value.isdigit():
+        return int(value)
+    try:
+        # No tzinfo: naive timestamps are interpreted in the server's local zone.
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise ApiError("invalid_params", "日期格式应为 YYYY-MM-DD", status_code=400)
+    timestamp = int(parsed.timestamp())
+    return timestamp + 86399 if end_of_day else timestamp
 
 
 def _workspace_project_id(user):
@@ -327,6 +351,14 @@ def _register_asset_routes(app, web_root, cfg):
         asset_type = request.args.get("asset_type")
         venue_type = request.args.get("venue_type")
         q = request.args.get("q")
+        created_after = _parse_date_param(request.args.get("created_after"))
+        created_before = _parse_date_param(request.args.get("created_before"), end_of_day=True)
+        if (created_after is not None and created_before is not None
+                and created_after > created_before):
+            raise ApiError("invalid_params", "开始时间不能晚于结束时间", status_code=400)
+        sort = request.args.get("sort") or "newest"
+        if sort not in ("newest", "oldest", "name"):
+            raise ApiError("invalid_params", "不支持的排序方式", status_code=400)
         user = g.current_user
         admin = is_admin(user)
         owner = None if admin else user.get("id")
@@ -342,6 +374,9 @@ def _register_asset_routes(app, web_root, cfg):
             include_shared=include_shared,
             tenant_id=tenant_id,
             q=q,
+            created_after=created_after,
+            created_before=created_before,
+            sort=sort,
         )
         total = asset_service.count_assets(
             asset_type=asset_type,
@@ -350,6 +385,8 @@ def _register_asset_routes(app, web_root, cfg):
             include_shared=include_shared,
             tenant_id=tenant_id,
             q=q,
+            created_after=created_after,
+            created_before=created_before,
         )
 
         return _json_success(

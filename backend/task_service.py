@@ -8,6 +8,7 @@ import logging
 import time
 
 from .database import get_database
+from .http_utils import ApiError
 from .models import GenerationTask, TaskArtifact
 
 logger = logging.getLogger(__name__)
@@ -23,8 +24,12 @@ class TaskService(object):
     def __init__(self, data_dir=None):
         self.db = get_database()
 
-    def create_task(self, creative_project_id, task_type, **kwargs):
-        """Create a new generation task."""
+    def create_task(self, creative_project_id, task_type, cursor=None, **kwargs):
+        """Create a new generation task.
+
+        Pass ``cursor`` to insert inside an existing ``db.transaction()`` block
+        (used to make quota checks and inserts atomic).
+        """
         task = GenerationTask(
             creative_project_id=creative_project_id,
             task_type=task_type,
@@ -34,7 +39,16 @@ class TaskService(object):
         task.updated_at = _now()
 
         params = task.to_insert_params()
-        self.db.insert("generation_tasks", params)
+        if cursor is None:
+            self.db.insert("generation_tasks", params)
+        else:
+            columns = list(params.keys())
+            cursor.execute(
+                "INSERT INTO generation_tasks ({0}) VALUES ({1})".format(
+                    ", ".join(columns), ", ".join("?" for _ in columns)
+                ),
+                tuple(params[column] for column in columns),
+            )
         return task
 
     def get_task(self, task_id):
@@ -45,8 +59,20 @@ class TaskService(object):
         )
         return GenerationTask.from_row(row)
 
-    def list_tasks(self, creative_project_id=None, task_type=None, limit=50, offset=0):
+    # Fixed ORDER BY fragments; raw client input never reaches the SQL string.
+    SORT_ORDERS = {
+        "newest": "created_at DESC",
+        "oldest": "created_at ASC",
+    }
+
+    def list_tasks(self, creative_project_id=None, task_type=None, task_types=None,
+                   status=None, created_by=None, limit=50, offset=0,
+                   created_after=None, created_before=None, model_id=None,
+                   sort="newest"):
         """List tasks, optionally filtered."""
+        order_clause = self.SORT_ORDERS.get(sort or "newest")
+        if order_clause is None:
+            raise ApiError("invalid_params", "不支持的排序方式", status_code=400)
         conditions = []
         params = []
 
@@ -56,10 +82,31 @@ class TaskService(object):
         if task_type:
             conditions.append("task_type = ?")
             params.append(task_type)
+        if task_types:
+            placeholders = ",".join("?" for _ in task_types)
+            conditions.append("task_type IN ({0})".format(placeholders))
+            params.extend(task_types)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if created_by:
+            conditions.append("created_by = ?")
+            params.append(created_by)
+        if created_after is not None:
+            conditions.append("created_at >= ?")
+            params.append(int(created_after))
+        if created_before is not None:
+            conditions.append("created_at <= ?")
+            params.append(int(created_before))
+        if model_id:
+            conditions.append("model_id = ?")
+            params.append(model_id)
 
         where = " AND ".join(conditions) if conditions else "1=1"
         rows = self.db.fetch_all(
-            "SELECT * FROM generation_tasks WHERE {0} ORDER BY created_at DESC LIMIT ? OFFSET ?".format(where),
+            "SELECT * FROM generation_tasks WHERE {0} ORDER BY {1} LIMIT ? OFFSET ?".format(
+                where, order_clause
+            ),
             tuple(params) + (limit, offset),
         )
         total = self.db.count("generation_tasks", where, tuple(params))
@@ -72,38 +119,157 @@ class TaskService(object):
             "offset": offset,
         }
 
-    def claim_next_task(self):
-        """
-        Atomically claim the next queued task.
-        Uses UPDATE ... WHERE id IN (SELECT ...) for atomicity.
-
-        Returns:
-            GenerationTask or None
-        """
-        # First find the next queued task
+    def find_idempotent_task(self, created_by, client_request_id):
+        if not created_by or not client_request_id:
+            return None
         row = self.db.fetch_one(
-            "SELECT id FROM generation_tasks WHERE status = ? ORDER BY created_at ASC LIMIT 1",
-            (GenerationTask.STATUS_QUEUED,),
+            "SELECT * FROM generation_tasks WHERE created_by = ? AND client_request_id = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (created_by, client_request_id),
+        )
+        return GenerationTask.from_row(row)
+
+    def claim_next_task(self, task_types=None):
+        """Atomically claim the next queued legacy task."""
+        conditions = ["status = ?"]
+        params = [GenerationTask.STATUS_QUEUED]
+        if task_types:
+            placeholders = ",".join("?" for _ in task_types)
+            conditions.append("task_type IN ({0})".format(placeholders))
+            params.extend(task_types)
+        row = self.db.fetch_one(
+            "SELECT id FROM generation_tasks WHERE {0} ORDER BY created_at ASC LIMIT 1".format(
+                " AND ".join(conditions)
+            ),
+            tuple(params),
         )
         if not row:
             return None
 
         task_id = row["id"]
         now = _now()
-
-        # Atomically claim it
         affected = self.db.update(
             "generation_tasks",
             {"status": GenerationTask.STATUS_RUNNING, "claimed_at": now, "updated_at": now},
             "id = ? AND status = ?",
             (task_id, GenerationTask.STATUS_QUEUED),
         )
-
         if affected == 0:
-            # Someone else claimed it
             return None
-
         return self.get_task(task_id)
+
+    # ── Resumable generation queue ──
+
+    def claim_generation_submission(self, lease_owner, lease_seconds=300):
+        now = _now()
+        task_id = None
+        with self.db.transaction() as cursor:
+            cursor.execute(
+                "SELECT id FROM generation_tasks "
+                "WHERE task_type IN ('image','video') AND status = 'queued' "
+                "AND (next_retry_at IS NULL OR next_retry_at <= ?) "
+                "ORDER BY created_at ASC LIMIT 1",
+                (now,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            task_id = row["id"]
+            cursor.execute(
+                "UPDATE generation_tasks SET status = 'submitting', lease_owner = ?, "
+                "lease_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1, "
+                "submission_uncertain = 1, submission_started_at = ?, updated_at = ?, claimed_at = ? "
+                "WHERE id = ? AND status = 'queued'",
+                (lease_owner, now + lease_seconds, now, now, now, task_id),
+            )
+            if cursor.rowcount != 1:
+                return None
+        return self.get_task(task_id)
+
+    def claim_generation_poll(self, lease_owner, lease_seconds=300):
+        now = _now()
+        task_id = None
+        with self.db.transaction() as cursor:
+            cursor.execute(
+                "SELECT id FROM generation_tasks "
+                "WHERE task_type IN ('image','video') AND status = 'running' "
+                "AND provider_job_id IS NOT NULL AND provider_job_id <> '' "
+                "AND (next_retry_at IS NULL OR next_retry_at <= ?) "
+                "AND (lease_expires_at IS NULL OR lease_expires_at < ?) "
+                "ORDER BY COALESCE(next_retry_at, 0) ASC, created_at ASC LIMIT 1",
+                (now, now),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            task_id = row["id"]
+            cursor.execute(
+                "UPDATE generation_tasks SET lease_owner = ?, lease_expires_at = ?, updated_at = ? "
+                "WHERE id = ? AND status = 'running' "
+                "AND (lease_expires_at IS NULL OR lease_expires_at < ?)",
+                (lease_owner, now + lease_seconds, now, task_id, now),
+            )
+            if cursor.rowcount != 1:
+                return None
+        return self.get_task(task_id)
+
+    def release_generation_lease(self, task_id, lease_owner, cursor=None, **fields):
+        update = {"lease_owner": None, "lease_expires_at": None, "updated_at": _now()}
+        for key, value in fields.items():
+            if key in (
+                "status", "stage", "progress", "provider_status", "provider_job_id",
+                "next_retry_at", "poll_error_count", "last_polled_at",
+                "submission_uncertain", "error_code", "error_message",
+                "completed_at", "result_payload", "output_asset_id",
+                "cancel_requested",
+            ):
+                if key == "result_payload":
+                    update[key] = __import__("json").dumps(value, ensure_ascii=False)
+                else:
+                    update[key] = value
+        set_clause = ", ".join("{0} = ?".format(key) for key in update)
+        query = "UPDATE generation_tasks SET {0} WHERE id = ? AND lease_owner = ?".format(set_clause)
+        params = tuple(update.values()) + (task_id, lease_owner)
+        if cursor is not None:
+            cursor.execute(query, params)
+            return cursor.rowcount
+        return self.db.execute(query, params)
+
+    def recover_stale_generation_leases(self):
+        now = _now()
+        with self.db.transaction() as cursor:
+            cursor.execute(
+                "UPDATE generation_tasks SET status = 'needs_review', lease_owner = NULL, "
+                "lease_expires_at = NULL, error_code = 'submission_uncertain', "
+                "error_message = '提交结果不确定，需人工确认是否已在服务商侧创建任务', updated_at = ? "
+                "WHERE task_type IN ('image','video') AND status = 'submitting' "
+                "AND (provider_job_id IS NULL OR provider_job_id = '') "
+                "AND lease_expires_at IS NOT NULL AND lease_expires_at < ?",
+                (now, now),
+            )
+            cursor.execute(
+                "UPDATE generation_tasks SET lease_owner = NULL, lease_expires_at = NULL, "
+                "next_retry_at = ?, updated_at = ? "
+                "WHERE task_type IN ('image','video') AND status = 'running' "
+                "AND provider_job_id IS NOT NULL AND provider_job_id <> '' "
+                "AND lease_expires_at IS NOT NULL AND lease_expires_at < ?",
+                (now, now, now),
+            )
+
+    def count_active_tasks(self, created_by):
+        return self.db.count(
+            "generation_tasks",
+            "created_by = ? AND status IN ('queued','submitting','running')",
+            (created_by,),
+        )
+
+    def count_tasks_since(self, created_by, since, task_type=None):
+        where = "created_by = ? AND created_at >= ?"
+        params = [created_by, since]
+        if task_type:
+            where += " AND task_type = ?"
+            params.append(task_type)
+        return self.db.count("generation_tasks", where, tuple(params))
 
     def update_task(self, task_id, **kwargs):
         """Update task fields."""
@@ -112,15 +278,19 @@ class TaskService(object):
             return None
 
         updatable = [
-            "status", "stage", "progress", "result_payload",
-            "error_code", "error_message", "completed_at",
+            "status", "stage", "progress", "params", "result_payload",
+            "error_code", "error_message", "completed_at", "provider",
+            "model_id", "provider_job_id", "provider_status", "attempt_count",
+            "max_attempts", "next_retry_at", "lease_expires_at", "lease_owner",
+            "submission_uncertain", "submission_started_at", "poll_error_count",
+            "last_polled_at", "output_asset_id", "client_request_id",
+            "cost_estimate", "currency", "cancel_requested",
         ]
         update_data = {}
         for key in updatable:
-            if key in kwargs and kwargs[key] is not None:
+            if key in kwargs:
                 setattr(existing, key, kwargs[key])
-                if key in ("result_payload",):
-                    # Serialize JSON-typed fields
+                if key in ("result_payload", "params"):
                     update_data[key] = __import__("json").dumps(kwargs[key], ensure_ascii=False)
                 else:
                     update_data[key] = kwargs[key]
@@ -135,10 +305,43 @@ class TaskService(object):
         return self.get_task(task_id)
 
     def cancel_task(self, task_id):
-        """Cancel a task if it's queued or running."""
+        """Cancel a task if it's queued, or request cancellation when running."""
         task = self.get_task(task_id)
         if not task:
             return False
+
+        if task.task_type in (GenerationTask.TYPE_IMAGE, GenerationTask.TYPE_VIDEO):
+            if task.status == GenerationTask.STATUS_QUEUED:
+                affected = self.db.update(
+                    "generation_tasks",
+                    {
+                        "status": GenerationTask.STATUS_CANCELLED,
+                        "completed_at": _now(),
+                        "updated_at": _now(),
+                    },
+                    "id = ? AND status = 'queued'",
+                    (task_id,),
+                )
+                if affected:
+                    return True
+                # Lost the race to a worker claim; fall through and request
+                # cancellation of the now-active task instead of lying.
+                task = self.get_task(task_id)
+                if not task:
+                    return False
+            if task.status in (
+                GenerationTask.STATUS_QUEUED,
+                GenerationTask.STATUS_SUBMITTING,
+                GenerationTask.STATUS_RUNNING,
+            ):
+                self.db.update(
+                    "generation_tasks",
+                    {"cancel_requested": 1, "updated_at": _now()},
+                    "id = ? AND status IN ('queued','submitting','running')",
+                    (task_id,),
+                )
+                return True
+            return task.status == GenerationTask.STATUS_CANCELLED
 
         if task.status in (GenerationTask.STATUS_QUEUED, GenerationTask.STATUS_RUNNING):
             self.db.update(
@@ -156,7 +359,8 @@ class TaskService(object):
         return False
 
     def add_artifact(self, task_id, creative_project_id, name, artifact_type,
-                     file_path=None, file_size=0, asset_id=None, metadata=None):
+                     file_path=None, file_size=0, asset_id=None, metadata=None,
+                     cursor=None):
         """Add an artifact record for a task."""
         artifact = TaskArtifact(
             task_id=task_id,
@@ -172,7 +376,16 @@ class TaskService(object):
         artifact.updated_at = _now()
 
         params = artifact.to_insert_params()
-        self.db.insert("task_artifacts", params)
+        if cursor is None:
+            self.db.insert("task_artifacts", params)
+        else:
+            columns = list(params.keys())
+            cursor.execute(
+                "INSERT INTO task_artifacts ({0}) VALUES ({1})".format(
+                    ", ".join(columns), ", ".join("?" for _ in columns)
+                ),
+                tuple(params[column] for column in columns),
+            )
         return artifact
 
     def list_artifacts(self, creative_project_id=None, task_id=None):

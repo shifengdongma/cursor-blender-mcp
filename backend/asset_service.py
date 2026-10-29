@@ -60,6 +60,13 @@ class AssetService(object):
 
     _UPDATE_FIELDS = {'name', 'description', 'venue_type', 'metadata', 'visibility'}
 
+    # Sort whitelist: only these fixed fragments ever reach the SQL string.
+    SORT_ORDERS = {
+        'newest': 'created_at DESC',
+        'oldest': 'created_at ASC',
+        'name': 'name COLLATE NOCASE ASC',
+    }
+
     VALID_VISIBILITIES = {'private', 'shared'}
     NAME_MAX_LENGTH = 120
     DESCRIPTION_MAX_LENGTH = 2000
@@ -177,8 +184,11 @@ class AssetService(object):
 
     # ── Queries ──
 
-    def list_assets(self, asset_type=None, venue_type=None, limit=100, offset=0,
-                    owner_user_id=None, include_shared=False, tenant_id=None, q=None):
+    def _filter_conditions(self, asset_type=None, venue_type=None,
+                           owner_user_id=None, include_shared=False,
+                           tenant_id=None, q=None, created_after=None,
+                           created_before=None):
+        """Build the shared WHERE fragment for list/count queries."""
         conditions = []
         params = []
         if asset_type:
@@ -202,38 +212,53 @@ class AssetService(object):
             like = '%{0}%'.format(q.strip())
             conditions.append('(name LIKE ? OR description LIKE ?)')
             params.extend([like, like])
+        # Timestamps are epoch seconds; callers convert dates (server-local).
+        if created_after is not None:
+            conditions.append('created_at >= ?')
+            params.append(int(created_after))
+        if created_before is not None:
+            conditions.append('created_at <= ?')
+            params.append(int(created_before))
+        return conditions, params
+
+    def list_assets(self, asset_type=None, venue_type=None, limit=100, offset=0,
+                    owner_user_id=None, include_shared=False, tenant_id=None, q=None,
+                    created_after=None, created_before=None, sort='newest'):
+        order_clause = self.SORT_ORDERS.get(sort or 'newest')
+        if order_clause is None:
+            raise AssetServiceError("Unsupported sort")
+        conditions, params = self._filter_conditions(
+            asset_type=asset_type,
+            venue_type=venue_type,
+            owner_user_id=owner_user_id,
+            include_shared=include_shared,
+            tenant_id=tenant_id,
+            q=q,
+            created_after=created_after,
+            created_before=created_before,
+        )
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
         rows = self.db.fetch_all(
-            'SELECT * FROM assets WHERE {0} ORDER BY created_at DESC LIMIT ? OFFSET ?'.format(where_clause),
+            'SELECT * FROM assets WHERE {0} ORDER BY {1} LIMIT ? OFFSET ?'.format(
+                where_clause, order_clause
+            ),
             tuple(params) + (int(limit), int(offset)),
         )
         return [Asset.from_row(row) for row in rows]
 
     def count_assets(self, asset_type=None, venue_type=None, owner_user_id=None,
-                     include_shared=False, tenant_id=None, q=None):
-        conditions = []
-        params = []
-        if asset_type:
-            conditions.append('asset_type = ?')
-            params.append(asset_type)
-        if venue_type:
-            conditions.append('venue_type = ?')
-            params.append(venue_type)
-        if owner_user_id:
-            if include_shared:
-                conditions.append(
-                    "(owner_user_id = ? "
-                    "OR (visibility = 'shared' AND (tenant_id = ? OR tenant_id IS NULL)) "
-                    "OR owner_user_id IS NULL)"
-                )
-                params.extend([owner_user_id, tenant_id])
-            else:
-                conditions.append('owner_user_id = ?')
-                params.append(owner_user_id)
-        if q:
-            like = '%{0}%'.format(q.strip())
-            conditions.append('(name LIKE ? OR description LIKE ?)')
-            params.extend([like, like])
+                     include_shared=False, tenant_id=None, q=None,
+                     created_after=None, created_before=None):
+        conditions, params = self._filter_conditions(
+            asset_type=asset_type,
+            venue_type=venue_type,
+            owner_user_id=owner_user_id,
+            include_shared=include_shared,
+            tenant_id=tenant_id,
+            q=q,
+            created_after=created_after,
+            created_before=created_before,
+        )
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
         return self.db.count(Asset.TABLE_NAME, where_clause, tuple(params) if params else None)
 

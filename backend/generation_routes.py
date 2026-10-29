@@ -4,7 +4,7 @@ from __future__ import absolute_import
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 
 from flask import g, request, send_file
 
@@ -35,7 +35,8 @@ def _parse_date(value, end_of_day=False):
     except ValueError:
         pass
     try:
-        parsed = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        # No tzinfo: dates are interpreted in the server's local timezone.
+        parsed = datetime.strptime(value, "%Y-%m-%d")
     except ValueError:
         raise ApiError("invalid_params", "日期格式应为 YYYY-MM-DD", status_code=400)
     timestamp = int(parsed.timestamp())
@@ -120,6 +121,14 @@ def register_generation_routes(app, cfg, json_success, json_error):
         project_id = request.args.get("project_id")
         scope = request.args.get("scope") or "mine"
         created_by = None if (scope == "all" and is_admin(g.current_user)) else g.current_user.get("id")
+        created_after = _parse_date(request.args.get("date_from"))
+        created_before = _parse_date(request.args.get("date_to"), end_of_day=True)
+        if (created_after is not None and created_before is not None
+                and created_after > created_before):
+            raise ApiError("invalid_params", "开始时间不能晚于结束时间", status_code=400)
+        sort = request.args.get("sort") or "newest"
+        if sort not in ("newest", "oldest"):
+            raise ApiError("invalid_params", "不支持的排序方式", status_code=400)
         result = task_service.list_tasks(
             creative_project_id=project_id,
             task_type=task_type,
@@ -128,9 +137,10 @@ def register_generation_routes(app, cfg, json_success, json_error):
             created_by=created_by,
             limit=pagination.limit,
             offset=pagination.offset,
-            created_after=_parse_date(request.args.get("date_from")),
-            created_before=_parse_date(request.args.get("date_to"), end_of_day=True),
+            created_after=created_after,
+            created_before=created_before,
             model_id=request.args.get("model_id"),
+            sort=sort,
         )
         asset_service = get_asset_service(cfg.DATA_DIR)
         result["items"] = [

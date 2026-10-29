@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>个人中心 - AIGV Studio</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body class="profile-page">
+    <div class="page-bg" aria-hidden="true"></div>
+
+    <nav class="navbar" aria-label="主导航">
+      <div class="nav-container">
+        <a href="/" class="nav-brand">
+          <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span>
+          <span class="brand-text">AIGV Studio</span>
+        </a>
+        <div class="nav-links">
+          <a href="/">工作台</a>
+          <a href="/creative-studio">创意生产</a>
+          <a href="/assets">素材库</a>
+          <a href="/compute-platform">算力调度</a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="profile-shell">
+      <header class="profile-header">
+        <div class="profile-identity">
+          <div class="profile-avatar-wrap">
+            <img id="profile-avatar" class="profile-avatar" alt="用户头像" hidden />
+            <span id="profile-avatar-fallback" class="profile-avatar profile-avatar-fallback">?</span>
+          </div>
+          <div>
+            <p class="panel-kicker">Account Center</p>
+            <h1 class="profile-title" id="profile-title">个人中心</h1>
+            <p class="profile-subtitle" id="profile-subtitle">加载中...</p>
+            <div class="profile-badges">
+              <span class="cp-badge" id="profile-role-badge">—</span>
+              <span class="cp-badge" id="profile-status-badge">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="profile-meta" id="profile-meta"></div>
+      </header>
+
+      <section class="profile-stats" id="profile-stats" aria-label="个人统计"></section>
+
+      <div class="profile-grid">
+        <section class="profile-card" aria-labelledby="profile-edit-title">
+          <div class="profile-card-header">
+            <div>
+              <p class="panel-kicker">Profile</p>
+              <h2 id="profile-edit-title">个人资料</h2>
+            </div>
+          </div>
+          <form id="profile-form" class="profile-form">
+            <div class="form-group">
+              <label for="profile-username">用户名</label>
+              <input id="profile-username" type="text" disabled />
+              <p class="field-hint">用户名首期不可修改，以保证历史任务关联稳定。</p>
+            </div>
+            <div class="form-group">
+              <label for="profile-nickname">昵称</label>
+              <input id="profile-nickname" type="text" maxlength="40" placeholder="显示昵称" />
+            </div>
+            <div class="form-group">
+              <label for="profile-email">邮箱</label>
+              <input id="profile-email" type="email" placeholder="可选" />
+            </div>
+            <div class="form-group">
+              <label for="profile-bio">个人简介</label>
+              <textarea id="profile-bio" rows="3" maxlength="500" placeholder="介绍一下自己"></textarea>
+            </div>
+            <div class="profile-form-actions">
+              <button type="submit" class="btn-primary">保存资料</button>
+            </div>
+          </form>
+
+          <div class="profile-avatar-actions">
+            <label class="btn-outline profile-file-label">
+              上传头像
+              <input id="avatar-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+            </label>
+            <button type="button" class="btn-outline" id="avatar-delete">移除头像</button>
+            <span class="field-hint">PNG / JPEG / WebP，最大 2 MB</span>
+          </div>
+        </section>
+
+        <section class="profile-card" aria-labelledby="profile-password-title">
+          <div class="profile-card-header">
+            <div>
+              <p class="panel-kicker">Security</p>
+              <h2 id="profile-password-title">修改密码</h2>
+            </div>
+          </div>
+          <form id="password-form" class="profile-form">
+            <div class="form-group">
+              <label for="current-password">当前密码</label>
+              <input id="current-password" type="password" autocomplete="current-password" />
+            </div>
+            <div class="form-group">
+              <label for="new-password">新密码</label>
+              <input id="new-password" type="password" autocomplete="new-password" placeholder="至少 8 位" />
+            </div>
+            <div class="form-group">
+              <label for="confirm-new-password">确认新密码</label>
+              <input id="confirm-new-password" type="password" autocomplete="new-password" />
+            </div>
+            <div class="profile-form-actions">
+              <button type="submit" class="btn-primary">修改密码</button>
+            </div>
+            <p class="field-hint">修改成功后所有旧会话将失效，需要重新登录。</p>
+          </form>
+        </section>
+      </div>
+
+      <section class="profile-card profile-api-entry" aria-labelledby="profile-api-title">
+        <div class="profile-card-header">
+          <div>
+            <p class="panel-kicker">API Access</p>
+            <h2 id="profile-api-title">API 配置</h2>
+          </div>
+          <a href="/api-settings" class="btn-outline btn-sm">配置 API</a>
+        </div>
+        <p class="field-hint">
+          为 OpenAI、DeepSeek、火山方舟、Luma 等 Provider 配置你自己的 API Key。
+          密钥加密保存，仅用于你本人发起的生成任务；未配置的 Provider 将回退使用平台默认配置。
+          建议使用可随时撤销的子账号密钥。
+        </p>
+      </section>
+
+      <section class="profile-card profile-recent" aria-labelledby="profile-recent-title">
+        <div class="profile-card-header">
+          <div>
+            <p class="panel-kicker">Recent Activity</p>
+            <h2 id="profile-recent-title">最近生成记录</h2>
+          </div>
+          <a href="/creative-studio" class="btn-outline btn-sm">进入创意工作台</a>
+        </div>
+        <div id="profile-recent-list" class="profile-recent-list">
+          <p class="empty-state">加载中...</p>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast-container" id="profile-toast-container"></div>
+
+    <script src="/web/runtime-config.js"></script>
+    <script src="/web/api-client.js"></script>
+    <script src="/web/profile.js"></script>
+    <script src="/web/session-nav.js"></script>
+  </body>
+</html>

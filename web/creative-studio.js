@@ -58,16 +58,8 @@
     return fallback || '';
   }
 
-  async function api(path, options) {
-    var res = await fetch(path, options || {});
-    var contentType = res.headers.get('content-type') || '';
-    var payload = contentType.indexOf('application/json') >= 0 ? await res.json() : await res.text();
-    if (!res.ok) throw new Error(apiMessage(payload, '请求失败: ' + res.status));
-    if (payload && typeof payload === 'object' && payload.success !== undefined) {
-      if (!payload.success) throw new Error(apiMessage(payload, '请求失败'));
-      return payload.data;
-    }
-    return payload;
+  function api(path, options) {
+    return window.AIGV.api(path, options || {});
   }
 
   // ---------------------------------------------------------------
@@ -396,6 +388,7 @@
     },
     exportInProgress: false,
     exportTree: null,
+    exportDownloadUrl: null,
     demoData: null,
     conceptGenTimer: null,
     videoGenTimer: null,
@@ -406,7 +399,17 @@
     projectId: null,
     project: null,
     shots: [],
-    tasks: {}
+    tasks: {},
+    generationModels: { image: [], video: [] },
+    referenceAssets: [],
+    projectImageTasks: {},
+    projectVideoTasks: {},
+    selectedImageModel: null,
+    selectedVideoModel: null,
+    selectedReferenceAssetId: '',
+    currentImageTaskId: null,
+    currentVideoTaskId: null,
+    analysisTaskId: null
   };
 
   // ---------------------------------------------------------------
@@ -445,7 +448,14 @@
         filterParams: state.filterParams,
         humanParams: state.humanParams,
         outputForm: state.outputForm,
-        trackData: state.trackData
+        trackData: state.trackData,
+        // Business ids only, never cached business data.
+        projectId: state.projectId,
+        currentImageTaskId: state.currentImageTaskId,
+        currentVideoTaskId: state.currentVideoTaskId,
+        analysisTaskId: state.analysisTaskId,
+        selectedImageModel: state.selectedImageModel,
+        selectedVideoModel: state.selectedVideoModel
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
     } catch (e) {
@@ -468,6 +478,12 @@
       if (prefs.humanParams) Object.assign(state.humanParams, prefs.humanParams);
       if (prefs.outputForm) Object.assign(state.outputForm, prefs.outputForm);
       if (prefs.trackData) Object.assign(state.trackData, prefs.trackData);
+      if (prefs.projectId) state.projectId = prefs.projectId;
+      if (prefs.currentImageTaskId) state.currentImageTaskId = prefs.currentImageTaskId;
+      if (prefs.currentVideoTaskId) state.currentVideoTaskId = prefs.currentVideoTaskId;
+      if (prefs.analysisTaskId) state.analysisTaskId = prefs.analysisTaskId;
+      if (prefs.selectedImageModel) state.selectedImageModel = prefs.selectedImageModel;
+      if (prefs.selectedVideoModel) state.selectedVideoModel = prefs.selectedVideoModel;
       return true;
     } catch (e) {
       try { localStorage.removeItem(STORAGE_KEY); } catch (ex) {}
@@ -476,32 +492,27 @@
   }
 
   // ---------------------------------------------------------------
-  // Demo data helpers
-  // ---------------------------------------------------------------
-  function loadDemoData() {
-    var data = window.AIGV_DEMO_DATA;
-    if (!data) {
-      showToast('演示数据加载失败', 'error');
-      return null;
-    }
-    var demoStatus = $('demo-data-status');
-    if (demoStatus) {
-      var projectCount = (data.creativeProjects && data.creativeProjects.length) || 0;
-      var shotCount = (data.storyboardShots && data.storyboardShots.length) || 0;
-      demoStatus.textContent = '演示数据: 已加载 ' + projectCount + ' 个项目，' + shotCount + ' 个分镜';
-    }
-    return data;
-  }
-
-  // ---------------------------------------------------------------
   // Core Functions
   // ---------------------------------------------------------------
 
   function init() {
     cacheElements();
+    var dataStatus = $('demo-data-status');
+    if (dataStatus) {
+      dataStatus.textContent = (window.AIGV && window.AIGV.runtime && window.AIGV.runtime.demoMode)
+        ? '演示模式（项目与任务仍来自后端）'
+        : '真实项目数据';
+    }
 
     // Try restoring UI prefs from localStorage
     loadFromLocalStorage();
+
+    // Hand-off from the generation-history page: preselect a reference image.
+    var refAssetFromUrl = new URLSearchParams(window.location.search).get('reference_asset_id');
+    if (refAssetFromUrl) {
+      state.selectedReferenceAssetId = refAssetFromUrl;
+      state.activeStep = 2;
+    }
 
     // Set active project
     if (state.projectId) {
@@ -514,11 +525,18 @@
     // Bind events
     bindEvents();
 
-    // Render
+    // Render shell immediately, then hydrate real projects/tasks/modules.
     renderCurrentModule();
     updateFlowNav();
     updatePreviewPanel(state.activeStep);
     updateProjectMetrics();
+
+    Promise.all([loadProjects(), loadGenerationModels(), loadReferenceAssets()]).then(function () {
+      renderCurrentModule();
+      updateProjectMetrics();
+      updatePreviewPanel(state.activeStep);
+      restoreActiveTasks();
+    }).catch(function () {});
   }
 
   function getActiveProject() {
@@ -546,6 +564,9 @@
       shot.keyframePrompt = shot.prompt_en || shot.prompt_cn || '';
       shot.negativePrompt = shot.negative_prompt || '';
       shot.number = shot.sequence_no || 0;
+      shot.primaryImageAssetId = shot.primary_image_asset_id || null;
+      shot.keyframeAssetId = shot.keyframe_asset_id || null;
+      shot.videoAssetId = shot.video_asset_id || null;
       shot.isDemo = false;
     }
     return shot;
@@ -574,16 +595,337 @@
   function populateProjectSelector() {
     if (!els.projectSelect) return;
     els.projectSelect.innerHTML = '';
+    if (!state.projects.length) {
+      var empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = '暂无创意项目';
+      els.projectSelect.appendChild(empty);
+      return;
+    }
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '-- 选择项目 --';
+    els.projectSelect.appendChild(placeholder);
     for (var i = 0; i < state.projects.length; i++) {
       var p = state.projects[i];
       var opt = document.createElement('option');
       opt.value = p.id;
       opt.textContent = p.name || p.theme || ('项目 ' + (i + 1));
-      if (p.id === state.activeProjectId) {
+      if (p.id === state.activeProjectId || p.id === state.projectId) {
         opt.selected = true;
       }
       els.projectSelect.appendChild(opt);
     }
+  }
+
+  function hydrateConceptImages() {
+    var shots = state.shots || [];
+    for (var i = 0; i < shots.length; i++) {
+      var shot = normalizeShot(shots[i]);
+      var assetId = shot.primary_image_asset_id || shot.keyframe_asset_id;
+      if (!assetId) {
+        state.conceptImages[shot.id] = [];
+        continue;
+      }
+      var task = state.projectImageTasks[assetId] || null;
+      var asset = task && task.output_asset ? task.output_asset : null;
+      var params = (task && task.params) || (asset && asset.metadata && asset.metadata.generation_params) || {};
+      var isKeyframe = shot.keyframe_asset_id === assetId || (!shot.keyframe_asset_id && !!shot.primary_image_asset_id);
+      state.conceptImages[shot.id] = [{
+        id: assetId,
+        assetId: assetId,
+        shotId: shot.id,
+        taskId: task ? task.id : null,
+        url: '/api/assets/' + encodeURIComponent(assetId) + '/file',
+        downloadUrl: '/api/assets/' + encodeURIComponent(assetId) + '/download',
+        prompt: params.prompt || shot.keyframePrompt || shot.scene_description || '',
+        modelLabel: (task && task.model_id) || '已生成图片',
+        model: task ? task.model_id : '',
+        seed: params.seed !== null && params.seed !== undefined ? params.seed : '—',
+        width: params.width || '—',
+        height: params.height || '—',
+        params: params,
+        metadata: (asset && asset.metadata) || {},
+        generatedAt: task ? AIGV.formatTime(task.completed_at || task.created_at) : '—',
+        colors: ['#1a2433', '#33465c'],
+        isKeyframe: isKeyframe,
+        isFavorite: !!(asset && asset.metadata && asset.metadata.favorite)
+      }];
+    }
+  }
+
+  function hydrateVideoResults() {
+    state.videoResults = {};
+    var shots = state.shots || [];
+    for (var i = 0; i < shots.length; i++) {
+      var shot = normalizeShot(shots[i]);
+      if (!shot.video_asset_id) {
+        continue;
+      }
+      var task = state.projectVideoTasks[shot.video_asset_id] || null;
+      var params = (task && task.params) || {};
+      state.videoResults[shot.id] = {
+        id: 'video-' + shot.id,
+        shotId: shot.id,
+        taskId: task ? task.id : null,
+        assetId: shot.video_asset_id,
+        fileUrl: '/api/assets/' + encodeURIComponent(shot.video_asset_id) + '/file',
+        downloadUrl: '/api/assets/' + encodeURIComponent(shot.video_asset_id) + '/download',
+        model: task ? task.model_id : '',
+        params: params,
+        createdAt: task ? AIGV.formatTime(task.completed_at || task.created_at) : '—',
+        status: 'completed',
+        progress: 100
+      };
+    }
+  }
+
+  async function loadGenerationModels() {
+    try {
+      var imageModels = await api('/api/generation/models?task_type=image');
+      state.generationModels.image = (imageModels && imageModels.items) || [];
+      var videoModels = await api('/api/generation/models?task_type=video');
+      state.generationModels.video = (videoModels && videoModels.items) || [];
+    } catch (e) {
+      state.generationModels = { image: [], video: [] };
+    }
+  }
+
+  async function loadReferenceAssets() {
+    try {
+      var data = await api('/api/assets?asset_type=image&limit=50');
+      state.referenceAssets = (data && data.items) || [];
+      // A history hand-off may point at an asset outside the first page.
+      if (state.selectedReferenceAssetId) {
+        var present = state.referenceAssets.some(function (asset) {
+          return asset.id === state.selectedReferenceAssetId;
+        });
+        if (!present) {
+          try {
+            var selected = await api('/api/assets/' + encodeURIComponent(state.selectedReferenceAssetId));
+            if (selected) state.referenceAssets.unshift(selected);
+          } catch (e) {
+            state.selectedReferenceAssetId = '';
+          }
+        }
+      }
+    } catch (e) {
+      state.referenceAssets = [];
+    }
+  }
+
+  function availableModels(kind) {
+    var models = (state.generationModels[kind] || []);
+    return models.filter(function (model) { return !!model.available; });
+  }
+
+  function findModel(kind, key) {
+    var models = state.generationModels[kind] || [];
+    for (var i = 0; i < models.length; i += 1) {
+      if (models[i].key === key) return models[i];
+    }
+    return null;
+  }
+
+  function selectedImageModelInfo() {
+    var models = availableModels('image');
+    if (!models.length) return null;
+    var selected = findModel('image', state.selectedImageModel);
+    if (selected && selected.available) return selected;
+    for (var i = 0; i < models.length; i += 1) {
+      if (models[i].default) {
+        state.selectedImageModel = models[i].key;
+        return models[i];
+      }
+    }
+    state.selectedImageModel = models[0].key;
+    return models[0];
+  }
+
+  function selectedVideoModelInfo() {
+    var models = availableModels('video');
+    if (!models.length) return null;
+    var selected = findModel('video', state.selectedVideoModel);
+    if (selected && selected.available) return selected;
+    for (var i = 0; i < models.length; i += 1) {
+      if (models[i].default) {
+        state.selectedVideoModel = models[i].key;
+        return models[i];
+      }
+    }
+    state.selectedVideoModel = models[0].key;
+    return models[0];
+  }
+
+  async function loadProjects() {
+    try {
+      var data = await api('/api/creative/projects?limit=200');
+      state.projects = (data && data.items) || [];
+      var restored = state.projectId && state.projects.some(function (item) {
+        return item.id === state.projectId;
+      });
+      if (!restored) {
+        state.projectId = state.projects.length ? state.projects[0].id : null;
+      }
+      populateProjectSelector();
+      if (state.projectId) {
+        await loadProjectFromBackend(state.projectId);
+      } else {
+        state.shots = [];
+        updateProjectMetrics();
+        renderCurrentModule();
+      }
+    } catch (e) {
+      showToast('加载项目失败: ' + e.message, 'error');
+    }
+  }
+
+  async function restoreActiveTasks() {
+    if (state.currentImageTaskId) {
+      resumeTask(state.currentImageTaskId, 'image');
+    }
+    if (state.currentVideoTaskId) {
+      resumeTask(state.currentVideoTaskId, 'video');
+    }
+  }
+
+  function clearTaskId(kind) {
+    if (kind === 'image') state.currentImageTaskId = null;
+    if (kind === 'video') state.currentVideoTaskId = null;
+    saveToLocalStorage();
+  }
+
+  function resumeTask(taskId, kind) {
+    api('/api/creative/tasks/' + encodeURIComponent(taskId)).then(function (task) {
+      if (!task) {
+        clearTaskId(kind);
+        return;
+      }
+      if (task.status === 'queued' || task.status === 'submitting' || task.status === 'running') {
+        if (kind === 'image') {
+          state.imageGenInProgress = true;
+        } else {
+          state.videoGenInProgress = true;
+          state.videoGenStage = task.stage || task.provider_status || '生成中...';
+        }
+        renderCurrentModule();
+        pollTask(taskId, function (progress, stage) {
+          if (kind === 'video') {
+            state.videoGenStage = stage || '生成中...';
+            if (state.activeStep === 3) renderModule3();
+          }
+        }).then(function (finalTask) {
+          finishGeneration(kind, finalTask);
+        }).catch(function (error) {
+          finishGenerationFailure(kind, error);
+        });
+        return;
+      }
+      if (task.status === 'succeeded') {
+        finishGeneration(kind, task);
+      } else {
+        clearTaskId(kind);
+      }
+    }).catch(function () {
+      clearTaskId(kind);
+    });
+  }
+
+  async function reloadShotsAndHydrate() {
+    if (!state.projectId) return;
+    var shots = await api('/api/creative/projects/' + state.projectId + '/shots');
+    state.shots = shots || [];
+    await loadProjectTasks();
+    hydrateConceptImages();
+    hydrateVideoResults();
+    state.stepsCompleted[1] = state.shots.some(function (item) { return !!item.primary_image_asset_id; });
+    state.stepsCompleted[2] = state.shots.some(function (item) { return !!item.video_asset_id; });
+    updateFlowNav();
+    updateProjectMetrics();
+  }
+
+  async function loadProjectTasks() {
+    state.projectImageTasks = {};
+    state.projectVideoTasks = {};
+    if (!state.projectId) return;
+    try {
+      var imageTasks = await api('/api/generation/tasks?task_type=image&project_id=' +
+        encodeURIComponent(state.projectId) + '&limit=100');
+      (imageTasks.items || []).forEach(function (task) {
+        if (task.output_asset_id) state.projectImageTasks[task.output_asset_id] = task;
+      });
+      var videoTasks = await api('/api/generation/tasks?task_type=video&project_id=' +
+        encodeURIComponent(state.projectId) + '&limit=100');
+      (videoTasks.items || []).forEach(function (task) {
+        if (task.output_asset_id) state.projectVideoTasks[task.output_asset_id] = task;
+      });
+    } catch (e) {
+      // History is supplementary; generation itself still works without it.
+    }
+  }
+
+  function finishGeneration(kind, finalTask) {
+    if (!finalTask) {
+      clearTaskId(kind);
+      return;
+    }
+    if (finalTask.status === 'cancelled') {
+      if (kind === 'image') {
+        state.imageGenInProgress = false;
+      } else {
+        state.videoGenInProgress = false;
+        state.videoProgress = 0;
+        state.videoGenStage = '';
+      }
+      clearTaskId(kind);
+      reloadShotsAndHydrate().then(function () {
+        renderCurrentModule();
+      });
+      showToast('任务已取消', 'info');
+      return;
+    }
+    clearTaskId(kind);
+    reloadShotsAndHydrate().then(function () {
+      if (kind === 'image') {
+        state.imageGenInProgress = false;
+        showToast('概念图生成完成', 'success');
+      } else {
+        state.videoGenInProgress = false;
+        state.videoProgress = 100;
+        state.videoGenStage = '完成';
+        showToast('视频生成完成', 'success');
+      }
+      renderCurrentModule();
+    }).catch(function (error) {
+      if (kind === 'image') state.imageGenInProgress = false;
+      else state.videoGenInProgress = false;
+      showToast('结果加载失败: ' + error.message, 'error');
+      renderCurrentModule();
+    });
+  }
+
+  function finishGenerationFailure(kind, error) {
+    // Keep the task id for resumable/unknown states; clear only terminal ones.
+    var terminal = error && (error.taskStatus === 'failed' || error.taskStatus === 'needs_review');
+    if (terminal || !error || !error.taskStatus) {
+      clearTaskId(kind);
+    }
+    if (kind === 'image') {
+      state.imageGenInProgress = false;
+    } else {
+      state.videoGenInProgress = false;
+      state.videoProgress = 0;
+      state.videoGenStage = '';
+    }
+    var message = error && error.message ? error.message : '生成失败';
+    if (message.indexOf('provider_not_configured') >= 0 || message.indexOf('尚未接入') >= 0) {
+      showToast('生成模型未配置，请检查服务器 Provider 设置（去配置 API: /api-settings）', 'warning');
+    } else if (message.indexOf('需要人工确认') >= 0) {
+      showToast(message, 'warning');
+    } else {
+      showToast((kind === 'image' ? '图片生成失败: ' : '视频生成失败: ') + message, 'error');
+    }
+    renderCurrentModule();
   }
 
   function bindEvents() {
@@ -608,8 +950,29 @@
     // Save button
     if (els.btnSaveProject) {
       els.btnSaveProject.addEventListener('click', function() {
-        saveToLocalStorage();
-        showToast('项目已保存', 'success');
+        if (!state.projectId) {
+          saveToLocalStorage();
+          showToast('本地偏好已保存', 'success');
+          return;
+        }
+        var form = state.requirementsForm;
+        api('/api/creative/projects/' + encodeURIComponent(state.projectId), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: form.projectName || (state.project && state.project.name) || '未命名项目',
+            description: form.description,
+            concept: form.theme,
+            requirements: form
+          })
+        }).then(function (project) {
+          state.project = project;
+          state.activeProject = project;
+          saveToLocalStorage();
+          showToast('项目已保存', 'success');
+        }).catch(function (error) {
+          showToast('保存失败: ' + error.message, 'error');
+        });
       });
     }
 
@@ -644,6 +1007,7 @@
         state.outputForm = { platformId: '', format: 'MP4', resolution: '1080p', fps: 30, bitrate: '15Mbps', includeSubtitles: true };
         state.exportInProgress = false;
         state.tasks = {};
+        state.exportDownloadUrl = null;
         // Clear timers
         if (state.conceptGenTimer) { clearTimeout(state.conceptGenTimer); state.conceptGenTimer = null; }
         if (state.videoGenTimer) { clearTimeout(state.videoGenTimer); state.videoGenTimer = null; }
@@ -661,26 +1025,50 @@
   }
 
   function switchProject(id) {
-    state.activeProjectId = id;
-    // Load project from backend
-    loadProjectFromBackend(id);
+    state.activeProjectId = id || null;
     state.activeShotIndex = 0;
+    if (!id) {
+      state.projectId = null;
+      state.project = null;
+      state.activeProject = null;
+      state.shots = [];
+      state.conceptImages = {};
+      state.videoResults = {};
+      populateProjectSelector();
+      renderCurrentModule();
+      updateFlowNav();
+      updatePreviewPanel(state.activeStep);
+      updateProjectMetrics();
+      return;
+    }
+    loadProjectFromBackend(id).then(function () {
+      populateProjectSelector();
+      renderCurrentModule();
+      updateFlowNav();
+      updatePreviewPanel(state.activeStep);
+      updateProjectMetrics();
+    });
     saveToLocalStorage();
-    renderCurrentModule();
-    updateFlowNav();
-    updatePreviewPanel(state.activeStep);
-    updateProjectMetrics();
   }
 
   async function loadProjectFromBackend(projectId) {
     try {
       var project = await api('/api/creative/projects/' + projectId);
+      var shots = await api('/api/creative/projects/' + projectId + '/shots');
       state.project = project;
       state.projectId = projectId;
+      state.activeProjectId = projectId;
       state.activeProject = project;
-      // Load shots
-      var shots = await api('/api/creative/projects/' + projectId + '/shots');
       state.shots = shots || [];
+      state.exportTree = null;
+      state.exportDownloadUrl = null;
+      await loadProjectTasks();
+      hydrateConceptImages();
+      state.videoResults = {};
+      hydrateVideoResults();
+      state.stepsCompleted[0] = state.shots.length > 0;
+      state.stepsCompleted[1] = state.shots.some(function (shot) { return !!shot.primary_image_asset_id; });
+      state.stepsCompleted[2] = state.shots.some(function (shot) { return !!shot.video_asset_id; });
       // Update form fields
       if (project) {
         state.requirementsForm.projectName = project.name || '';
@@ -719,19 +1107,19 @@
       els.projectMetrics.innerHTML = '<div class="metric-empty">未选择项目</div>';
       return;
     }
-    var shots = project.shots || [];
+    var shots = state.shots || [];
     var totalDuration = 0;
     for (var i = 0; i < shots.length; i++) {
-      totalDuration += (shots[i].duration || 0);
+      totalDuration += (shots[i].duration_s || shots[i].duration || 0);
     }
-    var confirmedCount = 0;
+    var readyCount = 0;
     for (var j = 0; j < shots.length; j++) {
-      if (shots[j].status === 'confirmed') confirmedCount++;
+      if (shots[j].status === 'ready' || shots[j].status === 'confirmed') readyCount++;
     }
     var html = '';
     html += '<div class="metric-item"><span class="metric-label">分镜数</span><span class="metric-value">' + shots.length + '</span></div>';
-    html += '<div class="metric-item"><span class="metric-label">总时长</span><span class="metric-value">' + totalDuration + 's</span></div>';
-    html += '<div class="metric-item"><span class="metric-label">已确认</span><span class="metric-value">' + confirmedCount + '</span></div>';
+    html += '<div class="metric-item"><span class="metric-label">总时长</span><span class="metric-value">' + Math.round(totalDuration) + 's</span></div>';
+    html += '<div class="metric-item"><span class="metric-label">可用镜头</span><span class="metric-value">' + readyCount + '</span></div>';
     html += '<div class="metric-item"><span class="metric-label">状态</span><span class="metric-value status-badge status-' + escapeHtml(project.status || 'draft') + '">' + escapeHtml(project.status || '草稿') + '</span></div>';
     els.projectMetrics.innerHTML = html;
   }
@@ -860,125 +1248,21 @@
     var shots = getNormalizedShots();
     var result = [];
     for (var i = 0; i < shots.length; i++) {
-      if (shots[i].status === 'confirmed') {
+      // "ready" means a generated asset exists; keep it in the workflow so a
+      // successfully generated shot does not disappear from later steps.
+      if (shots[i].status === 'confirmed' || shots[i].status === 'ready') {
         result.push(shots[i]);
       }
     }
     return result;
   }
 
-  // ---------------------------------------------------------------
-  // Template Generator
-  // ---------------------------------------------------------------
-
-  function templateGenerator(project) {
-    var shots = [];
-    if (!project) return shots;
-
-    var theme = project.theme || '文化场馆';
-    var elements = project.elements || '';
-
-    var shotTypes = ['wide-shot', 'close-up', 'macro', 'medium-shot', 'aerial', 'orbit'];
-    var cameraMoves = ['pan-left', 'pan-right', 'tilt-up', 'tilt-down', 'dolly-in', 'dolly-out', 'track-left', 'track-right', 'static', 'crane-up', 'crane-down'];
-    var durations = [8, 10, 12, 6, 15, 8];
-
-    var titles = [
-      '开场全景 - ' + theme,
-      '细节特写',
-      '空间氛围',
-      '主体呈现',
-      '动态叙事',
-      '收尾升华'
-    ];
-
-    var sceneDescs = [
-      '场馆外景全景，展示建筑整体风貌和环境',
-      '场馆内部装饰细节，材质与纹理特写',
-      '空间内部光影氛围，展示空间感与层次',
-      '核心展品或表演主体居中呈现',
-      '人物或展品在空间中的动态过程',
-      '场馆全景或标志性视角，配合结尾文案'
-    ];
-
-    var subjectDescs = [
-      '建筑外观与周边环境',
-      '局部细节与材质纹理',
-      '空间内部结构与光线',
-      '核心展品或表演者',
-      '人物/展品运动轨迹',
-      '整体场景鸟瞰'
-    ];
-
-    var actionDescs = [
-      '缓慢平移展示全貌',
-      '极慢推进聚焦细节',
-      '环绕拍摄展现空间',
-      '由远及近推向主体',
-      '跟随主体运动轨迹',
-      '缓慢拉升或后退'
-    ];
-
-    var lightingDescs = [
-      '自然光，黄昏时分，暖色调',
-      '聚光灯，局部照明，高对比',
-      '环境光，柔和均匀，氛围感',
-      '主光+补光，突出主体',
-      '动态光线变化，跟随运动',
-      '渐变光线，由亮转暗'
-    ];
-
-    var narrations = [
-      '欢迎来到' + theme + '，让我们一同探索文化与艺术的魅力。',
-      '每一处细节都承载着历史的记忆与匠心的温度。',
-      '空间与光线交织，营造出沉浸式的观展体验。',
-      '现在呈现在您面前的是本次展览的核心作品。',
-      '跟随时间的轨迹，感受艺术与空间的对话。',
-      '感谢您的观看，期待与您再次相遇。'
-    ];
-
-    var keyframePrompts = [
-      ' cinematic wide shot of a cultural venue exterior, golden hour lighting, majestic architecture, professional photography, 8K',
-      ' macro close-up of intricate decorative details, rich textures, shallow depth of field, museum lighting',
-      ' interior ambient shot of a gallery space, soft natural light through windows, volumetric rays, serene atmosphere',
-      ' medium shot of central exhibit/performance, dramatic key light, professional stage lighting, deep shadows',
-      ' dynamic tracking shot of moving subject, motion blur, cinematic composition, action sequence',
-      ' aerial establishing shot pulling back, cityscape background, epic scale, golden ratio composition'
-    ];
-
-    var negativePrompts = [
-      'blurry, low quality, distortion, oversaturated, watermark, text overlay',
-      'motion blur, camera shake, out of focus, noise, grain',
-      'harsh lighting, overexposed, underexposed, flat lighting, no contrast',
-      'cluttered background, distracting elements, poor composition, bad framing',
-      'static motion, frozen, stiff, unnatural movement, robotic',
-      'oversharpened, artificial, CGI looking, fake, plastic'
-    ];
-
-    for (var i = 0; i < 6; i++) {
-      var idx = i % shotTypes.length;
-      var camIdx = i % cameraMoves.length;
-      var shot = {
-        shotId: project.id + '-shot-' + (i + 1),
-        projectId: project.id,
-        number: i + 1,
-        title: titles[i],
-        duration: durations[i],
-        shotType: shotTypes[idx],
-        cameraMove: cameraMoves[camIdx],
-        sceneDesc: sceneDescs[i],
-        subjectDesc: subjectDescs[i],
-        actionDesc: actionDescs[i],
-        lightingDesc: lightingDescs[i],
-        narration: narrations[i],
-        keyframePrompt: keyframePrompts[i],
-        negativePrompt: negativePrompts[i],
-        status: 'draft',
-        isDemo: true
-      };
-      shots.push(shot);
+  function getWorkflowShot() {
+    var shots = getConfirmedShots();
+    if (shots.length && state.activeShotIndex < shots.length) {
+      return shots[state.activeShotIndex];
     }
-
-    return shots;
+    return getActiveShot();
   }
 
   // ---------------------------------------------------------------
@@ -1161,6 +1445,9 @@
           state.project = project;
           state.activeProjectId = project.id;
           state.activeProject = project;
+          state.projects.unshift(project);
+          populateProjectSelector();
+          saveToLocalStorage();
         }
 
         // Step 2: Trigger LLM storyboard analysis
@@ -1175,10 +1462,14 @@
 
         // Step 3: Poll task until complete
         var taskId = task.id;
+        state.analysisTaskId = taskId;
+        saveToLocalStorage();
         await pollTask(taskId, function(progress, stage) {
           state.analysisStage = stage || '正在分析...';
           renderModule1();
         });
+        state.analysisTaskId = null;
+        saveToLocalStorage();
 
         // Step 4: Load shots from backend
         state.analysisStage = '正在加载分镜...';
@@ -1197,7 +1488,9 @@
           });
         }
 
-        state.stepsCompleted[0] = true;
+        hydrateConceptImages();
+        hydrateVideoResults();
+        state.stepsCompleted[0] = state.shots.length > 0;
         state.analysisInProgress = false;
         state.analysisStage = '';
         updateFlowNav();
@@ -1210,7 +1503,7 @@
         state.analysisInProgress = false;
         state.analysisStage = '';
         if (e.message && e.message.indexOf('provider_not_configured') >= 0) {
-          showToast('LLM 服务未配置，请先配置 LLM API Key', 'warning');
+          showToast('LLM 服务未配置，请先配置 LLM API Key（去配置 API: /api-settings）', 'warning');
         } else {
           showToast('分析失败: ' + e.message, 'error');
         }
@@ -1221,19 +1514,28 @@
 
   // Poll a task until completion
   async function pollTask(taskId, onProgress) {
-    var maxPolls = 120;
+    // Video jobs can legitimately run for a long time; never fake a percentage.
+    // The backend enforces the real deadline and exposes only stage/status.
+    var maxPolls = 3600;
     for (var i = 0; i < maxPolls; i++) {
       await new Promise(function(r) { setTimeout(r, 2000); });
       var task = await api('/api/creative/tasks/' + taskId);
-      if (onProgress) onProgress(task.progress || 0, task.stage || task.status);
-      if (task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled') {
-        if (task.status === 'failed') {
-          throw new Error(task.error_message || '任务执行失败');
+      if (onProgress) {
+        onProgress(task.progress || 0, task.stage || task.provider_status || task.status);
+      }
+      if (task.status === 'succeeded' || task.status === 'failed' ||
+          task.status === 'cancelled' || task.status === 'needs_review') {
+        if (task.status === 'failed' || task.status === 'needs_review') {
+          var error = new Error(task.error_message || (task.status === 'failed' ? '任务执行失败' : '任务需要人工确认'));
+          error.taskStatus = task.status;
+          throw error;
         }
         return task;
       }
     }
-    throw new Error('任务超时');
+    var timeoutError = new Error('任务仍在运行，请刷新页面后继续查看');
+    timeoutError.taskStatus = 'running';
+    throw timeoutError;
   }
 
   function renderShotCardsHTML() {
@@ -1317,7 +1619,9 @@
   function findShotById(shotId) {
     var shots = getShotsForActiveProject();
     for (var i = 0; i < shots.length; i++) {
-      if (shots[i].shotId === shotId) return shots[i];
+      if (shots[i].shotId === shotId || shots[i].id === shotId) {
+        return normalizeShot(shots[i]);
+      }
     }
     return null;
   }
@@ -1325,9 +1629,27 @@
   function findShotIndex(shotId) {
     var shots = getShotsForActiveProject();
     for (var i = 0; i < shots.length; i++) {
-      if (shots[i].shotId === shotId) return i;
+      if (shots[i].shotId === shotId || shots[i].id === shotId) return i;
     }
     return -1;
+  }
+
+  function shotUpdatePayload(shot) {
+    return {
+      scene_title: shot.title,
+      duration_s: shot.duration,
+      shot_type: shot.shotType,
+      camera_movement: shot.cameraMove,
+      dialogue: shot.narration,
+      prompt_en: shot.keyframePrompt,
+      negative_prompt: shot.negativePrompt
+    };
+  }
+
+  function refreshShotsFromBackend() {
+    return reloadShotsAndHydrate().then(function () {
+      renderCurrentModule();
+    });
   }
 
   function handleEditShot(shotId) {
@@ -1335,91 +1657,118 @@
     if (!shot) return;
 
     showEditShotDialog(shot, function() {
-    saveToLocalStorage();
-    renderModule1();
-    updatePreviewPanel(state.activeStep);
-    showToast('分镜已更新', 'success');
-  });
+      api('/api/creative/shots/' + encodeURIComponent(shot.id), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(shotUpdatePayload(shot))
+      }).then(function () {
+        saveToLocalStorage();
+        return refreshShotsFromBackend();
+      }).then(function () {
+        updatePreviewPanel(state.activeStep);
+        showToast('分镜已更新', 'success');
+      }).catch(function (error) {
+        showToast('分镜更新失败: ' + error.message, 'error');
+      });
+    });
   }
 
   function handleCopyShot(shotId) {
-    var shots = getShotsForActiveProject();
     var shot = findShotById(shotId);
-    if (!shot) return;
+    if (!shot || !state.projectId) return;
 
-    var newShot = JSON.parse(JSON.stringify(shot));
-    var project = getActiveProject();
-    newShot.shotId = project.id + '-shot-copy-' + Date.now();
-    newShot.number = shots.length + 1;
-    newShot.title = shot.title + ' (副本)';
-    newShot.status = 'draft';
-    shots.push(newShot);
-
-    saveToLocalStorage();
-    renderModule1();
-    updateProjectMetrics();
-    showToast('分镜已复制', 'success');
+    api('/api/creative/projects/' + encodeURIComponent(state.projectId) + '/shots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scene_title: (shot.title || '') + ' (副本)',
+        scene_description: shot.sceneDesc || '',
+        shot_type: shot.shotType || 'medium-shot',
+        duration_s: shot.duration || 5,
+        camera_movement: shot.cameraMove || '',
+        dialogue: shot.narration || '',
+        prompt_cn: shot.prompt_cn || '',
+        prompt_en: shot.keyframePrompt || '',
+        negative_prompt: shot.negativePrompt || '',
+        status: 'draft'
+      })
+    }).then(function () {
+      return refreshShotsFromBackend();
+    }).then(function () {
+      showToast('分镜已复制', 'success');
+    }).catch(function (error) {
+      showToast('复制分镜失败: ' + error.message, 'error');
+    });
   }
 
   function handleDeleteShot(shotId) {
-    showConfirmDialog('删除分镜', '确定要删除该分镜吗？', '删除', function() {
-    var shots = getShotsForActiveProject();
-    var idx = findShotIndex(shotId);
-    if (idx === -1) return;
-    shots.splice(idx, 1);
-    // Renumber
-    for (var i = 0; i < shots.length; i++) {
-      shots[i].number = i + 1;
-    }
-    saveToLocalStorage();
-    renderModule1();
-    updateProjectMetrics();
-    showToast('分镜已删除', 'info');
-  });
+    showConfirmDialog('删除分镜', '确定要删除该分镜吗？此操作会删除服务器上的分镜记录。', '删除', function() {
+      api('/api/creative/shots/' + encodeURIComponent(shotId), {
+        method: 'DELETE'
+      }).then(function () {
+        return refreshShotsFromBackend();
+      }).then(function () {
+        showToast('分镜已删除', 'info');
+      }).catch(function (error) {
+        showToast('删除分镜失败: ' + error.message, 'error');
+      });
+    });
   }
 
   function handleMoveShot(shotId, dir) {
     var shots = getShotsForActiveProject();
     var idx = findShotIndex(shotId);
-    if (idx === -1) return;
+    if (idx === -1 || !state.projectId) return;
     var newIdx = idx + dir;
     if (newIdx < 0 || newIdx >= shots.length) return;
 
-    var temp = shots[idx];
-    shots[idx] = shots[newIdx];
-    shots[newIdx] = temp;
+    var order = shots.map(function (item) { return item.id; });
+    var moved = order.splice(idx, 1)[0];
+    order.splice(newIdx, 0, moved);
 
-    // Renumber
-    for (var i = 0; i < shots.length; i++) {
-      shots[i].number = i + 1;
-    }
-
-    saveToLocalStorage();
-    renderModule1();
-    updateProjectMetrics();
+    api('/api/creative/shots/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: state.projectId, ordered_ids: order })
+    }).then(function () {
+      return refreshShotsFromBackend();
+    }).catch(function (error) {
+      showToast('调整顺序失败: ' + error.message, 'error');
+      refreshShotsFromBackend();
+    });
   }
 
   function handleConfirmShot(shotId) {
     var shot = findShotById(shotId);
     if (!shot) return;
-    shot.status = (shot.status === 'confirmed') ? 'draft' : 'confirmed';
+    var next = (shot.status === 'confirmed')
+      ? (shot.primaryImageAssetId || shot.primary_image_asset_id ? 'ready' : 'draft')
+      : 'confirmed';
 
-    // Update stepsCompleted: check if at least one shot is confirmed
-    var shots = getShotsForActiveProject();
-    var anyConfirmed = false;
-    for (var i = 0; i < shots.length; i++) {
-      if (shots[i].status === 'confirmed') {
-        anyConfirmed = true;
-        break;
+    api('/api/creative/shots/' + encodeURIComponent(shot.id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: next })
+    }).then(function () {
+      shot.status = next;
+      var shots = getShotsForActiveProject();
+      var anyConfirmed = false;
+      for (var i = 0; i < shots.length; i++) {
+        if (shots[i].status === 'confirmed' || shots[i].status === 'ready') {
+          anyConfirmed = true;
+          break;
+        }
       }
-    }
-    state.stepsCompleted[0] = anyConfirmed;
-
-    saveToLocalStorage();
-    renderModule1();
-    updateFlowNav();
-    updateProjectMetrics();
-    showToast(shot.status === 'confirmed' ? '分镜已确认' : '分镜已取消确认', 'info');
+      state.stepsCompleted[0] = anyConfirmed;
+      saveToLocalStorage();
+      renderModule1();
+      updateFlowNav();
+      updateProjectMetrics();
+      showToast(next === 'confirmed' ? '分镜已确认' : '分镜已取消确认', 'info');
+    }).catch(function (error) {
+      shot.status = shot.status;
+      showToast('分镜状态保存失败: ' + error.message, 'error');
+    });
   }
 
   // ---------------------------------------------------------------
@@ -1474,25 +1823,96 @@
     html += '  </div>';
     html += '</div>';
 
-    // Prompt fields
+    var imageModels = state.generationModels.image || [];
+    var currentImageModel = selectedImageModelInfo();
+    var imageCaps = (currentImageModel && currentImageModel.capabilities) || {};
+
+    // Prompt fields (negative prompt is hidden when the selected model rejects it)
     html += '<div class="prompt-fields card">';
     html += '  <div class="form-group"><label>正向提示词</label><textarea id="module2-keyframe-prompt" rows="2">' + escapeHtml(currentShot.keyframePrompt || '') + '</textarea></div>';
-    html += '  <div class="form-group"><label>负向提示词</label><textarea id="module2-negative-prompt" rows="2">' + escapeHtml(currentShot.negativePrompt || '') + '</textarea></div>';
+    if (imageCaps.supports_negative_prompt) {
+      html += '  <div class="form-group"><label>负向提示词</label><textarea id="module2-negative-prompt" rows="2">' + escapeHtml(currentShot.negativePrompt || '') + '</textarea></div>';
+    }
     html += '</div>';
 
-    // Model selector
+    // Model selector (server-side registry; unconfigured models are disabled
+    // with a reason instead of being silently hidden).
     html += '<div class="model-selector card">';
     html += '  <label>选择模型:</label>';
     html += '  <select id="module2-model">';
-    html += '    <option value="seedance-1.5">Seedance-1.5</option>';
-    html += '    <option value="midjourney-v6">Midjourney-v6</option>';
-    html += '    <option value="luma-dreammachine">Luma-DreamMachine</option>';
-    html += '    <option value="sdxl">SDXL</option>';
+    if (!imageModels.length) {
+      html += '    <option value="">尚未接入图片生成模型</option>';
+    } else {
+      for (var m = 0; m < imageModels.length; m++) {
+        var modelItem = imageModels[m];
+        var disabled = modelItem.available ? '' : ' disabled';
+        var suffix = modelItem.available ? '' : '（未配置）';
+        html += '    <option value="' + escapeHtml(modelItem.key) + '"' + disabled +
+          (state.selectedImageModel === modelItem.key ? ' selected' : '') + '>' +
+          escapeHtml(modelItem.display_name + suffix) + '</option>';
+      }
+    }
     html += '  </select>';
+    if (imageCaps.sizes && imageCaps.sizes.length) {
+      html += '  <label>尺寸:</label><select id="module2-size">';
+      for (var si = 0; si < imageCaps.sizes.length; si += 1) {
+        var sizeValue = imageCaps.sizes[si];
+        html += '<option value="' + escapeHtml(sizeValue) + '"' +
+          (sizeValue === imageCaps.default_size ? ' selected' : '') + '>' +
+          escapeHtml(sizeValue === 'custom' ? '自定义（在 Prompt 中说明）' : sizeValue) + '</option>';
+      }
+      html += '</select>';
+    }
+    if (imageCaps.ratios && imageCaps.ratios.length) {
+      html += '  <label>比例:</label><select id="module2-ratio">';
+      for (var ri = 0; ri < imageCaps.ratios.length; ri += 1) {
+        var ratioValue = imageCaps.ratios[ri];
+        html += '<option value="' + escapeHtml(ratioValue) + '"' +
+          (ratioValue === imageCaps.default_ratio ? ' selected' : '') + '>' +
+          escapeHtml(ratioValue) + '</option>';
+      }
+      html += '</select>';
+    }
+    if (imageCaps.supports_seed) {
+      html += '  <label>种子:</label><input id="module2-seed" type="number" min="0" placeholder="随机" />';
+    }
+    if (imageCaps.supports_watermark) {
+      html += '  <label class="inline-check"><input id="module2-watermark" type="checkbox" /> 水印</label>';
+    }
+    if (imageCaps.supports_reference_image) {
+      html += '  <label>参考图片:</label><select id="module2-reference">';
+      var seenRefs = {};
+      var currentImageAsset = currentShot.primary_image_asset_id || currentShot.keyframe_asset_id;
+      html += '<option value="">不使用参考图</option>';
+      if (currentImageAsset) {
+        seenRefs[currentImageAsset] = true;
+        html += '<option value="' + escapeHtml(currentImageAsset) + '"' +
+          (state.selectedReferenceAssetId === currentImageAsset ? ' selected' : '') +
+          '>当前分镜图片</option>';
+      }
+      for (var ra = 0; ra < state.referenceAssets.length; ra += 1) {
+        var refAsset = state.referenceAssets[ra];
+        if (seenRefs[refAsset.id]) continue;
+        seenRefs[refAsset.id] = true;
+        html += '<option value="' + escapeHtml(refAsset.id) + '"' +
+          (state.selectedReferenceAssetId === refAsset.id ? ' selected' : '') + '>' +
+          escapeHtml((refAsset.name || '图片') + ' · ' + AIGV.formatTime(refAsset.created_at)) + '</option>';
+      }
+      html += '  </select>';
+      html += '  <label class="inline-check">上传参考图: <input id="module2-reference-file" type="file" accept="image/png,image/jpeg,image/webp" /></label>';
+    }
     if (state.imageGenInProgress) {
       html += '  <button class="btn btn-primary" disabled><span class="spinner"></span> 生成中...</button>';
     } else {
-      html += '  <button class="btn btn-primary" id="btn-generate-concept">&#9889; 生成概念图</button>';
+      html += '  <button class="btn btn-primary" id="btn-generate-concept"' + (currentImageModel ? '' : ' disabled') + '>&#9889; 生成概念图</button>';
+    }
+    if (!currentImageModel) {
+      html += '  <p class="field-hint">尚未配置可用的图片模型。请 <a class="field-hint-link" href="/api-settings">去配置 API</a>（ARK / OpenAI 图片），或启用 COMFYUI_ENABLED 与 COMFYUI_BASE_URL。</p>';
+      var reasons = imageModels.filter(function (item) { return !item.available; });
+      for (var rr = 0; rr < reasons.length; rr += 1) {
+        html += '  <p class="field-hint">' + escapeHtml(reasons[rr].display_name) + '：' +
+          escapeHtml(reasons[rr].unavailable_reason || '不可用') + '</p>';
+      }
     }
     html += '</div>';
 
@@ -1522,6 +1942,29 @@
       });
     }
 
+    // Model/capability driven controls
+    var modelSel = $('module2-model');
+    if (modelSel) {
+      modelSel.addEventListener('change', function() {
+        state.selectedImageModel = modelSel.value;
+        state.selectedReferenceAssetId = '';
+        saveToLocalStorage();
+        renderModule2();
+      });
+    }
+    var refSel = $('module2-reference');
+    if (refSel) {
+      refSel.addEventListener('change', function() {
+        state.selectedReferenceAssetId = refSel.value;
+      });
+    }
+    var refFile = $('module2-reference-file');
+    if (refFile) {
+      refFile.addEventListener('change', function() {
+        if (refFile.files && refFile.files[0]) uploadReferenceImage(refFile.files[0]);
+      });
+    }
+
     // Generate button
     var genBtn = $('btn-generate-concept');
     if (genBtn) {
@@ -1547,10 +1990,35 @@
     }
   }
 
+  function uploadReferenceImage(file) {
+    if (!file) return;
+    if (['image/png', 'image/jpeg', 'image/webp'].indexOf(file.type) === -1) {
+      showToast('参考图片仅支持 PNG/JPEG/WebP', 'warning');
+      return;
+    }
+    var formData = new FormData();
+    formData.append('file', file);
+    formData.append('name', file.name.replace(/\.[^.]+$/, ''));
+    api('/api/assets/upload', { method: 'POST', body: formData }).then(function(asset) {
+      state.referenceAssets.unshift(asset);
+      state.selectedReferenceAssetId = asset.id;
+      renderModule2();
+      showToast('参考图已上传并选中', 'success');
+    }).catch(function(error) {
+      showToast('参考图上传失败: ' + error.message, 'error');
+    });
+  }
+
   function handleGenerateConceptImage() {
     if (state.imageGenInProgress) return;
     var shot = getActiveShot();
     if (!shot) return;
+    var model = selectedImageModelInfo();
+    if (!model) {
+      showToast('尚未配置可用的图片生成模型', 'warning');
+      return;
+    }
+    var caps = model.capabilities || {};
 
     state.imageGenInProgress = true;
     renderModule2();
@@ -1561,34 +2029,43 @@
           throw new Error('请先创建项目');
         }
 
+        var modelEl = $('module2-model');
+        var sizeEl = $('module2-size');
+        var ratioEl = $('module2-ratio');
+        var seedEl = $('module2-seed');
+        var watermarkEl = $('module2-watermark');
+        var referenceEl = $('module2-reference');
+        var promptEl = $('module2-keyframe-prompt');
+        var modelKey = modelEl ? modelEl.value : model.key;
+        if (!modelKey) {
+          throw new Error('尚未接入图片生成模型，请在服务器配置 Provider');
+        }
+        var payload = {
+          model_key: modelKey,
+          prompt: promptEl ? promptEl.value : shot.keyframePrompt
+        };
+        if (sizeEl && sizeEl.value) payload.size = sizeEl.value;
+        if (ratioEl && ratioEl.value) payload.ratio = ratioEl.value;
+        if (seedEl && seedEl.value !== '') payload.seed = parseInt(seedEl.value, 10);
+        if (watermarkEl) payload.watermark = !!watermarkEl.checked;
+        if (caps.supports_reference_image && referenceEl && referenceEl.value) {
+          payload.reference_asset_id = referenceEl.value;
+        }
+
         var task = await api('/api/creative/shots/' + shot.id + '/images', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
+          body: JSON.stringify(payload)
         });
-
-        await pollTask(task.id, function(progress, stage) {
-          // Progress updates handled by pollTask
-        });
-
-        // Reload shot data
-        var shots = await api('/api/creative/projects/' + state.projectId + '/shots');
-        state.shots = shots || [];
-        state.imageGenInProgress = false;
-        state.stepsCompleted[1] = true;
-        updateFlowNav();
+        state.currentImageTaskId = task.id;
         saveToLocalStorage();
-        renderModule2();
-        showToast('概念图生成完成', 'success');
 
+        var finalTask = await pollTask(task.id, function(progress, stage) {
+          state.analysisStage = stage || '生成中...';
+        });
+        finishGeneration('image', finalTask);
       } catch (e) {
-        state.imageGenInProgress = false;
-        if (e.message && e.message.indexOf('provider_not_configured') >= 0) {
-          showToast('ComfyUI 图片生成服务未配置', 'warning');
-        } else {
-          showToast('图片生成失败: ' + e.message, 'error');
-        }
-        renderModule2();
+        finishGenerationFailure('image', e);
       }
     })();
   }
@@ -1602,21 +2079,27 @@
     var html = '<div class="concept-image-grid">';
     for (var i = 0; i < images.length; i++) {
       var img = images[i];
-      var gradient = 'linear-gradient(135deg, ' + img.colors.join(', ') + ')';
+      var colors = img.colors && img.colors.length ? img.colors : ['#1a2433', '#33465c'];
+      var gradient = 'linear-gradient(135deg, ' + colors.join(', ') + ')';
       var keyframeBadge = img.isKeyframe ? '<span class="keyframe-badge">&#9733; 关键帧</span>' : '';
       var favClass = img.isFavorite ? 'fav-active' : '';
       var label = 'Image ' + (i + 1);
+      var thumbStyle = img.url
+        ? 'background-image: url(' + JSON.stringify(img.url) + '); background-size: cover; background-position: center;'
+        : 'background: ' + gradient + ';';
 
       html += '<div class="concept-image-card" data-image-id="' + escapeHtml(img.id) + '">';
-      html += '  <div class="concept-image-thumb" style="background: ' + gradient + ';">';
-      html += '    <div class="concept-overlay">';
-      html += '      <svg viewBox="0 0 64 64" width="48" height="48" fill="rgba(255,255,255,0.6)">';
-      html += '        <rect x="8" y="12" width="48" height="40" rx="4" stroke="rgba(255,255,255,0.8)" stroke-width="2" fill="none"/>';
-      html += '        <circle cx="24" cy="28" r="6" fill="rgba(255,255,255,0.5)"/>';
-      html += '        <polygon points="30,38 38,32 46,38 46,46 30,46" fill="rgba(255,255,255,0.4)"/>';
-      html += '        <rect x="14" y="40" width="12" height="2" rx="1" fill="rgba(255,255,255,0.3)"/>';
-      html += '      </svg>';
-      html += '    </div>';
+      html += '  <div class="concept-image-thumb" style="' + thumbStyle + '">';
+      if (!img.url) {
+        html += '    <div class="concept-overlay">';
+        html += '      <svg viewBox="0 0 64 64" width="48" height="48" fill="rgba(255,255,255,0.6)">';
+        html += '        <rect x="8" y="12" width="48" height="40" rx="4" stroke="rgba(255,255,255,0.8)" stroke-width="2" fill="none"/>';
+        html += '        <circle cx="24" cy="28" r="6" fill="rgba(255,255,255,0.5)"/>';
+        html += '        <polygon points="30,38 38,32 46,38 46,46 30,46" fill="rgba(255,255,255,0.4)"/>';
+        html += '        <rect x="14" y="40" width="12" height="2" rx="1" fill="rgba(255,255,255,0.3)"/>';
+        html += '      </svg>';
+        html += '    </div>';
+      }
       html += '    <div class="concept-hover-actions">';
       html += '      <button class="btn-icon-sm" data-action="set-keyframe" title="设为关键帧">&#9733;</button>';
       html += '      <button class="btn-icon-sm ' + favClass + '" data-action="favorite" title="收藏">&#9829;</button>';
@@ -1628,8 +2111,8 @@
       html += '  </div>';
       html += '  <div class="concept-image-info">';
       html += '    <span class="concept-image-label">' + label + '</span>';
-      html += '    <span class="meta-chip">' + escapeHtml(img.modelLabel || img.model) + '</span>';
-      html += '    <span class="meta-chip">#' + img.seed + '</span>';
+      html += '    <span class="meta-chip">' + escapeHtml(img.modelLabel || img.model || '生成图片') + '</span>';
+      html += '    <span class="meta-chip">#' + escapeHtml(String(img.seed || '—')) + '</span>';
       html += '  </div>';
       html += '</div>';
     }
@@ -1684,47 +2167,93 @@
   function handleSetKeyframe(imageId) {
     var img = findImageById(imageId);
     if (!img) return;
-    var shotId = img.shotId;
+    var shotId = img.shotId || findImageContainerShotId(imageId);
     var images = state.conceptImages[shotId] || [];
-    for (var i = 0; i < images.length; i++) {
-      images[i].isKeyframe = (images[i].id === imageId);
+    function applyLocal() {
+      for (var i = 0; i < images.length; i++) {
+        images[i].isKeyframe = (images[i].id === imageId);
+      }
+      for (var j = 0; j < state.shots.length; j++) {
+        if (state.shots[j].id === shotId) {
+          state.shots[j].keyframe_asset_id = img.assetId || img.id;
+          break;
+        }
+      }
+      saveToLocalStorage();
+      renderModule2();
     }
-    saveToLocalStorage();
-    renderModule2();
-    showToast('关键帧已设置', 'success');
+    if (!img.assetId) {
+      applyLocal();
+      showToast('关键帧已设置', 'success');
+      return;
+    }
+    api('/api/creative/shots/' + shotId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keyframe_asset_id: img.assetId })
+    }).then(function () {
+      applyLocal();
+      showToast('关键帧已设置', 'success');
+    }).catch(function (e) {
+      showToast('设置关键帧失败: ' + e.message, 'error');
+    });
   }
 
   function handleFavoriteImage(imageId) {
     var img = findImageById(imageId);
     if (!img) return;
-    img.isFavorite = !img.isFavorite;
-    saveToLocalStorage();
-    renderModule2();
+    var nextFavorite = !img.isFavorite;
+    if (!img.assetId) {
+      img.isFavorite = nextFavorite;
+      renderModule2();
+      return;
+    }
+    api('/api/assets/' + encodeURIComponent(img.assetId)).then(function(asset) {
+      var metadata = Object.assign({}, (asset && asset.metadata) || {}, {
+        favorite: nextFavorite
+      });
+      return api('/api/assets/' + encodeURIComponent(img.assetId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ metadata: metadata })
+      });
+    }).then(function() {
+      img.isFavorite = nextFavorite;
+      img.metadata = Object.assign({}, img.metadata || {}, { favorite: nextFavorite });
+      renderModule2();
+      showToast(nextFavorite ? '已收藏' : '已取消收藏', 'info');
+    }).catch(function(error) {
+      showToast('收藏失败: ' + error.message, 'error');
+    });
   }
 
   function handleViewImageLarge(imageId) {
     var img = findImageById(imageId);
     if (!img) return;
-    var gradient = 'linear-gradient(135deg, ' + img.colors.join(', ') + ')';
+    var gradient = 'linear-gradient(135deg, ' + (img.colors || ['#1a2433', '#33465c']).join(', ') + ')';
+    var imageHtml = img.url
+      ? '<img src="' + escapeHtml(img.url) + '" alt="生成图片" style="width:100%; height:auto; border-radius:8px; display:block;" />'
+      : '<div class="large-image" style="background: ' + gradient + '; width: 100%; aspect-ratio: 16/9; border-radius: 8px; display: flex; align-items: center; justify-content: center;">' +
+        '<svg viewBox="0 0 64 64" width="96" height="96" fill="rgba(255,255,255,0.4)">' +
+        '<rect x="8" y="12" width="48" height="40" rx="4" stroke="rgba(255,255,255,0.6)" stroke-width="2" fill="none"/>' +
+        '<circle cx="24" cy="28" r="6" fill="rgba(255,255,255,0.3)"/>' +
+        '<polygon points="30,38 38,32 46,38 46,46 30,46" fill="rgba(255,255,255,0.3)"/></svg></div>';
     var html = '';
     html += '<div class="modal-overlay" id="image-modal">';
     html += '  <div class="modal-content modal-lg">';
     html += '    <button class="modal-close" id="modal-close-btn">&times;</button>';
     html += '    <div class="modal-body">';
-    html += '      <div class="large-image" style="background: ' + gradient + '; width: 100%; aspect-ratio: 16/9; border-radius: 8px; display: flex; align-items: center; justify-content: center;">';
-    html += '        <svg viewBox="0 0 64 64" width="96" height="96" fill="rgba(255,255,255,0.4)">';
-    html += '          <rect x="8" y="12" width="48" height="40" rx="4" stroke="rgba(255,255,255,0.6)" stroke-width="2" fill="none"/>';
-    html += '          <circle cx="24" cy="28" r="6" fill="rgba(255,255,255,0.3)"/>';
-    html += '          <polygon points="30,38 38,32 46,38 46,46 30,46" fill="rgba(255,255,255,0.3)"/>';
-    html += '        </svg>';
-    html += '      </div>';
+    html += imageHtml;
     html += '      <div class="image-details">';
-    html += '        <p><strong>提示词:</strong> ' + escapeHtml(img.prompt) + '</p>';
-    html += '        <p><strong>模型:</strong> ' + escapeHtml(img.modelLabel || img.model) + '</p>';
-    html += '        <p><strong>种子:</strong> ' + img.seed + '</p>';
-    html += '        <p><strong>分辨率:</strong> ' + img.width + 'x' + img.height + '</p>';
+    html += '        <p><strong>提示词:</strong> ' + escapeHtml(img.prompt || '—') + '</p>';
+    html += '        <p><strong>模型:</strong> ' + escapeHtml(img.modelLabel || img.model || '—') + '</p>';
+    html += '        <p><strong>种子:</strong> ' + escapeHtml(String(img.seed === undefined ? '—' : img.seed)) + '</p>';
+    html += '        <p><strong>分辨率:</strong> ' + escapeHtml(String(img.width || '—')) + 'x' + escapeHtml(String(img.height || '—')) + '</p>';
     html += '        <p><strong>关键帧:</strong> ' + (img.isKeyframe ? '是' : '否') + '</p>';
     html += '      </div>';
+    if (img.downloadUrl) {
+      html += '      <a class="btn btn-secondary" href="' + escapeHtml(img.downloadUrl) + '" target="_blank" rel="noopener">下载图片</a>';
+    }
     html += '    </div>';
     html += '  </div>';
     html += '</div>';
@@ -1750,18 +2279,27 @@
   function handleViewImageParams(imageId) {
     var img = findImageById(imageId);
     if (!img) return;
+    var params = img.params || {};
+    var rows = [
+      ['模型', img.modelLabel || img.model || '—'],
+      ['尺寸', (params.width || img.width || '—') + 'x' + (params.height || img.height || '—')],
+      ['比例', params.ratio || '—'],
+      ['种子', params.seed === null || params.seed === undefined ? '—' : params.seed],
+      ['生成时间', img.generatedAt || '—']
+    ];
+    var rowsHtml = '';
+    for (var i = 0; i < rows.length; i += 1) {
+      rowsHtml += '<div class="param-row"><span class="param-label">' + escapeHtml(rows[i][0]) + '</span><span>' +
+        escapeHtml(String(rows[i][1])) + '</span></div>';
+    }
     var html = '';
     html += '<div class="modal-overlay" id="params-modal">';
     html += '  <div class="modal-content">';
     html += '    <button class="modal-close" id="params-close-btn">&times;</button>';
     html += '    <h3>生成参数</h3>';
     html += '    <div class="params-table">';
-    html += '      <div class="param-row"><span class="param-label">模型</span><span>' + escapeHtml(img.modelLabel || img.model) + '</span></div>';
-    html += '      <div class="param-row"><span class="param-label">分辨率</span><span>' + img.width + 'x' + img.height + '</span></div>';
-    html += '      <div class="param-row"><span class="param-label">种子</span><span>' + img.seed + '</span></div>';
-    html += '      <div class="param-row"><span class="param-label">步数</span><span>' + img.steps + '</span></div>';
-    html += '      <div class="param-row"><span class="param-label">生成时间</span><span>' + escapeHtml(img.generatedAt) + '</span></div>';
-    html += '      <div class="param-row"><span class="param-label">正向提示词</span><span class="param-prompt">' + escapeHtml(img.prompt) + '</span></div>';
+    html += rowsHtml;
+    html += '      <div class="param-row"><span class="param-label">正向提示词</span><span class="param-prompt">' + escapeHtml(img.prompt || '—') + '</span></div>';
     html += '    </div>';
     html += '  </div>';
     html += '</div>';
@@ -1785,22 +2323,33 @@
   }
 
   function handleDeleteImage(imageId) {
-    showConfirmDialog('删除概念图', '确定要删除该概念图吗？', '删除', function() {
-    var shotId = findImageContainerShotId(imageId);
-    if (!shotId) return;
-    var images = state.conceptImages[shotId] || [];
-    for (var i = 0; i < images.length; i++) {
-      if (images[i].id === imageId) {
-        images.splice(i, 1);
-        break;
+    var img = findImageById(imageId);
+    if (!img) return;
+    showConfirmDialog('删除概念图', '确定要删除该概念图吗？如果它仍被分镜引用，服务器会拒绝删除。', '删除', function() {
+      if (!img.assetId) {
+        var shotId = findImageContainerShotId(imageId);
+        if (!shotId) return;
+        var images = state.conceptImages[shotId] || [];
+        for (var i = 0; i < images.length; i++) {
+          if (images[i].id === imageId) { images.splice(i, 1); break; }
+        }
+        if (images.length === 0) delete state.conceptImages[shotId];
+        saveToLocalStorage();
+        renderModule2();
+        return;
       }
-    }
-    if (images.length === 0) {
-      delete state.conceptImages[shotId];
-    }
-    saveToLocalStorage();
-    renderModule2();
-  });
+      api('/api/assets/' + encodeURIComponent(img.assetId), { method: 'DELETE' })
+        .then(function() {
+          showToast('图片已删除', 'success');
+          return reloadShotsAndHydrate();
+        })
+        .then(function() {
+          renderModule2();
+        })
+        .catch(function(error) {
+          showToast((error && error.message) || '删除失败', 'error');
+        });
+    });
   }
 
   // ---------------------------------------------------------------
@@ -1827,7 +2376,11 @@
       return;
     }
 
-    var gradient = 'linear-gradient(135deg, ' + keyframe.colors.join(', ') + ')';
+    var keyframeColors = keyframe.colors && keyframe.colors.length ? keyframe.colors : ['#1a2433', '#33465c'];
+    var gradient = 'linear-gradient(135deg, ' + keyframeColors.join(', ') + ')';
+    var keyframeStyle = keyframe.url
+      ? 'background-image: url(' + JSON.stringify(keyframe.url) + '); background-size: cover; background-position: center;'
+      : 'background: ' + gradient + ';';
     var existingVideo = shotId && state.videoResults[shotId] ? state.videoResults[shotId] : null;
 
     var html = '';
@@ -1838,61 +2391,107 @@
     // Keyframe display
     html += '<div class="keyframe-display card">';
     html += '  <h4>关键帧</h4>';
-    html += '  <div class="keyframe-preview" style="background: ' + gradient + '; aspect-ratio: 16/9; border-radius: 8px; display: flex; align-items: center; justify-content: center;">';
-    html += '    <svg viewBox="0 0 64 64" width="64" height="64" fill="rgba(255,255,255,0.4)">';
-    html += '      <rect x="8" y="12" width="48" height="40" rx="4" stroke="rgba(255,255,255,0.6)" stroke-width="2" fill="none"/>';
-    html += '      <circle cx="24" cy="28" r="6" fill="rgba(255,255,255,0.3)"/>';
-    html += '      <polygon points="30,38 38,32 46,38 46,46 30,46" fill="rgba(255,255,255,0.3)"/>';
-    html += '    </svg>';
+    html += '  <div class="keyframe-preview" style="' + keyframeStyle + ' aspect-ratio: 16/9; border-radius: 8px; display: flex; align-items: center; justify-content: center;">';
+    if (!keyframe.url) {
+      html += '    <svg viewBox="0 0 64 64" width="64" height="64" fill="rgba(255,255,255,0.4)">';
+      html += '      <rect x="8" y="12" width="48" height="40" rx="4" stroke="rgba(255,255,255,0.6)" stroke-width="2" fill="none"/>';
+      html += '      <circle cx="24" cy="28" r="6" fill="rgba(255,255,255,0.3)"/>';
+      html += '      <polygon points="30,38 38,32 46,38 46,46 30,46" fill="rgba(255,255,255,0.3)"/>';
+      html += '    </svg>';
+    }
     html += '  </div>';
     html += '  <p class="keyframe-prompt">' + escapeHtml(keyframe.prompt) + '</p>';
     html += '</div>';
 
-    // Video params form
+    // Video params form (capability driven)
+    var videoModels = state.generationModels.video || [];
+    var currentVideoModel = selectedVideoModelInfo();
+    var videoCaps = (currentVideoModel && currentVideoModel.capabilities) || {};
     html += '<div class="video-params card">';
     html += '  <h4>视频参数</h4>';
     html += '  <div class="form-grid">';
-    html += '    <div class="form-group"><label>时长 (秒)</label><input type="range" id="vparam-duration" min="4" max="30" value="8" step="1" /><span id="vparam-duration-val">8s</span></div>';
-    html += '    <div class="form-group"><label>运镜类型</label><select id="vparam-camera">';
-    html += '      <option value="static">静态</option><option value="pan">平移</option><option value="tilt">俯仰</option><option value="zoom">变焦</option><option value="dolly">推进</option><option value="orbit">环绕</option>';
-    html += '    </select></div>';
-    html += '    <div class="form-group"><label>运动强度</label><input type="range" id="vparam-motion" min="1" max="5" value="3" step="1" /><span id="vparam-motion-val">3</span></div>';
-    html += '    <div class="form-group"><label>稳定性</label><input type="range" id="vparam-stability" min="1" max="10" value="7" step="1" /><span id="vparam-stability-val">7</span></div>';
-    html += '    <div class="form-group"><label>分辨率</label><select id="vparam-resolution">';
-    html += '      <option value="720p">720p</option><option value="1080p" selected>1080p</option><option value="4K">4K</option>';
-    html += '    </select></div>';
-    html += '    <div class="form-group"><label>帧率</label><select id="vparam-fps">';
-    html += '      <option value="24">24fps</option><option value="30" selected>30fps</option><option value="60">60fps</option>';
-    html += '    </select></div>';
     html += '    <div class="form-group"><label>模型</label><select id="vparam-model">';
-    html += '      <option value="seedance-1.5">Seedance-1.5</option><option value="luma-dreammachine">Luma-DreamMachine</option>';
+    if (!videoModels.length) {
+      html += '      <option value="">尚未接入视频生成模型</option>';
+    } else {
+      for (var vmi = 0; vmi < videoModels.length; vmi++) {
+        var videoModel = videoModels[vmi];
+        html += '      <option value="' + escapeHtml(videoModel.key) + '"' +
+          (videoModel.available ? '' : ' disabled') +
+          (state.selectedVideoModel === videoModel.key ? ' selected' : '') + '>' +
+          escapeHtml(videoModel.display_name + (videoModel.available ? '' : '（未配置）')) + '</option>';
+      }
+    }
     html += '    </select></div>';
+    if (videoCaps.ratios && videoCaps.ratios.length) {
+      html += '    <div class="form-group"><label>比例</label><select id="vparam-ratio">';
+      for (var vri = 0; vri < videoCaps.ratios.length; vri += 1) {
+        var videoRatio = videoCaps.ratios[vri];
+        html += '<option value="' + escapeHtml(videoRatio) + '"' +
+          (videoRatio === '16:9' || (vri === 0 && videoCaps.ratios.indexOf('16:9') === -1) ? ' selected' : '') +
+          '>' + escapeHtml(videoRatio) + '</option>';
+      }
+      html += '    </select></div>';
+    }
+    if (videoCaps.durations && videoCaps.durations.length) {
+      html += '    <div class="form-group"><label>时长</label><select id="vparam-duration">';
+      for (var vdi = 0; vdi < videoCaps.durations.length; vdi += 1) {
+        var videoDuration = videoCaps.durations[vdi];
+        html += '<option value="' + escapeHtml(String(videoDuration)) + '"' +
+          (videoDuration === 5 || (vdi === 0 && videoCaps.durations.indexOf(5) === -1) ? ' selected' : '') +
+          '>' + escapeHtml(String(videoDuration)) + 's</option>';
+      }
+      html += '    </select></div>';
+    }
+    if (videoCaps.resolutions && videoCaps.resolutions.length) {
+      html += '    <div class="form-group"><label>分辨率</label><select id="vparam-resolution">';
+      for (var vsi = 0; vsi < videoCaps.resolutions.length; vsi += 1) {
+        var videoResolution = videoCaps.resolutions[vsi];
+        html += '<option value="' + escapeHtml(videoResolution) + '"' +
+          (videoResolution === '720p' ? ' selected' : '') + '>' + escapeHtml(videoResolution) + '</option>';
+      }
+      html += '    </select></div>';
+    }
+    if (videoCaps.supports_audio) {
+      html += '    <div class="form-group"><label><input type="checkbox" id="vparam-audio"' +
+        (videoCaps.default_audio ? ' checked' : '') + ' /> 生成音频</label></div>';
+    }
+    if (videoCaps.supports_seed) {
+      html += '    <div class="form-group"><label>种子</label><input id="vparam-seed" type="number" min="0" placeholder="随机" /></div>';
+    }
     html += '  </div>';
+    if (!currentVideoModel) {
+      html += '  <p class="field-hint">尚未配置可用的视频模型。请 <a class="field-hint-link" href="/api-settings">去配置 API</a>（ARK / Seedance / Luma）。</p>';
+      var videoReasons = videoModels.filter(function (item) { return !item.available; });
+      for (var vrr = 0; vrr < videoReasons.length; vrr += 1) {
+        html += '  <p class="field-hint">' + escapeHtml(videoReasons[vrr].display_name) + '：' +
+          escapeHtml(videoReasons[vrr].unavailable_reason || '不可用') + '</p>';
+      }
+    } else if (!videoCaps.supports_reference_image) {
+      html += '  <p class="field-hint">当前模型不支持参考图，将按文本 Prompt 生成视频。</p>';
+    }
 
-    // Generate / Status
+    // Generate / Status. Providers rarely expose a numeric percentage, so the
+    // UI shows the real stage and an indeterminate bar instead of fake progress.
     if (state.videoGenInProgress) {
       html += '  <div class="video-progress">';
-      html += '    <div class="progress-bar"><div class="progress-fill" style="width: ' + state.videoProgress + '%"></div></div>';
-      html += '    <p class="progress-label">' + escapeHtml(state.videoGenStage) + ' (' + state.videoProgress + '%)</p>';
+      html += '    <div class="progress-bar"><div class="progress-fill progress-indeterminate"></div></div>';
+      html += '    <p class="progress-label">' + escapeHtml(state.videoGenStage || '生成中...') + '</p>';
       html += '    <button class="btn btn-danger" id="btn-cancel-video">取消生成</button>';
       html += '  </div>';
-    } else if (existingVideo && existingVideo.status === 'completed') {
+    } else if (existingVideo && existingVideo.status === 'completed' && existingVideo.fileUrl) {
       html += '  <div class="video-result">';
-      html += '    <div class="video-placeholder" style="background: #000; aspect-ratio: 16/9; border-radius: 8px; display: flex; align-items: center; justify-content: center; position: relative;">';
-      html += '      <svg viewBox="0 0 64 64" width="64" height="64" fill="rgba(255,255,255,0.3)">';
-      html += '        <circle cx="32" cy="32" r="28" stroke="rgba(255,255,255,0.5)" stroke-width="2" fill="none"/>';
-      html += '        <polygon points="26,20 26,44 46,32" fill="rgba(255,255,255,0.5)"/>';
-      html += '      </svg>';
-      html += '      <div class="video-corner-badge top-left">' + (existingVideo.duration || '8') + 's</div>';
-      html += '      <div class="video-corner-badge bottom-right">' + escapeHtml(existingVideo.resolution || '1080p') + '</div>';
-      html += '    </div>';
+      html += '    <video src="' + escapeHtml(existingVideo.fileUrl) + '" controls playsinline style="width:100%; aspect-ratio:16/9; border-radius:8px; background:#000;"></video>';
+      html += '    <p class="field-hint">' + escapeHtml(existingVideo.model || '') +
+        (existingVideo.createdAt ? ' · ' + escapeHtml(existingVideo.createdAt) : '') + '</p>';
       html += '    <div class="video-actions">';
+      html += '      <a class="btn btn-secondary" href="' + escapeHtml(existingVideo.downloadUrl || existingVideo.fileUrl) + '" target="_blank" rel="noopener">下载视频</a>';
       html += '      <button class="btn btn-secondary" id="btn-regenerate-video">重新生成</button>';
       html += '    </div>';
       html += '  </div>';
     } else {
       html += '  <div class="form-actions">';
-      html += '    <button class="btn btn-primary" id="btn-generate-video">&#127916; 生成视频</button>';
+      html += '    <button class="btn btn-primary" id="btn-generate-video"' + (currentVideoModel ? '' : ' disabled') + '>&#127916; 生成视频</button>';
       html += '  </div>';
     }
     html += '</div>';
@@ -1901,6 +2500,15 @@
 
     // Bind range sliders
     bindVideoRangeSliders();
+
+    var videoModelSelect = $('vparam-model');
+    if (videoModelSelect) {
+      videoModelSelect.addEventListener('change', function() {
+        state.selectedVideoModel = videoModelSelect.value;
+        saveToLocalStorage();
+        renderModule3();
+      });
+    }
 
     // Generate button
     var genBtn = $('btn-generate-video');
@@ -1947,8 +2555,14 @@
 
   function handleGenerateVideo() {
     if (state.videoGenInProgress) return;
-    var shot = getActiveShot();
+    var shot = getWorkflowShot();
     if (!shot) return;
+    var model = selectedVideoModelInfo();
+    if (!model) {
+      showToast('尚未配置可用的视频生成模型（去配置 API: /api-settings）', 'warning');
+      return;
+    }
+    var caps = model.capabilities || {};
 
     state.videoGenInProgress = true;
     state.videoProgress = 0;
@@ -1962,72 +2576,82 @@
           throw new Error('请先创建项目');
         }
 
+        var modelEl = $('vparam-model');
+        var ratioEl = $('vparam-ratio');
+        var durationEl = $('vparam-duration');
+        var resolutionEl = $('vparam-resolution');
+        var audioEl = $('vparam-audio');
+        var seedEl = $('vparam-seed');
+        var modelKey = modelEl ? modelEl.value : model.key;
+        if (!modelKey) {
+          throw new Error('尚未接入视频生成模型，请在服务器配置 Provider');
+        }
+        var images = state.conceptImages[shot.id] || [];
+        var keyframe = null;
+        for (var k = 0; k < images.length; k++) {
+          if (images[k].isKeyframe) { keyframe = images[k]; break; }
+        }
+        var referenceAssetId = shot.keyframe_asset_id || shot.keyframeAssetId ||
+          (keyframe && keyframe.assetId) || shot.primary_image_asset_id || null;
+
+        var payload = {
+          model_key: modelKey,
+          prompt: shot.keyframePrompt || shot.prompt_en || shot.prompt_cn || ''
+        };
+        if (ratioEl && ratioEl.value) payload.ratio = ratioEl.value;
+        if (durationEl && durationEl.value) payload.duration_s = parseInt(durationEl.value, 10);
+        if (resolutionEl && resolutionEl.value) payload.resolution = resolutionEl.value;
+        if (audioEl && caps.supports_audio) payload.generate_audio = !!audioEl.checked;
+        if (seedEl && seedEl.value !== '' && caps.supports_seed) {
+          payload.seed = parseInt(seedEl.value, 10);
+        }
+        if (caps.supports_reference_image && referenceAssetId) {
+          payload.reference_asset_id = referenceAssetId;
+        }
+
         var task = await api('/api/creative/shots/' + shot.id + '/videos', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
+          body: JSON.stringify(payload)
         });
-
-        await pollTask(task.id, function(progress, stage) {
-          state.videoProgress = progress || 0;
-          state.videoGenStage = stage || '生成中...';
-          renderModule3();
-        });
-
-        // Reload shots
-        var shots = await api('/api/creative/projects/' + state.projectId + '/shots');
-        state.shots = shots || [];
-
-        // Update shot reference
-        for (var i = 0; i < state.shots.length; i++) {
-          if (state.shots[i].id === shot.id) {
-            shot = state.shots[i];
-            break;
-          }
-        }
-
-        state.videoGenInProgress = false;
-        state.videoProgress = 100;
-        state.videoGenStage = '完成';
-        state.videoResults[shot.id] = {
-          id: 'video-' + shot.id,
-          shotId: shot.id,
-          video_url: shot.video_url,
-          status: 'completed',
-          progress: 100
-        };
-        state.stepsCompleted[2] = true;
-        updateFlowNav();
+        state.currentVideoTaskId = task.id;
         saveToLocalStorage();
-        renderModule3();
-        showToast('视频生成完成', 'success');
 
+        var finalTask = await pollTask(task.id, function(progress, stage) {
+          state.videoGenStage = stage || '生成中...';
+          if (state.activeStep === 3) renderModule3();
+        });
+        finishGeneration('video', finalTask);
       } catch (e) {
-        state.videoGenInProgress = false;
-        state.videoProgress = 0;
-        state.videoGenStage = '';
-        if (e.message && e.message.indexOf('provider_not_configured') >= 0) {
-          showToast('视频生成服务未配置', 'warning');
-        } else {
-          showToast('视频生成失败: ' + e.message, 'error');
-        }
-        renderModule3();
+        finishGenerationFailure('video', e);
       }
     })();
   }
 
   function handleCancelVideo() {
     state.videoCancelRequested = true;
+    if (!state.currentVideoTaskId) {
+      showToast('没有正在运行的任务', 'info');
+      return;
+    }
     showToast('正在取消...', 'info');
+    api('/api/creative/tasks/' + state.currentVideoTaskId + '/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    }).then(function () {
+      showToast('取消请求已提交', 'info');
+    }).catch(function (e) {
+      showToast('取消失败: ' + e.message, 'error');
+    });
   }
 
   function handleRegenerateVideo() {
-    var shot = getActiveShot();
+    var shot = getWorkflowShot();
     if (!shot) return;
     if (state.videoResults[shot.shotId]) {
       delete state.videoResults[shot.shotId];
     }
-    state.stepsCompleted[2] = false;
     saveToLocalStorage();
     handleGenerateVideo();
   }
@@ -2194,11 +2818,31 @@
 
     var genBtn = $('btn-generate-narration');
     if (genBtn) {
-      genBtn.addEventListener('click', function() {
-        showToast('配音生成中', 'info');
-        setTimeout(function() {
-          showToast('配音已生成', 'success');
-        }, 1500);
+      genBtn.addEventListener('click', async function() {
+        if (!state.projectId) {
+          showToast('请先创建项目', 'error');
+          return;
+        }
+        genBtn.disabled = true;
+        try {
+          var task = await api('/api/creative/projects/' + state.projectId + '/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+          await pollTask(task.id, function(progress, stage) {
+            showToast(stage || '配音任务运行中', 'info');
+          });
+          showToast('配音任务已完成', 'success');
+        } catch (e) {
+          if (e.message && e.message.indexOf('provider_not_configured') >= 0) {
+            showToast('TTS 服务未配置（需要 Piper 模型）', 'warning');
+          } else {
+            showToast('配音失败: ' + e.message, 'error');
+          }
+        } finally {
+          genBtn.disabled = false;
+        }
       });
     }
   }
@@ -2677,37 +3321,54 @@
   function handleStartAiBatch() {
     if (state.aiBatchInProgress) return;
 
-    // Check if any options selected
     var options = els.studioContentPanel.querySelectorAll('.batch-option:checked');
     if (options.length === 0) {
       showToast('请至少选择一个处理选项', 'warning');
+      return;
+    }
+    if (!state.projectId) {
+      showToast('请先创建项目', 'error');
+      return;
+    }
+    var videoAssetId = null;
+    for (var i = 0; i < state.shots.length; i++) {
+      if (state.shots[i].video_asset_id) {
+        videoAssetId = state.shots[i].video_asset_id;
+        break;
+      }
+    }
+    if (!videoAssetId) {
+      showToast('请先在模块3生成至少一个视频', 'warning');
       return;
     }
 
     state.aiBatchInProgress = true;
     renderModule5();
 
-    var stages = [
-      { label: '分析画面特征...', delay: 1000 },
-      { label: '准备处理资源...', delay: 1000 },
-      { label: '执行批量处理...', delay: 1200 },
-      { label: '完成处理', delay: 800 }
-    ];
-
-    var stepIndex = 0;
-
-    function runStage() {
-      if (stepIndex >= stages.length) {
-        state.aiBatchInProgress = false;
-        renderModule5();
-        showToast('AI 批量处理完成', 'success');
-        return;
-      }
-      stepIndex++;
-      state.aiBatchTimer = setTimeout(runStage, stages[stepIndex - 1].delay);
-    }
-
-    runStage();
+    api('/api/creative/projects/' + state.projectId + '/refine', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input_asset_id: videoAssetId,
+        filters: {
+          brightness: (state.filterParams.brightness - 100) / 100,
+          contrast: state.filterParams.contrast / 100,
+          saturation: state.filterParams.saturation / 100
+        }
+      })
+    }).then(function (task) {
+      return pollTask(task.id, function (progress, stage) {
+        showToast(stage || '精修任务运行中', 'info');
+      });
+    }).then(function () {
+      state.aiBatchInProgress = false;
+      renderModule5();
+      showToast('精修任务已完成', 'success');
+    }).catch(function (e) {
+      state.aiBatchInProgress = false;
+      renderModule5();
+      showToast('精修失败: ' + e.message, 'error');
+    });
   }
 
   // ---------------------------------------------------------------
@@ -2800,7 +3461,11 @@
       html += renderExportTreeHTML(state.exportTree);
       html += '  <div class="export-tree-actions">';
       html += '    <button class="btn btn-secondary" id="btn-copy-manifest">复制 Manifest</button>';
-      html += '    <button class="btn btn-secondary" id="btn-sim-download">模拟下载</button>';
+      if (state.exportDownloadUrl) {
+        html += '    <a class="btn btn-secondary" href="' + escapeHtml(state.exportDownloadUrl) + '" target="_blank" rel="noopener">下载导出包</a>';
+      } else {
+        html += '    <span class="field-hint">导出包尚未生成</span>';
+      }
       html += '  </div>';
       html += '</div>';
     }
@@ -2816,8 +3481,6 @@
       bindTreeToggle();
       var copyBtn = $('btn-copy-manifest');
       if (copyBtn) copyBtn.addEventListener('click', handleCopyManifest);
-      var dlBtn = $('btn-sim-download');
-      if (dlBtn) dlBtn.addEventListener('click', handleSimulatedDownload);
     }
   }
 
@@ -2978,17 +3641,9 @@
               });
             }
           }
-        } else {
-          // Fallback placeholder
-          state.exportTree.children = [
-            { name: 'video', type: 'folder', children: [] },
-            { name: 'audio', type: 'folder', children: [] },
-            { name: 'metadata', type: 'folder', children: [
-              { name: 'manifest.json', type: 'json', size: '1KB' }
-            ]}
-          ];
         }
 
+        state.exportDownloadUrl = '/api/creative/tasks/' + task.id + '/export/download';
         state.exportInProgress = false;
         state.stepsCompleted[5] = true;
         updateFlowNav();

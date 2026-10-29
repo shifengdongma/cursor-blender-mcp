@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>API 配置 - AIGV Studio</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body class="profile-page api-settings-page">
+    <div class="page-bg" aria-hidden="true"></div>
+
+    <nav class="navbar" aria-label="主导航">
+      <div class="nav-container">
+        <a href="/" class="nav-brand">
+          <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span>
+          <span class="brand-text">AIGV Studio</span>
+        </a>
+        <div class="nav-links">
+          <a href="/">工作台</a>
+          <a href="/creative-studio">创意生产</a>
+          <a href="/assets">素材库</a>
+          <a href="/compute-platform">算力调度</a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="profile-shell">
+      <header class="profile-header api-settings-header">
+        <div>
+          <p class="panel-kicker">API Settings</p>
+          <h1 class="profile-title">API 配置</h1>
+          <p class="profile-subtitle">
+            为每个 AI Provider 配置你自己的 API Key。密钥加密存储于本平台，仅用于你本人发起的生成任务，
+            不会明文回传或展示；未配置的 Provider 将回退使用平台默认配置。
+          </p>
+        </div>
+      </header>
+
+      <section class="api-settings-note" aria-label="安全提示">
+        <strong>安全提示</strong>
+        <p>
+          请使用可随时撤销的子账号 / 独立 API Key，并避免在共享账号中填写主账号密钥。
+          Base URL 必须为公网 HTTPS 地址；使用自定义 Base URL 时必须同时填写你自己的密钥。
+          保存或删除配置时，若该 Provider 还有排队/运行中的任务，需要等待任务结束后再试。
+        </p>
+      </section>
+
+      <div id="api-settings-status" class="api-settings-status" role="status" aria-live="polite" hidden></div>
+
+      <div id="api-settings-loading" class="api-settings-loading" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span>正在加载 API 配置...</span>
+      </div>
+
+      <section id="provider-cards" class="api-settings-grid" aria-label="Provider 配置列表"></section>
+    </main>
+
+    <div class="toast-container" id="api-settings-toast-container"></div>
+
+    <script src="/web/runtime-config.js"></script>
+    <script src="/web/api-client.js"></script>
+    <script src="/web/api-settings.js"></script>
+    <script src="/web/session-nav.js"></script>
+  </body>
+</html>

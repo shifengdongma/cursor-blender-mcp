@@ -173,6 +173,22 @@ class TestCreativeRoutes(object):
         assert resp.status_code == 200
         assert resp.get_json()["data"]["name"] == "New"
 
+    def test_update_project_with_requirements_object(self, client):
+        """The Save button sends requirements/settings as nested objects."""
+        create_resp = client.post("/api/creative/projects", json={"name": "Old"})
+        pid = create_resp.get_json()["data"]["id"]
+
+        resp = client.put("/api/creative/projects/{0}".format(pid), json={
+            "name": "New",
+            "description": "desc",
+            "concept": "theme",
+            "requirements": {"elements": "建筑", "duration": 60, "channels": ["官网"]},
+        })
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["requirements"]["elements"] == "建筑"
+        assert data["requirements"]["channels"] == ["官网"]
+
     def test_delete_project(self, client):
         create_resp = client.post("/api/creative/projects", json={"name": "ToDelete"})
         pid = create_resp.get_json()["data"]["id"]

@@ -77,6 +77,26 @@ class TestCreativeProjectService(object):
         assert updated.name == "新名称"
         assert updated.description == "desc2"
 
+    def test_update_project_json_fields(self, svc):
+        """JSON columns accept dict/list values (frontend save sends requirements as object)."""
+        created = svc.create_project(name="原始名称")
+        requirements = {"elements": "建筑", "duration": 60, "channels": ["官网"]}
+        settings = {"aspect": "16:9"}
+        creative_brief = {"beats": [{"title": "开场"}]}
+
+        updated = svc.update_project(
+            created.id,
+            requirements=requirements,
+            settings=settings,
+            creative_brief=creative_brief,
+        )
+
+        assert updated is not None
+        assert updated.requirements == requirements
+        assert updated.settings == settings
+        assert updated.creative_brief == creative_brief
+        assert svc.get_project(created.id).requirements == requirements
+
     def test_update_nonexistent(self, svc):
         updated = svc.update_project("nonexistent", name="x")
         assert updated is None

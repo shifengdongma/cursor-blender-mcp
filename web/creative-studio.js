@@ -418,6 +418,7 @@
     // Backend-driven fields
     projectId: null,
     project: null,
+    newProjectDraft: false,
     shots: [],
     tasks: {},
     generationModels: { image: [], video: [] },
@@ -441,6 +442,7 @@
     els.projectSelect = $('project-select');
     els.projectMetrics = $('project-metrics');
     els.projectActions = $('project-actions');
+    els.btnNewProject = $('btn-new-project');
     els.btnSaveProject = $('btn-save-project');
     els.btnResetProject = $('btn-reset-project');
     els.flowNav = $('flow-nav');
@@ -781,6 +783,11 @@
     try {
       var data = await api('/api/creative/projects?limit=200');
       state.projects = (data && data.items) || [];
+      if (state.newProjectDraft) {
+        // A brand-new draft is being edited; don't replace it with an existing project.
+        populateProjectSelector();
+        return;
+      }
       var restored = state.projectId && state.projects.some(function (item) {
         return item.id === state.projectId;
       });
@@ -967,12 +974,23 @@
       });
     }
 
+    // New project button
+    if (els.btnNewProject) {
+      els.btnNewProject.addEventListener('click', function() {
+        showConfirmDialog('新建项目', '当前未保存的编辑内容将被清空，确定新建项目吗？', '新建', startNewProject);
+      });
+    }
+
     // Save button
     if (els.btnSaveProject) {
       els.btnSaveProject.addEventListener('click', function() {
         if (!state.projectId) {
-          saveToLocalStorage();
-          showToast('本地偏好已保存', 'success');
+          if (state.project) {
+            createProjectFromForm();
+          } else {
+            saveToLocalStorage();
+            showToast('本地偏好已保存', 'success');
+          }
           return;
         }
         var form = state.requirementsForm;
@@ -1003,6 +1021,7 @@
         try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
         state.projectId = null;
         state.project = null;
+        state.newProjectDraft = false;
         state.shots = [];
         state.activeProjectId = null;
         state.activeProject = null;
@@ -1044,8 +1063,101 @@
     }
   }
 
+  function defaultRequirementsForm() {
+    return {
+      projectName: '',
+      theme: '',
+      elements: '',
+      audience: '',
+      channels: '',
+      duration: 60,
+      aspect: '16:9',
+      style: 'cinematic-realistic',
+      mood: '',
+      description: '',
+      restrictions: ''
+    };
+  }
+
+  function startNewProject() {
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    state.projectId = null;
+    state.project = {
+      id: null,
+      name: '',
+      status: 'draft',
+      description: '',
+      genre: '',
+      concept: '',
+      requirements: null,
+      creative_brief: null,
+      settings: null
+    };
+    state.newProjectDraft = true;
+    state.activeProjectId = null;
+    state.activeProject = null;
+    state.activeStep = 1;
+    state.activeShotIndex = 0;
+    state.stepsCompleted = [false, false, false, false, false, false];
+    state.shots = [];
+    state.conceptImages = {};
+    state.videoResults = {};
+    state.projectImageTasks = {};
+    state.projectVideoTasks = {};
+    state.trackData = { video: [], narration: [], music: [], effects: [], subtitles: [] };
+    state.analysisInProgress = false;
+    state.analysisStage = '';
+    state.analysisError = '';
+    state.analysisNeedsConfig = false;
+    state.requirementsForm = defaultRequirementsForm();
+    populateProjectSelector();
+    renderCurrentModule();
+    updateFlowNav();
+    updatePreviewPanel(state.activeStep);
+    updateProjectMetrics();
+    showToast('已新建项目草稿，填写需求后点击"分析需求"或"保存"', 'info');
+  }
+
+  function projectPayloadFromForm() {
+    var form = state.requirementsForm;
+    return {
+      name: (form.projectName || '').trim() || '未命名项目',
+      description: form.description,
+      genre: form.style || 'cinematic',
+      concept: form.theme,
+      requirements: form
+    };
+  }
+
+  function adoptCreatedProject(project) {
+    state.projectId = project.id;
+    state.project = project;
+    state.newProjectDraft = false;
+    state.activeProjectId = project.id;
+    state.activeProject = project;
+    state.projects.unshift(project);
+    populateProjectSelector();
+    saveToLocalStorage();
+  }
+
+  function createProjectFromForm() {
+    api('/api/creative/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(projectPayloadFromForm())
+    }).then(function (project) {
+      adoptCreatedProject(project);
+      renderCurrentModule();
+      updateProjectMetrics();
+      showToast('项目已保存', 'success');
+    }).catch(function (error) {
+      showToast('保存失败: ' + error.message, 'error');
+    });
+  }
+
   function switchProject(id) {
     state.activeProjectId = id || null;
+    state.newProjectDraft = false;
     state.activeShotIndex = 0;
     if (!id) {
       state.projectId = null;
@@ -1292,7 +1404,7 @@
   function renderModule1() {
     var project = getActiveProject();
     if (!project) {
-      els.studioContentPanel.innerHTML = '<div class="module-empty"><div class="empty-icon">&#128196;</div><p>请先选择一个项目开始创作</p></div>';
+      els.studioContentPanel.innerHTML = '<div class="module-empty"><div class="empty-icon">&#128196;</div><p>请选择一个项目，或点击右上角「新建项目」开始创作</p></div>';
       return;
     }
 
@@ -1451,36 +1563,13 @@
           state.analysisStage = '正在创建项目...';
           renderModule1();
 
-          var projectData = {
-            name: state.requirementsForm.projectName || state.requirementsForm.theme || '未命名项目',
-            description: state.requirementsForm.description,
-            genre: state.requirementsForm.style || 'cinematic',
-            concept: state.requirementsForm.theme,
-            requirements: {
-              elements: state.requirementsForm.elements,
-              audience: state.requirementsForm.audience,
-              channels: state.requirementsForm.channels,
-              duration: state.requirementsForm.duration,
-              aspect: state.requirementsForm.aspect,
-              style: state.requirementsForm.style,
-              mood: state.requirementsForm.mood,
-              restrictions: state.requirementsForm.restrictions
-            }
-          };
-
           var project = await api('/api/creative/projects', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(projectData)
+            body: JSON.stringify(projectPayloadFromForm())
           });
 
-          state.projectId = project.id;
-          state.project = project;
-          state.activeProjectId = project.id;
-          state.activeProject = project;
-          state.projects.unshift(project);
-          populateProjectSelector();
-          saveToLocalStorage();
+          adoptCreatedProject(project);
         }
 
         // Step 2: Trigger LLM storyboard analysis

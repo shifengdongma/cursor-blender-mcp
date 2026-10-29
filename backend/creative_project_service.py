@@ -9,7 +9,7 @@ import os
 import time
 
 from .database import get_database
-from .models import CreativeProject
+from .models import CreativeProject, _json_dumps
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +81,13 @@ class CreativeProjectService(object):
             "name", "description", "status", "genre", "target_duration",
             "concept", "requirements", "creative_brief", "settings",
         ]
+        json_fields = ("requirements", "creative_brief", "settings")
         update_data = {}
         for key in updatable:
             if key in kwargs and kwargs[key] is not None:
-                setattr(existing, key, kwargs[key])
-                update_data[key] = kwargs[key]
+                value = kwargs[key]
+                setattr(existing, key, value)
+                update_data[key] = _json_dumps(value) if key in json_fields else value
 
         if not update_data:
             return existing

@@ -402,6 +402,20 @@ class AssetService(object):
                 pass
             raise AssetServiceError("图片文件类型校验失败")
 
+        # GLB is handed to model-viewer; a wrong header means a blank canvas.
+        if ext == 'glb':
+            try:
+                with open(full_path, 'rb') as handle:
+                    magic = handle.read(4)
+            except OSError:
+                magic = b''
+            if magic != b'glTF':
+                try:
+                    os.remove(full_path)
+                except OSError:
+                    pass
+                raise AssetServiceError("GLB 文件头校验失败")
+
         logger.info("Stored file: %s (%d bytes)", rel_path, size)
         return rel_path, size, digest.hexdigest()
 
@@ -444,6 +458,20 @@ class AssetService(object):
         """Safe API representation; deliberately omits filesystem paths."""
         if not asset:
             return None
+        file_ext = self.extension_for(asset.file_path) if asset.file_path else None
+        # GLB magic is enforced on upload, so the extension is trustworthy here.
+        previewable = asset.asset_type == self.TYPE_GLB and file_ext == 'glb'
+        if previewable:
+            preview_reason = None
+        elif asset.asset_type == self.TYPE_GLB:
+            preview_reason = '该格式不支持在线预览，请下载查看'
+        else:
+            preview_reason = None
+        file_url = None
+        if asset.file_path:
+            file_url = '/api/assets/{0}/file'.format(asset.id)
+            if asset.checksum_sha256:
+                file_url += '?v=' + asset.checksum_sha256[:12]
         item = {
             'id': asset.id,
             'name': asset.name,
@@ -455,9 +483,12 @@ class AssetService(object):
             'visibility': asset.visibility,
             'can_edit': can_write_asset(asset, viewer) if viewer else False,
             'checksum_sha256': asset.checksum_sha256,
+            'file_ext': file_ext,
+            'previewable': previewable,
+            'preview_reason': preview_reason,
             'created_at': asset.created_at,
             'updated_at': asset.updated_at,
-            'file_url': '/api/assets/{0}/file'.format(asset.id) if asset.file_path else None,
+            'file_url': file_url,
             'download_url': '/api/assets/{0}/download'.format(asset.id) if asset.file_path else None,
             'thumbnail_url': None,
         }

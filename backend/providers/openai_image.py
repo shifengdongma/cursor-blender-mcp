@@ -94,8 +94,11 @@ class OpenAIImageProvider(object):
             "prompt": prompt,
             "size": normalize_size(size),
             "n": 1,
-            "response_format": response_format or "b64_json",
         }
+        # gpt-image-* always returns b64_json and rejects ``response_format``
+        # with HTTP 400; only older DALL·E models accept the field.
+        if not str(self.model_id or "").startswith("gpt-image-"):
+            payload["response_format"] = response_format or "b64_json"
 
         url = self.base_url + "/images/generations"
         try:

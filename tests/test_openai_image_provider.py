@@ -91,7 +91,8 @@ def test_request_shape_and_b64_and_url_parsing(monkeypatch):
     assert body["model"] == "gpt-image-1"
     assert body["prompt"] == "a hall"
     assert body["n"] == 1
-    assert body["response_format"] == "b64_json"
+    # gpt-image-* rejects response_format on the wire.
+    assert "response_format" not in body
     assert "negative_prompt" not in body
     assert "seed" not in body
     assert "watermark" not in body
@@ -99,6 +100,20 @@ def test_request_shape_and_b64_and_url_parsing(monkeypatch):
         {"b64_json": "QUJD"},
         {"url": "https://cdn.example/out.png"},
     ]
+
+
+def test_response_format_only_sent_for_non_gpt_image_models(monkeypatch):
+    captured = _capture(monkeypatch)
+    OpenAIImageProvider(
+        api_key="sk-test-secret",
+        base_url="https://api.openai.example/v1",
+        model_id="dall-e-3",
+    ).generate("a hall")
+    assert captured["json"]["response_format"] == "b64_json"
+
+    captured = _capture(monkeypatch)
+    _provider().generate("a hall")
+    assert "response_format" not in captured["json"]
 
 
 def test_reference_images_are_rejected_without_network(monkeypatch):

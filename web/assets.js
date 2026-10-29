@@ -13,13 +13,21 @@
   var pageSize = 12;
   var searchQuery = '';
   var venueFilter = '';
-  var isLoading = false;
+  var assetDatePreset = 'all';
+  var assetDateFrom = '';
+  var assetDateTo = '';
+  var assetSort = 'newest';
   var historyType = '';
   var historyStatus = '';
+  var historyDatePreset = 'all';
   var historyDateFrom = '';
   var historyDateTo = '';
+  var historySort = 'newest';
   var historyTaskMap = {};
   var currentAssetsById = {};
+
+  // Monotonic request sequence: only the latest request may render.
+  var loadSeq = 0;
 
   // 3D preview state
   var AUTO_PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
@@ -95,9 +103,18 @@
   var historyFilterBar = document.getElementById('history-filter-bar');
   var historyTypeFilter = document.getElementById('history-type-filter');
   var historyStatusFilter = document.getElementById('history-status-filter');
+  var historyDatePresetSelect = document.getElementById('history-date-preset');
   var historyDateFromInput = document.getElementById('history-date-from');
   var historyDateToInput = document.getElementById('history-date-to');
+  var historySortSelect = document.getElementById('history-sort');
   var historyRefreshBtn = document.getElementById('history-refresh');
+  var assetFilterControls = document.getElementById('asset-filter-controls');
+  var assetDatePresetSelect = document.getElementById('asset-date-preset');
+  var assetDateRange = document.getElementById('asset-date-range');
+  var assetDateFromInput = document.getElementById('asset-date-from');
+  var assetDateToInput = document.getElementById('asset-date-to');
+  var assetSortSelect = document.getElementById('asset-sort');
+  var clearFiltersBtn = document.getElementById('clear-filters');
   var searchBox = document.querySelector('.toolbar-search');
   var editAssetModal = document.getElementById('edit-asset-modal');
   var editAssetForm = document.getElementById('edit-asset-form');
@@ -136,7 +153,7 @@
           searchQuery = searchInput.value.trim();
           if (currentTab === 'history') return;
           currentPage = 1;
-          loadAssets();
+          requestAssets();
         }, 300);
       });
     }
@@ -146,8 +163,43 @@
       venueFilterSelect.addEventListener('change', function() {
         venueFilter = this.value;
         currentPage = 1;
-        loadAssets();
+        requestAssets();
       });
+    }
+
+    // Asset date / sort filters
+    if (assetDatePresetSelect) {
+      assetDatePresetSelect.addEventListener('change', function() {
+        applyAssetDatePreset(this.value);
+        currentPage = 1;
+        requestAssets();
+      });
+    }
+    if (assetDateFromInput) {
+      assetDateFromInput.addEventListener('change', function() {
+        assetDateFrom = this.value;
+        if (!validateAssetDateRange()) return;
+        currentPage = 1;
+        requestAssets();
+      });
+    }
+    if (assetDateToInput) {
+      assetDateToInput.addEventListener('change', function() {
+        assetDateTo = this.value;
+        if (!validateAssetDateRange()) return;
+        currentPage = 1;
+        requestAssets();
+      });
+    }
+    if (assetSortSelect) {
+      assetSortSelect.addEventListener('change', function() {
+        assetSort = this.value || 'newest';
+        currentPage = 1;
+        requestAssets();
+      });
+    }
+    if (clearFiltersBtn) {
+      clearFiltersBtn.addEventListener('click', resetAssetFilters);
     }
 
     // Generation history filters
@@ -155,34 +207,52 @@
       historyTypeFilter.addEventListener('change', function() {
         historyType = this.value;
         currentPage = 1;
-        loadAssets();
+        requestAssets();
       });
     }
     if (historyStatusFilter) {
       historyStatusFilter.addEventListener('change', function() {
         historyStatus = this.value;
         currentPage = 1;
-        loadAssets();
+        requestAssets();
+      });
+    }
+    if (historyDatePresetSelect) {
+      historyDatePresetSelect.addEventListener('change', function() {
+        applyHistoryDatePreset(this.value);
+        currentPage = 1;
+        requestAssets();
       });
     }
     if (historyDateFromInput) {
       historyDateFromInput.addEventListener('change', function() {
         historyDateFrom = this.value;
+        markHistoryPresetCustom();
+        if (!validateHistoryDateRange()) return;
         currentPage = 1;
-        loadAssets();
+        requestAssets();
       });
     }
     if (historyDateToInput) {
       historyDateToInput.addEventListener('change', function() {
         historyDateTo = this.value;
+        markHistoryPresetCustom();
+        if (!validateHistoryDateRange()) return;
         currentPage = 1;
-        loadAssets();
+        requestAssets();
+      });
+    }
+    if (historySortSelect) {
+      historySortSelect.addEventListener('change', function() {
+        historySort = this.value || 'newest';
+        currentPage = 1;
+        requestAssets();
       });
     }
     if (historyRefreshBtn) {
       historyRefreshBtn.addEventListener('click', function() {
         currentPage = 1;
-        loadAssets();
+        requestAssets();
       });
     }
 
@@ -283,7 +353,7 @@
     if (initialTab && document.querySelector('.tab-btn[data-tab="' + initialTab + '"]')) {
       switchTab(initialTab);
     } else {
-      loadAssets();
+      requestAssets();
     }
     loadSummary();
   }
@@ -323,9 +393,9 @@
       }
     });
 
-    // Update filter visibility (venue filter only applies to models/images)
+    // Venue filter applies to all/models/images only.
     if (venueFilterSelect) {
-      var showVenueFilter = (tab === 'models' || tab === 'images');
+      var showVenueFilter = (tab === 'all' || tab === 'models' || tab === 'images');
       venueFilterSelect.style.display = showVenueFilter ? 'block' : 'none';
       if (!showVenueFilter) {
         venueFilter = '';
@@ -338,15 +408,23 @@
     if (searchBox) {
       searchBox.style.display = tab === 'history' ? 'none' : '';
     }
+    updateAssetFilterVisibility();
 
-    // Load content with fade effect
-    if (assetGrid) {
-      assetGrid.style.opacity = '0';
-      setTimeout(function() {
-        loadAssets();
-      }, 150);
-    } else {
-      loadAssets();
+    // Load immediately: request sequence invalidates any in-flight response.
+    requestAssets();
+  }
+
+  function isAssetTab(tab) {
+    return tab !== 'prompts' && tab !== 'history';
+  }
+
+  function updateAssetFilterVisibility() {
+    var showAssetFilters = isAssetTab(currentTab);
+    if (assetFilterControls) {
+      assetFilterControls.style.display = showAssetFilters ? '' : 'none';
+    }
+    if (assetDateRange) {
+      assetDateRange.hidden = !showAssetFilters || assetDatePreset !== 'custom';
     }
   }
 
@@ -364,10 +442,12 @@
         return 'document';
       case 'archives':
         return 'archive';
+      case 'all':
+        return '';
       case 'prompts':
         return 'prompt_doc';
       default:
-        return 'glb';
+        return '';
     }
   }
 
@@ -381,42 +461,155 @@
     return payload;
   }
 
-  function loadAssets() {
+  function pad2(value) {
+    return value < 10 ? '0' + value : String(value);
+  }
+
+  function formatLocalDate(date) {
+    return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
+  }
+
+  // Quick presets are inclusive local-date windows.
+  function computePresetRange(preset) {
+    if (preset === 'all') {
+      return { from: '', to: '' };
+    }
+    if (preset === 'custom') {
+      return null;
+    }
+    var today = new Date();
+    var from = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    if (preset === '7d') {
+      from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6);
+    } else if (preset === '30d') {
+      from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29);
+    }
+    return { from: formatLocalDate(from), to: formatLocalDate(today) };
+  }
+
+  function applyAssetDatePreset(preset) {
+    assetDatePreset = preset || 'all';
+    var range = computePresetRange(assetDatePreset);
+    if (range) {
+      assetDateFrom = range.from;
+      assetDateTo = range.to;
+    }
+    if (assetDateFromInput) assetDateFromInput.value = assetDateFrom;
+    if (assetDateToInput) assetDateToInput.value = assetDateTo;
+    if (assetDateRange) {
+      assetDateRange.hidden = !isAssetTab(currentTab) || assetDatePreset !== 'custom';
+    }
+  }
+
+  function isDateRangeValid(from, to) {
+    return !(from && to && from > to);
+  }
+
+  function validateAssetDateRange() {
+    if (!isDateRangeValid(assetDateFrom, assetDateTo)) {
+      showToast('开始日期不能晚于结束日期', 'warning');
+      return false;
+    }
+    return true;
+  }
+
+  function markHistoryPresetCustom() {
+    historyDatePreset = 'custom';
+    if (historyDatePresetSelect) historyDatePresetSelect.value = 'custom';
+  }
+
+  function applyHistoryDatePreset(preset) {
+    historyDatePreset = preset || 'all';
+    if (historyDatePreset === 'custom') return;
+    var range = computePresetRange(historyDatePreset);
+    historyDateFrom = range.from;
+    historyDateTo = range.to;
+    if (historyDateFromInput) historyDateFromInput.value = historyDateFrom;
+    if (historyDateToInput) historyDateToInput.value = historyDateTo;
+  }
+
+  function validateHistoryDateRange() {
+    if (!isDateRangeValid(historyDateFrom, historyDateTo)) {
+      showToast('开始日期不能晚于结束日期', 'warning');
+      return false;
+    }
+    return true;
+  }
+
+  function hasActiveAssetFilters() {
+    return Boolean(searchQuery) || Boolean(venueFilter) ||
+      Boolean(assetDateFrom) || Boolean(assetDateTo) || assetSort !== 'newest';
+  }
+
+  function resetAssetFilters() {
+    searchQuery = '';
+    if (searchInput) searchInput.value = '';
+    venueFilter = '';
+    if (venueFilterSelect) venueFilterSelect.value = '';
+    assetDatePreset = 'all';
+    if (assetDatePresetSelect) assetDatePresetSelect.value = 'all';
+    assetDateFrom = '';
+    assetDateTo = '';
+    if (assetDateFromInput) assetDateFromInput.value = '';
+    if (assetDateToInput) assetDateToInput.value = '';
+    assetSort = 'newest';
+    if (assetSortSelect) assetSortSelect.value = 'newest';
+    if (assetDateRange) assetDateRange.hidden = true;
+    currentPage = 1;
+    requestAssets();
+  }
+
+  function requestAssets() {
     if (currentTab === 'history') {
       loadGenerationHistory();
       return;
     }
-    if (!assetGrid || isLoading) return;
+    if (!assetGrid) return;
 
-    isLoading = true;
+    // Never issue a request with an inverted date range (e.g. after another
+    // filter changed while the invalid dates are still in the inputs).
+    if (isAssetTab(currentTab) && !isDateRangeValid(assetDateFrom, assetDateTo)) return;
+
+    var seq = ++loadSeq;
+    var tab = currentTab;
     resetPreviewState();
 
-    // Show loading skeleton
+    // Skeleton is owned by the newest request only; older responses are dropped.
     assetGrid.innerHTML = renderSkeletons();
     assetGrid.style.opacity = '1';
 
-    var endpoint = currentTab === 'prompts' ? '/api/prompts/documents' : '/api/assets';
+    var endpoint = tab === 'prompts' ? '/api/prompts/documents' : '/api/assets';
     var params = new URLSearchParams();
     params.append('limit', pageSize);
     params.append('offset', (currentPage - 1) * pageSize);
 
-    if (currentTab !== 'prompts') {
-      params.append('asset_type', getAssetTypeForTab());
+    if (tab !== 'prompts') {
+      var assetType = getAssetTypeForTab();
+      if (assetType) {
+        params.append('asset_type', assetType);
+      }
       if (venueFilter) {
         params.append('venue_type', venueFilter);
       }
       if (searchQuery) {
         params.append('q', searchQuery);
       }
+      if (assetDateFrom) {
+        params.append('created_after', assetDateFrom);
+      }
+      if (assetDateTo) {
+        params.append('created_before', assetDateTo);
+      }
+      params.append('sort', assetSort || 'newest');
     }
 
     window.AIGV.api(endpoint + '?' + params.toString())
       .then(function(responseData) {
-        isLoading = false;
+        if (seq !== loadSeq) return;
         responseData = responseData || {};
         var items = responseData.items || [];
-        var filteredItems = currentTab === 'prompts' ? filterItems(items) : items;
-        if (currentTab === 'prompts') {
+        var filteredItems = tab === 'prompts' ? filterItems(items) : items;
+        if (tab === 'prompts') {
           renderPromptDocuments(filteredItems);
         } else {
           renderAssets(filteredItems);
@@ -429,7 +622,7 @@
         renderPagination();
       })
       .catch(function(error) {
-        isLoading = false;
+        if (seq !== loadSeq) return;
         console.error('Error loading assets:', error);
         assetGrid.innerHTML = '<div class="empty-state-container"><p class="empty-desc">加载失败，请重试</p></div>';
         showToast(error && error.message ? error.message : '加载失败，请检查网络连接', 'error');
@@ -437,8 +630,10 @@
   }
 
   function loadGenerationHistory() {
-    if (!assetGrid || isLoading) return;
-    isLoading = true;
+    if (!assetGrid) return;
+    if (!isDateRangeValid(historyDateFrom, historyDateTo)) return;
+
+    var seq = ++loadSeq;
     resetPreviewState();
     assetGrid.innerHTML = renderSkeletons();
     assetGrid.style.opacity = '1';
@@ -450,10 +645,11 @@
     if (historyStatus) params.append('status', historyStatus);
     if (historyDateFrom) params.append('date_from', historyDateFrom);
     if (historyDateTo) params.append('date_to', historyDateTo);
+    params.append('sort', historySort || 'newest');
 
     window.AIGV.api('/api/generation/tasks?' + params.toString())
       .then(function(responseData) {
-        isLoading = false;
+        if (seq !== loadSeq) return;
         responseData = responseData || {};
         var items = responseData.items || [];
         renderGenerationTasks(items);
@@ -463,7 +659,7 @@
         renderPagination();
       })
       .catch(function(error) {
-        isLoading = false;
+        if (seq !== loadSeq) return;
         console.error('Error loading generation history:', error);
         assetGrid.innerHTML =
           '<div class="empty-state-container"><h3 class="empty-title">生成历史加载失败</h3>' +
@@ -537,14 +733,29 @@
     resetPreviewState();
     cacheAssetsById(assets);
     if (!assets.length) {
-      assetGrid.innerHTML = '\
-        <div class="empty-state-container">\
-          <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">\
-            <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>\
-          </svg>\
-          <h3 class="empty-title">暂无资产</h3>\
-          <p class="empty-desc">点击上方按钮上传资产</p>\
-        </div>';
+      if (hasActiveAssetFilters()) {
+        assetGrid.innerHTML =
+          '<div class="empty-state-container">' +
+          '<svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">' +
+          '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>' +
+          '<h3 class="empty-title">没有符合条件的素材</h3>' +
+          '<p class="empty-desc">尝试调整关键词、场馆、时间范围或排序。</p>' +
+          '<button type="button" class="btn-outline" id="empty-clear-filters">清除筛选</button>' +
+          '</div>';
+        var emptyClearBtn = assetGrid.querySelector('#empty-clear-filters');
+        if (emptyClearBtn) {
+          emptyClearBtn.addEventListener('click', resetAssetFilters);
+        }
+      } else {
+        assetGrid.innerHTML = '\
+          <div class="empty-state-container">\
+            <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">\
+              <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>\
+            </svg>\
+            <h3 class="empty-title">暂无资产</h3>\
+            <p class="empty-desc">点击上方按钮上传资产</p>\
+          </div>';
+      }
       return;
     }
 
@@ -1078,7 +1289,7 @@
         method: 'POST'
       }).then(function() {
         showToast('取消请求已提交', 'info');
-        loadAssets();
+        requestAssets();
       }).catch(function(error) {
         showToast((error && error.message) || '取消失败', 'error');
       });
@@ -1110,7 +1321,7 @@
     window.AIGV.api(endpoint, { method: 'POST', body: payload })
       .then(function() {
         showToast('已重新提交生成任务', 'success');
-        loadAssets();
+        requestAssets();
       })
       .catch(function(error) {
         showToast((error && error.message) || '重新生成失败', 'error');
@@ -1160,7 +1371,7 @@
       btn.addEventListener('click', function() {
         if (this.disabled) return;
         currentPage = parseInt(this.dataset.page);
-        loadAssets();
+        requestAssets();
         window.scrollTo({ top: 0, behavior: 'smooth' });
       });
     });
@@ -1271,7 +1482,7 @@
       }
       closeEditAssetModal();
       showToast('素材已更新', 'success');
-      loadAssets();
+      requestAssets();
       loadSummary();
     }).catch(function(error) {
       showToast((error && error.message) || '保存失败，请重试', 'error');
@@ -1366,7 +1577,7 @@
       .then(function() {
         showToast('上传成功!', 'success');
         closeModal();
-        loadAssets();
+        requestAssets();
         loadSummary();
       })
       .catch(function(error) {
@@ -1388,7 +1599,7 @@
         method: 'DELETE'
       }).then(function() {
         showToast('删除成功', 'success');
-        loadAssets();
+        requestAssets();
         loadSummary();
       }).catch(function(error) {
         console.error('Delete error:', error);

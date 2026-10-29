@@ -63,6 +63,15 @@
       <section class="library-controls-shell" aria-label="资产库控制区">
         <div class="library-controls-bar">
           <nav class="tab-nav tab-nav-segmented tab-nav-premium" role="tablist" aria-label="资产分类导航">
+            <button class="tab-btn" data-tab="all" role="tab" aria-selected="false" aria-controls="asset-grid" aria-label="查看全部素材">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <rect x="3" y="3" width="7" height="7" rx="1"/>
+                <rect x="14" y="3" width="7" height="7" rx="1"/>
+                <rect x="3" y="14" width="7" height="7" rx="1"/>
+                <rect x="14" y="14" width="7" height="7" rx="1"/>
+              </svg>
+              全部
+            </button>
             <button class="tab-btn active" data-tab="models" role="tab" aria-selected="true" aria-controls="asset-grid" aria-label="查看3D模型">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
@@ -143,6 +152,25 @@
                 <input type="text" id="search-input" placeholder="搜索资产、描述或关键词..." aria-label="搜索资产" />
               </div>
             </div>
+            <div class="toolbar-controls toolbar-controls-premium asset-filter-controls" id="asset-filter-controls">
+              <select id="asset-date-preset" class="filter-select" aria-label="素材时间范围">
+                <option value="all">全部时间</option>
+                <option value="today">今天</option>
+                <option value="7d">近7天</option>
+                <option value="30d">近30天</option>
+                <option value="custom">自定义</option>
+              </select>
+              <div class="asset-date-range" id="asset-date-range" hidden>
+                <label class="history-date-label">从 <input id="asset-date-from" type="date" class="ch-search-input" aria-label="素材开始日期" /></label>
+                <label class="history-date-label">到 <input id="asset-date-to" type="date" class="ch-search-input" aria-label="素材结束日期" /></label>
+              </div>
+              <select id="asset-sort" class="filter-select" aria-label="素材排序">
+                <option value="newest">最新</option>
+                <option value="oldest">最早</option>
+                <option value="name">名称</option>
+              </select>
+              <button type="button" class="btn-outline btn-sm" id="clear-filters">清除筛选</button>
+            </div>
             <div class="toolbar-controls toolbar-controls-premium">
               <select id="venue-filter" class="filter-select" aria-label="场馆过滤">
                 <option value="">全部场馆</option>
@@ -178,8 +206,19 @@
             <option value="cancelled">已取消</option>
             <option value="needs_review">待人工确认</option>
           </select>
+          <select id="history-date-preset" class="filter-select" aria-label="历史时间范围">
+            <option value="all">全部时间</option>
+            <option value="today">今天</option>
+            <option value="7d">近7天</option>
+            <option value="30d">近30天</option>
+            <option value="custom">自定义</option>
+          </select>
           <label class="history-date-label">从 <input id="history-date-from" type="date" class="ch-search-input" /></label>
           <label class="history-date-label">到 <input id="history-date-to" type="date" class="ch-search-input" /></label>
+          <select id="history-sort" class="filter-select" aria-label="历史排序">
+            <option value="newest">最新</option>
+            <option value="oldest">最早</option>
+          </select>
           <button type="button" class="btn-outline btn-sm" id="history-refresh">刷新</button>
         </div>
 

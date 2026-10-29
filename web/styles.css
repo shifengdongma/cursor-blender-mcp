@@ -9712,3 +9712,68 @@ a:focus-visible,
     height: 44px;
   }
 }
+
+/* ── Asset filter toolbar (time / sort / clear) ── */
+.asset-filter-controls {
+  flex: 0 1 auto;
+}
+
+.asset-filter-controls .filter-select,
+.history-filter-bar .filter-select {
+  width: auto;
+  min-width: 132px;
+  flex: 0 1 auto;
+}
+
+.history-filter-bar .filter-select {
+  min-width: 168px;
+}
+
+.history-filter-bar input[type="date"] {
+  width: auto;
+}
+
+.history-filter-bar[hidden] {
+  display: none;
+}
+
+.asset-date-range {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.asset-date-range[hidden] {
+  display: none;
+}
+
+.asset-date-range input {
+  width: auto;
+  max-width: 150px;
+}
+
+#clear-filters {
+  width: auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .asset-filter-controls,
+  .asset-date-range {
+    width: 100%;
+  }
+
+  .asset-filter-controls .filter-select {
+    min-width: 0;
+  }
+
+  .asset-date-range {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .asset-date-range input {
+    max-width: 100%;
+  }
+}

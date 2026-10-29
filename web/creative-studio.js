@@ -62,6 +62,22 @@
     return window.AIGV.api(path, options || {});
   }
 
+  // Provider configuration errors surface through AIGV.ApiError.code for HTTP
+  // failures; task failures only carry the backend error message, so also match
+  // codes embedded in the text and the configure_url hint.
+  function isProviderConfigError(error) {
+    if (!error) return false;
+    if (error.code === 'provider_not_configured' ||
+        error.code === 'provider_credential_missing') {
+      return true;
+    }
+    var message = typeof error === 'string' ? error : (error.message || '');
+    return message.indexOf('provider_not_configured') !== -1 ||
+      message.indexOf('provider_credential_missing') !== -1 ||
+      message.indexOf('/api-settings') !== -1 ||
+      message.indexOf('API 配置页') !== -1;
+  }
+
   // ---------------------------------------------------------------
   // Custom Modal Dialogs (replaces browser native confirm/prompt)
   // ---------------------------------------------------------------
@@ -337,6 +353,8 @@
     },
     analysisInProgress: false,
     analysisStage: '',
+    analysisError: '',
+    analysisNeedsConfig: false,
     conceptImages: {},
     imageGenInProgress: false,
     videoGenInProgress: false,
@@ -918,8 +936,8 @@
       state.videoGenStage = '';
     }
     var message = error && error.message ? error.message : '生成失败';
-    if (message.indexOf('provider_not_configured') >= 0 || message.indexOf('尚未接入') >= 0) {
-      showToast('生成模型未配置，请检查服务器 Provider 设置（去配置 API: /api-settings）', 'warning');
+    if (isProviderConfigError(error) || message.indexOf('尚未接入') >= 0) {
+      showToast('生成模型未配置，请前往 API 配置页填写 Provider 密钥（去配置 API: /api-settings）', 'warning');
     } else if (message.indexOf('需要人工确认') >= 0) {
       showToast(message, 'warning');
     } else {
@@ -1332,6 +1350,17 @@
       html += '</div>';
     }
 
+    // Persistent analysis error (toasts are transient and cannot contain links).
+    if (state.analysisError) {
+      html += '<div class="analysis-error card" role="alert">';
+      html += '  <p class="history-task-error">' + escapeHtml(state.analysisError) + '</p>';
+      if (state.analysisNeedsConfig) {
+        html += '  <p class="field-hint">LLM 服务尚未配置或凭据不可用，请先 ' +
+          '<a class="field-hint-link" href="/api-settings">去配置 API</a> 填写 LLM API Key。</p>';
+      }
+      html += '</div>';
+    }
+
     // Shot cards
     html += '<div class="shot-cards-section">';
     html += '  <h3>分镜脚本 <span class="badge">' + getShotsForActiveProject().length + '</span></h3>';
@@ -1409,6 +1438,8 @@
     if (state.analysisInProgress) return;
     state.analysisInProgress = true;
     state.analysisStage = '正在创建项目...';
+    state.analysisError = '';
+    state.analysisNeedsConfig = false;
     renderModule1();
 
     (async function() {
@@ -1502,7 +1533,9 @@
       } catch (e) {
         state.analysisInProgress = false;
         state.analysisStage = '';
-        if (e.message && e.message.indexOf('provider_not_configured') >= 0) {
+        state.analysisError = (e && e.message) || '需求分析失败';
+        state.analysisNeedsConfig = isProviderConfigError(e);
+        if (state.analysisNeedsConfig) {
           showToast('LLM 服务未配置，请先配置 LLM API Key（去配置 API: /api-settings）', 'warning');
         } else {
           showToast('分析失败: ' + e.message, 'error');
@@ -2835,7 +2868,7 @@
           });
           showToast('配音任务已完成', 'success');
         } catch (e) {
-          if (e.message && e.message.indexOf('provider_not_configured') >= 0) {
+          if (e && e.code === 'provider_not_configured') {
             showToast('TTS 服务未配置（需要 Piper 模型）', 'warning');
           } else {
             showToast('配音失败: ' + e.message, 'error');

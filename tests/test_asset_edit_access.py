@@ -131,6 +131,7 @@ def test_edit_metadata_and_validation(client):
         {"name": 123},
         {"description": "x" * 2001},
         {"venue_type": "moon_base"},
+        {"venue_type": []},
         {"visibility": "public"},
         {"metadata": ["not", "a", "dict"]},
     ):
@@ -183,3 +184,37 @@ def test_can_edit_flag(client, tmp_path):
     assert admin_item["owner_user_id"]
     admin_detail = admin_client.get("/api/assets/{0}".format(asset_id)).get_json()["data"]
     assert admin_detail["can_edit"] is True
+
+
+def test_ownerless_asset_cannot_be_made_private(client, tmp_path):
+    from backend.asset_service import AssetService
+
+    service = AssetService(str(tmp_path))
+    asset = service.create_asset(name="Legacy shared", asset_type="image")
+    assert asset.owner_user_id is None
+    assert asset.visibility == "shared"
+
+    support.register_and_login(client, "legacy_viewer")
+    _set_tenant("legacy_viewer", "tenant_legacy")
+    listing = client.get("/api/assets").get_json()["data"]
+    item = next(entry for entry in listing["items"] if entry["id"] == asset.id)
+    assert item["visibility"] == "shared"
+    assert item["can_edit"] is False
+    assert client.get("/api/assets/{0}".format(asset.id)).status_code == 200
+
+    support.create_admin(tmp_path)
+    admin_client = client.application.test_client()
+    _, admin_token = support.login_and_token(admin_client, "rootadmin", "AdminPass12345")
+    response = admin_client.put(
+        "/api/assets/{0}".format(asset.id),
+        json={"visibility": "private"},
+        headers=support.auth_headers(admin_token),
+    )
+    assert response.status_code == 400, response.get_json()
+    assert response.get_json()["error"] == "invalid_asset_update"
+    assert service.get_asset(asset.id).visibility == "shared"
+
+    listing = client.get("/api/assets").get_json()["data"]
+    item = next(entry for entry in listing["items"] if entry["id"] == asset.id)
+    assert item["visibility"] == "shared"
+    assert client.get("/api/assets/{0}".format(asset.id)).status_code == 200

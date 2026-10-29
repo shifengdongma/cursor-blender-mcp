@@ -110,6 +110,8 @@ class AssetService(object):
     def _validate_venue(self, venue_type):
         if venue_type in (None, ''):
             return None
+        if not isinstance(venue_type, str):
+            raise AssetServiceError("Unsupported venue_type")
         if venue_type not in self.VALID_VENUES:
             raise AssetServiceError("Unsupported venue_type")
         return venue_type
@@ -292,6 +294,10 @@ class AssetService(object):
                 value = self._validate_venue(value)
             elif key == 'visibility':
                 value = self._validate_visibility(value)
+                # Ownerless rows are the historical shared library; the
+                # read rule and list predicate require them to stay shared.
+                if value == 'private' and asset.owner_user_id is None:
+                    raise AssetServiceError("无主历史素材必须保持共享，不能设为私有")
             elif key == 'metadata' and value is not None and not isinstance(value, dict):
                 raise AssetServiceError("metadata must be an object")
             setattr(asset, key, value)

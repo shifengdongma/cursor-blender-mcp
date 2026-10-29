@@ -11,6 +11,7 @@ import os
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +67,13 @@ class Database(object):
                 timeout=30.0
             )
             self._local.conn.row_factory = sqlite3.Row
-            # Enable foreign keys
+            # Enable foreign keys and sane contention defaults per connection.
             self._local.conn.execute('PRAGMA foreign_keys = ON')
+            self._local.conn.execute('PRAGMA busy_timeout = 5000')
+            try:
+                self._local.conn.execute('PRAGMA journal_mode = WAL')
+            except sqlite3.OperationalError:
+                logger.warning("Could not enable WAL mode for %s", self.db_path)
         return self._local.conn
 
     def _init_schema(self):
@@ -78,6 +84,18 @@ class Database(object):
         # Enable WAL mode for better concurrent read/write performance
         cursor.execute('PRAGMA journal_mode=WAL')
         cursor.execute('PRAGMA busy_timeout=5000')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT,
+                applied_at INTEGER
+            )
+        ''')
+        cursor.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+            (1, "baseline_schema", _now()),
+        )
 
         # Assets table (3D models, images, prompt documents)
         cursor.execute('''
@@ -776,9 +794,94 @@ class Database(object):
                 failed_login_count INTEGER DEFAULT 0,
                 locked_until INTEGER,
                 created_at INTEGER,
-                updated_at INTEGER
+                updated_at INTEGER,
+                nickname TEXT,
+                avatar_path TEXT,
+                bio TEXT,
+                role TEXT NOT NULL DEFAULT 'user',
+                status TEXT NOT NULL DEFAULT 'active',
+                session_version INTEGER NOT NULL DEFAULT 0,
+                terms_accepted_at INTEGER
             )
         ''')
+
+        # Per-user AI provider credentials.  Key material is encrypted by
+        # backend.credential_service; this table never stores plaintext.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS provider_credentials (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                tenant_id TEXT,
+                provider TEXT NOT NULL,
+                base_url TEXT,
+                model TEXT,
+                api_key_ciphertext TEXT,
+                model_overrides TEXT,
+                is_active INTEGER DEFAULT 1,
+                last_verified_at INTEGER,
+                created_at INTEGER,
+                updated_at INTEGER,
+                UNIQUE(user_id, provider)
+            )
+        ''')
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_provider_credentials_user '
+            'ON provider_credentials(user_id)'
+        )
+
+        # Incremental migrations for existing databases (never rebuild tables).
+        self._ensure_column(cursor, 'auth_users', 'nickname', 'TEXT')
+        self._ensure_column(cursor, 'auth_users', 'avatar_path', 'TEXT')
+        self._ensure_column(cursor, 'auth_users', 'bio', 'TEXT')
+        self._ensure_column(cursor, 'auth_users', 'role', "TEXT NOT NULL DEFAULT 'user'")
+        self._ensure_column(cursor, 'auth_users', 'status', "TEXT NOT NULL DEFAULT 'active'")
+        self._ensure_column(cursor, 'auth_users', 'session_version', 'INTEGER NOT NULL DEFAULT 0')
+        self._ensure_column(cursor, 'auth_users', 'terms_accepted_at', 'INTEGER')
+        self._ensure_column(cursor, 'assets', 'owner_user_id', 'TEXT')
+        self._ensure_column(cursor, 'assets', 'tenant_id', 'TEXT')
+        self._ensure_column(cursor, 'assets', 'visibility', "TEXT DEFAULT 'private'")
+        self._ensure_column(cursor, 'assets', 'checksum_sha256', 'TEXT')
+        self._ensure_column(cursor, 'storyboard_shots', 'keyframe_asset_id', 'TEXT')
+        self._ensure_column(cursor, 'generation_tasks', 'provider', 'TEXT')
+        self._ensure_column(cursor, 'generation_tasks', 'model_id', 'TEXT')
+        self._ensure_column(cursor, 'generation_tasks', 'provider_job_id', 'TEXT')
+        self._ensure_column(cursor, 'generation_tasks', 'provider_status', 'TEXT')
+        self._ensure_column(cursor, 'generation_tasks', 'attempt_count', 'INTEGER DEFAULT 0')
+        self._ensure_column(cursor, 'generation_tasks', 'max_attempts', 'INTEGER DEFAULT 3')
+        self._ensure_column(cursor, 'generation_tasks', 'next_retry_at', 'INTEGER')
+        self._ensure_column(cursor, 'generation_tasks', 'lease_expires_at', 'INTEGER')
+        self._ensure_column(cursor, 'generation_tasks', 'lease_owner', 'TEXT')
+        self._ensure_column(cursor, 'generation_tasks', 'submission_uncertain', 'INTEGER DEFAULT 0')
+        self._ensure_column(cursor, 'generation_tasks', 'submission_started_at', 'INTEGER')
+        self._ensure_column(cursor, 'generation_tasks', 'poll_error_count', 'INTEGER DEFAULT 0')
+        self._ensure_column(cursor, 'generation_tasks', 'last_polled_at', 'INTEGER')
+        self._ensure_column(cursor, 'generation_tasks', 'output_asset_id', 'TEXT')
+        self._ensure_column(cursor, 'generation_tasks', 'client_request_id', 'TEXT')
+        self._ensure_column(cursor, 'generation_tasks', 'cost_estimate', 'REAL')
+        self._ensure_column(cursor, 'generation_tasks', 'currency', 'TEXT')
+        self._ensure_column(cursor, 'generation_tasks', 'cancel_requested', 'INTEGER DEFAULT 0')
+        self._ensure_column(cursor, 'ops_events', 'actor_user_id', 'TEXT')
+        self._ensure_column(cursor, 'ops_events', 'request_id', 'TEXT')
+
+        # Normalise legacy auth status/nickname values.
+        cursor.execute(
+            "UPDATE auth_users SET nickname = username "
+            "WHERE nickname IS NULL OR TRIM(nickname) = ''"
+        )
+        cursor.execute(
+            "UPDATE auth_users SET status = CASE WHEN is_active = 0 THEN 'disabled' ELSE 'active' END "
+            "WHERE status IS NULL OR TRIM(status) = ''"
+        )
+        cursor.execute(
+            "UPDATE auth_users SET role = 'user' WHERE role IS NULL OR TRIM(role) = ''"
+        )
+        cursor.execute(
+            "UPDATE auth_users SET session_version = 0 WHERE session_version IS NULL"
+        )
+        cursor.execute(
+            "UPDATE assets SET visibility = 'shared' "
+            "WHERE owner_user_id IS NULL AND (visibility IS NULL OR visibility = 'private')"
+        )
 
         # Phase 3 indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_rules_tenant ON alert_rules(tenant_id)')
@@ -790,6 +893,42 @@ class Database(object):
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_task_attempts_job ON task_attempts(job_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_auth_users_username ON auth_users(username)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_auth_users_tenant ON auth_users(tenant_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_auth_users_role_status ON auth_users(role, status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_user_id, asset_type)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_assets_visibility ON assets(visibility)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_creative_projects_user ON creative_projects(user_id, created_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_tasks_created_by ON generation_tasks(created_by, created_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_tasks_due ON generation_tasks(status, next_retry_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_tasks_provider_job ON generation_tasks(provider_job_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_tasks_lease ON generation_tasks(lease_expires_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_ops_actor_time ON ops_events(actor_user_id, created_at)')
+
+        # Case-insensitive uniqueness.  These are best-effort here so an old
+        # database with case-only duplicates can still start; the migration
+        # script reports conflicts before creating the final indexes.
+        try:
+            cursor.execute(
+                'CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_users_username_nocase '
+                'ON auth_users(username COLLATE NOCASE)'
+            )
+        except sqlite3.IntegrityError:
+            logger.warning("auth_users has case-insensitive username duplicates; migration required")
+        try:
+            cursor.execute(
+                'CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_users_email_nocase '
+                "ON auth_users(email COLLATE NOCASE) "
+                "WHERE email IS NOT NULL AND TRIM(email) <> ''"
+            )
+        except sqlite3.IntegrityError:
+            logger.warning("auth_users has case-insensitive email duplicates; migration required")
+        try:
+            cursor.execute(
+                'CREATE UNIQUE INDEX IF NOT EXISTS idx_gen_tasks_idempotency '
+                'ON generation_tasks(created_by, client_request_id) '
+                'WHERE client_request_id IS NOT NULL AND client_request_id <> \'\''
+            )
+        except sqlite3.IntegrityError:
+            logger.warning("generation_tasks has duplicate client_request_id values")
 
         conn.commit()
         logger.info("Database schema initialized at %s", self.db_path)
@@ -832,6 +971,32 @@ class Database(object):
             cursor.executemany(query, params_list)
             conn.commit()
             return cursor.rowcount
+
+    @contextmanager
+    def transaction(self):
+        """Run multiple statements atomically on the current thread connection.
+
+        Usage:
+            with db.transaction() as cursor:
+                cursor.execute(...)
+
+        Do not call db.insert/db.update inside this block; they take the same
+        non-reentrant lock.  Use the yielded cursor directly.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            if conn.in_transaction:
+                conn.rollback()
+            cursor = conn.cursor()
+            try:
+                cursor.execute('BEGIN IMMEDIATE')
+                yield cursor
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
 
     def fetch_one(self, query, params=None):
         """
@@ -985,6 +1150,28 @@ def get_database(db_path=None):
             db_path = os.path.join(data_dir, 'aigv.db')
         _db_instance = Database(db_path)
     return _db_instance
+
+
+def init_database(data_dir=None):
+    """Initialise the process-wide database for an application data directory.
+
+    The app factory must call this before constructing services.  Creating two
+    apps with different data directories in one process is rejected to avoid
+    accidentally writing to the wrong tenant database.
+    """
+    data_dir = data_dir or os.environ.get('DATA_DIR', './data')
+    db_path = os.path.join(data_dir, 'aigv.db')
+    global _db_instance
+    if _db_instance is not None:
+        if os.path.abspath(_db_instance.db_path) != os.path.abspath(db_path):
+            raise RuntimeError(
+                "Database already initialised at {0} (requested {1}); "
+                "call reset_database() between app factories".format(
+                    _db_instance.db_path, db_path
+                )
+            )
+        return _db_instance
+    return get_database(db_path)
 
 
 def reset_database():

@@ -44,17 +44,17 @@
           <div class="stats-row stats-row-premium" id="stats-row" aria-label="资产库统计">
             <div class="stat-item">
               <div class="stat-label">3D Models</div>
-              <div class="stat-number">5</div>
+              <div class="stat-number">—</div>
               <div class="content-note-desc">可用于空间锚点与白模预览</div>
             </div>
             <div class="stat-item">
               <div class="stat-label">Prompt Docs</div>
-              <div class="stat-number">16</div>
+              <div class="stat-number">—</div>
               <div class="content-note-desc">覆盖场馆、镜头、光影与风格语义</div>
             </div>
             <div class="stat-item">
               <div class="stat-label">Venue Presets</div>
-              <div class="stat-number">4</div>
+              <div class="stat-number">—</div>
               <div class="content-note-desc">服务剧院、画廊、博物馆与音乐厅</div>
             </div>
           </div>
@@ -125,6 +125,13 @@
               </svg>
               Prompt文档
             </button>
+            <button class="tab-btn" data-tab="history" role="tab" aria-selected="false" aria-controls="asset-grid" aria-label="查看生成历史">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"/>
+                <polyline points="12 7 12 12 15 14"/>
+              </svg>
+              生成历史
+            </button>
           </nav>
 
           <div class="filter-toolbar filter-toolbar-premium">
@@ -155,6 +162,26 @@
               </button>
             </div>
           </div>
+        </div>
+
+        <div class="history-filter-bar" id="history-filter-bar" hidden>
+          <select id="history-type-filter" class="filter-select" aria-label="生成类型">
+            <option value="">全部类型</option>
+            <option value="image">图片</option>
+            <option value="video">视频</option>
+          </select>
+          <select id="history-status-filter" class="filter-select" aria-label="任务状态">
+            <option value="">全部状态</option>
+            <option value="queued">排队中</option>
+            <option value="running">生成中</option>
+            <option value="succeeded">已完成</option>
+            <option value="failed">失败</option>
+            <option value="cancelled">已取消</option>
+            <option value="needs_review">待人工确认</option>
+          </select>
+          <label class="history-date-label">从 <input id="history-date-from" type="date" class="ch-search-input" /></label>
+          <label class="history-date-label">到 <input id="history-date-to" type="date" class="ch-search-input" /></label>
+          <button type="button" class="btn-outline btn-sm" id="history-refresh">刷新</button>
         </div>
 
         <div class="library-content-head library-content-head-premium">
@@ -236,6 +263,65 @@
       </div>
     </div>
 
+    <div id="edit-asset-modal" class="modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="edit-asset-modal-title" aria-describedby="edit-asset-modal-desc">
+      <div class="modal-content asset-edit-modal">
+        <div class="modal-header">
+          <div>
+            <p class="panel-kicker">Asset Edit</p>
+            <h2 id="edit-asset-modal-title">编辑素材</h2>
+            <p id="edit-asset-modal-desc" class="modal-desc">修改名称、场馆、描述与可见性；类型与文件本身不可更改。</p>
+          </div>
+          <button type="button" class="modal-close" id="edit-asset-close" aria-label="关闭编辑窗口">&times;</button>
+        </div>
+        <form id="edit-asset-form">
+          <input type="hidden" id="edit-asset-id" />
+          <div class="asset-edit-readonly">
+            <div class="asset-edit-readonly-item">
+              <span>类型</span>
+              <strong id="edit-asset-type">—</strong>
+            </div>
+            <div class="asset-edit-readonly-item">
+              <span>文件大小</span>
+              <strong id="edit-asset-size">—</strong>
+            </div>
+          </div>
+          <div class="form-group form-group-spaced">
+            <label for="edit-asset-name">素材名称 <span class="field-required" aria-hidden="true">*</span></label>
+            <input type="text" id="edit-asset-name" name="name" maxlength="120" required autocomplete="off" placeholder="输入素材名称" />
+          </div>
+          <div class="form-group form-group-spaced">
+            <label for="edit-asset-venue">场馆类型</label>
+            <select id="edit-asset-venue" name="venue_type">
+              <option value="">通用</option>
+              <option value="grand_theater">大剧院</option>
+              <option value="modern_gallery">现代画廊</option>
+              <option value="ancient_museum">古典博物馆</option>
+              <option value="concert_hall">音乐厅</option>
+            </select>
+          </div>
+          <div class="form-group form-group-spaced">
+            <label for="edit-asset-desc">描述</label>
+            <textarea id="edit-asset-desc" name="description" rows="4" maxlength="2000" placeholder="素材描述..."></textarea>
+          </div>
+          <div class="form-group form-group-spaced">
+            <label for="edit-asset-visibility">可见性</label>
+            <select id="edit-asset-visibility" name="visibility">
+              <option value="private">私有</option>
+              <option value="shared">共享</option>
+            </select>
+            <p class="field-hint">私有仅自己可见；共享对同租户成员可见，但只有所有者可编辑。</p>
+          </div>
+          <div class="form-actions form-actions-split form-group-spaced">
+            <button type="button" class="btn-outline" id="edit-asset-cancel">取消</button>
+            <button type="submit" class="btn-primary" id="edit-asset-save">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="/web/runtime-config.js"></script>
+    <script src="/web/api-client.js"></script>
     <script src="/web/assets.js"></script>
+    <script src="/web/session-nav.js"></script>
   </body>
 </html>

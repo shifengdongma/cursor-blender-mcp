@@ -86,6 +86,102 @@ def test_user_isolation_and_placeholder(app):
     assert platform["source"] == "platform"
 
 
+@pytest.mark.parametrize(
+    "placeholder",
+    [
+        "", "placeholder", " placeholder ", "PLACEHOLDER", "your_api_key",
+        "your-api-key", "your key", "changeme", "change-me", "none", "null",
+    ],
+)
+def test_user_supplied_placeholder_key_is_unconfigured(app, placeholder):
+    svc, cfg = _service(app)
+    user = support.create_admin(cfg.DATA_DIR, username="credplaceholder")
+    cfg.LLM_API_KEY = "platform-key"
+
+    svc.upsert(user["id"], user.get("tenant_id"), "llm", api_key=placeholder)
+
+    row = svc.get_record(user["id"], "llm")
+    assert row is not None
+    assert row["api_key_ciphertext"] is None
+
+    public = svc.list_public(user["id"], cfg)[0]
+    assert public["has_key"] is False
+    assert public["key_last4"] is None
+
+    effective = svc.effective(user["id"], "llm", cfg)
+    assert effective["api_key"] == "platform-key"
+    assert effective["source"] == "platform"
+
+    cfg.LLM_API_KEY = ""
+    assert svc.effective(user["id"], "llm", cfg)["source"] is None
+
+
+def test_placeholder_key_with_custom_base_url_is_rejected(app):
+    svc, cfg = _service(app)
+    user = support.create_admin(cfg.DATA_DIR, username="credplaceurl")
+
+    with pytest.raises(CredentialError) as exc:
+        svc.upsert(
+            user["id"], user.get("tenant_id"), "llm",
+            api_key="your_api_key",
+            base_url="https://93.184.216.34/v1",
+        )
+    assert exc.value.code == "user_key_required"
+    assert exc.value.status_code == 400
+    assert svc.get_record(user["id"], "llm") is None
+
+
+def _store_legacy_placeholder(svc, cfg, user, api_key="changeme", base_url=None):
+    """Persist a placeholder key directly, simulating rows saved before normalisation."""
+    svc.upsert(user["id"], user.get("tenant_id"), "llm")
+    svc.db.update(
+        "provider_credentials",
+        {"api_key_ciphertext": svc._encrypt(api_key, cfg), "base_url": base_url},
+        "user_id = ? AND provider = ?",
+        (user["id"], "llm"),
+    )
+
+
+def test_stored_placeholder_key_is_unconfigured(app):
+    svc, cfg = _service(app)
+    user = support.create_admin(cfg.DATA_DIR, username="credlegacy")
+    cfg.LLM_API_KEY = "platform-key"
+    _store_legacy_placeholder(svc, cfg, user)
+
+    public = svc.list_public(user["id"], cfg)[0]
+    assert public["has_key"] is False
+    assert public["key_last4"] is None
+
+    effective = svc.effective(user["id"], "llm", cfg)
+    assert effective["api_key"] == "platform-key"
+    assert effective["source"] == "platform"
+
+    cfg.LLM_API_KEY = ""
+    assert svc.effective(user["id"], "llm", cfg)["source"] is None
+    assert svc.has_provider(user["id"], "llm", cfg)[0] is False
+
+
+def test_stored_placeholder_key_with_custom_base_url_requires_user_key(app):
+    svc, cfg = _service(app)
+    user = support.create_admin(cfg.DATA_DIR, username="credlegacyurl")
+    cfg.LLM_API_KEY = "platform-key"
+    _store_legacy_placeholder(
+        svc, cfg, user, base_url="https://93.184.216.34/v1",
+    )
+
+    with pytest.raises(CredentialError) as exc:
+        svc.effective(user["id"], "llm", cfg)
+    assert exc.value.code == "user_key_required"
+
+    # Saving over a legacy placeholder row must also refuse a custom base URL.
+    with pytest.raises(CredentialError) as exc:
+        svc.upsert(
+            user["id"], user.get("tenant_id"), "llm",
+            base_url="https://93.184.216.34/v1",
+        )
+    assert exc.value.code == "user_key_required"
+
+
 def test_validate_base_url_rejects_private_and_http(app):
     svc, cfg = _service(app)
 

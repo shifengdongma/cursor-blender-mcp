@@ -292,7 +292,11 @@ class CredentialService(object):
             key_value = str(api_key).strip()
             if len(key_value) > _LENGTH_LIMITS["api_key"]:
                 raise CredentialError("invalid_api_key", "API Key 过长", 400)
-            ciphertext = self._encrypt(key_value, cfg)
+            if _key_present(key_value):
+                ciphertext = self._encrypt(key_value, cfg)
+            else:
+                # 占位符一律视为未配置：等同未提交 api_key，保留已有密钥。
+                ciphertext = existing.get("api_key_ciphertext") if existing else None
         elif existing:
             ciphertext = existing.get("api_key_ciphertext")
         else:
@@ -324,6 +328,8 @@ class CredentialService(object):
             final_active = 1 if is_active else 0
 
         user_key, _ = self._decrypt(ciphertext, cfg) if ciphertext else (None, None)
+        if not _key_present(user_key):
+            user_key = None
         platform = self._platform_credentials(provider, cfg)
         if final_base_url and final_base_url != platform.get("base_url"):
             if not user_key:
@@ -395,6 +401,8 @@ class CredentialService(object):
             return platform
 
         user_key, decrypt_error = self._decrypt(row.get("api_key_ciphertext"), cfg)
+        if not _key_present(user_key):
+            user_key = None
         try:
             overrides = json.loads(row.get("model_overrides") or "{}")
         except (ValueError, TypeError):
@@ -487,6 +495,10 @@ class CredentialService(object):
             return None
         cfg = self._config(cfg)
         user_key, decrypt_error = self._decrypt(row.get("api_key_ciphertext"), cfg)
+        if decrypt_error:
+            stored_key = bool(row.get("api_key_ciphertext"))
+        else:
+            stored_key = _key_present(user_key)
         try:
             source = self.effective(row["user_id"], row["provider"], cfg).get("source")
         except CredentialError:
@@ -496,8 +508,8 @@ class CredentialService(object):
             "base_url": row.get("base_url"),
             "model": row.get("model"),
             "model_overrides": self._load_overrides(row.get("model_overrides")),
-            "has_key": bool(row.get("api_key_ciphertext")),
-            "key_last4": (user_key[-4:] if user_key else None),
+            "has_key": stored_key,
+            "key_last4": (user_key[-4:] if _key_present(user_key) else None),
             "key_unreadable": bool(decrypt_error),
             "source": source,
             "is_active": bool(row.get("is_active", 1)),

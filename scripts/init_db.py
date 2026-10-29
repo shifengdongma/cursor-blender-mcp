@@ -77,6 +77,10 @@ def create_asset_directories(data_dir):
         'assets/prompts/venues',
         'assets/prompts/shots',
         'assets/prompts/styles',
+        'assets/videos',
+        'assets/audio',
+        'assets/documents',
+        'assets/archives',
     ]
 
     for rel_path in directories:

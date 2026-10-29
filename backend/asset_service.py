@@ -33,12 +33,34 @@ class AssetService(object):
     TYPE_IMAGE = 'image'
     TYPE_PROMPT_DOC = 'prompt_doc'
     TYPE_SPATIAL_ANCHOR = 'spatial_anchor'
+    TYPE_VIDEO = 'video'
+    TYPE_AUDIO = 'audio'
+    TYPE_DOCUMENT = 'document'
+    TYPE_ARCHIVE = 'archive'
 
     # Venue type constants
     VENUE_THEATER = 'grand_theater'
     VENUE_GALLERY = 'modern_gallery'
     VENUE_MUSEUM = 'ancient_museum'
     VENUE_CONCERT = 'concert_hall'
+
+    # Allowed file extensions by asset type (authoritative whitelist).
+    # The extension is the authoritative basis for classification on upload.
+    ALLOWED_EXTENSIONS = {
+        TYPE_GLB: ['glb', 'gltf', 'obj', 'fbx', 'stl', 'blend', 'dae', '3ds', 'ply'],
+        TYPE_IMAGE: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'tiff', 'tif', 'ico', 'heic', 'avif'],
+        TYPE_VIDEO: ['mp4', 'mov', 'avi', 'webm', 'mkv', 'flv', 'm4v', 'mpeg', 'mpg', 'wmv'],
+        TYPE_AUDIO: ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma', 'opus'],
+        TYPE_DOCUMENT: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'csv', 'rtf', 'odt', 'json', 'xml', 'yaml', 'yml'],
+        TYPE_ARCHIVE: ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'],
+    }
+
+    # Reverse lookup: extension -> asset type (computed at class definition time)
+    _EXTENSION_TO_TYPE = {
+        ext: asset_type
+        for asset_type, exts in ALLOWED_EXTENSIONS.items()
+        for ext in exts
+    }
 
     def __init__(self, data_dir=None):
         """
@@ -59,7 +81,8 @@ class AssetService(object):
         subdirs = [
             'models/theater', 'models/gallery', 'models/museum', 'models/concert',
             'images/textures', 'images/previews', 'images/references',
-            'prompts/venues', 'prompts/shots', 'prompts/styles'
+            'prompts/venues', 'prompts/shots', 'prompts/styles',
+            'videos', 'audio', 'documents', 'archives'
         ]
         for subdir in subdirs:
             path = os.path.join(self.assets_dir, subdir)
@@ -85,8 +108,38 @@ class AssetService(object):
             return os.path.join('images', 'references', filename) if filename else os.path.join('images', 'references')
         elif asset_type == self.TYPE_PROMPT_DOC:
             return os.path.join('prompts', filename) if filename else 'prompts'
+        elif asset_type == self.TYPE_VIDEO:
+            return os.path.join('videos', filename) if filename else 'videos'
+        elif asset_type == self.TYPE_AUDIO:
+            return os.path.join('audio', filename) if filename else 'audio'
+        elif asset_type == self.TYPE_DOCUMENT:
+            return os.path.join('documents', filename) if filename else 'documents'
+        elif asset_type == self.TYPE_ARCHIVE:
+            return os.path.join('archives', filename) if filename else 'archives'
         else:
             return filename
+
+    def classify_filename(self, filename):
+        """
+        Classify a filename into an asset type by extension.
+
+        Args:
+            filename: Original filename (may be None)
+
+        Returns:
+            str or None: asset type, or None if extension is unsupported
+        """
+        ext = os.path.splitext(filename or '')[1].lstrip('.').lower()
+        return self._EXTENSION_TO_TYPE.get(ext)
+
+    def allowed_extensions_list(self):
+        """
+        Return a flat list of all allowed file extensions.
+
+        Returns:
+            list: Sorted list of extensions
+        """
+        return sorted(self._EXTENSION_TO_TYPE.keys())
 
     def list_assets(self, asset_type=None, venue_type=None, limit=100, offset=0):
         """

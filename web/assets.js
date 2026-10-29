@@ -15,6 +15,26 @@
   var venueFilter = '';
   var isLoading = false;
 
+  // Extension -> asset type whitelist (mirrors backend/asset_service.py)
+  var ALLOWED_EXTENSIONS = {
+    'glb': 'glb', 'gltf': 'glb', 'obj': 'glb', 'fbx': 'glb', 'stl': 'glb',
+    'blend': 'glb', 'dae': 'glb', '3ds': 'glb', 'ply': 'glb',
+    'png': 'image', 'jpg': 'image', 'jpeg': 'image', 'webp': 'image',
+    'gif': 'image', 'svg': 'image', 'bmp': 'image', 'tiff': 'image',
+    'tif': 'image', 'ico': 'image', 'heic': 'image', 'avif': 'image',
+    'mp4': 'video', 'mov': 'video', 'avi': 'video', 'webm': 'video',
+    'mkv': 'video', 'flv': 'video', 'm4v': 'video', 'mpeg': 'video',
+    'mpg': 'video', 'wmv': 'video',
+    'mp3': 'audio', 'wav': 'audio', 'ogg': 'audio', 'flac': 'audio',
+    'aac': 'audio', 'm4a': 'audio', 'wma': 'audio', 'opus': 'audio',
+    'pdf': 'document', 'doc': 'document', 'docx': 'document', 'xls': 'document',
+    'xlsx': 'document', 'ppt': 'document', 'pptx': 'document', 'txt': 'document',
+    'md': 'document', 'csv': 'document', 'rtf': 'document', 'odt': 'document',
+    'json': 'document', 'xml': 'document', 'yaml': 'document', 'yml': 'document',
+    'zip': 'archive', 'rar': 'archive', '7z': 'archive', 'tar': 'archive',
+    'gz': 'archive', 'bz2': 'archive', 'xz': 'archive'
+  };
+
   // Toast notification system
   var toastContainer = null;
 
@@ -205,9 +225,14 @@
       }
     });
 
-    // Update filter visibility
+    // Update filter visibility (venue filter only applies to models/images)
     if (venueFilterSelect) {
-      venueFilterSelect.style.display = tab === 'prompts' ? 'none' : 'block';
+      var showVenueFilter = (tab === 'models' || tab === 'images');
+      venueFilterSelect.style.display = showVenueFilter ? 'block' : 'none';
+      if (!showVenueFilter) {
+        venueFilter = '';
+        venueFilterSelect.value = '';
+      }
     }
 
     // Load content with fade effect
@@ -227,6 +252,14 @@
         return 'glb';
       case 'images':
         return 'image';
+      case 'videos':
+        return 'video';
+      case 'audio':
+        return 'audio';
+      case 'documents':
+        return 'document';
+      case 'archives':
+        return 'archive';
       case 'prompts':
         return 'prompt_doc';
       default:
@@ -423,6 +456,10 @@
       return '<model-viewer src="/data/assets/' + asset.file_path + '" camera-controls touch-action="pan-y" interaction-prompt="none"></model-viewer>';
     } else if (asset.asset_type === 'image' && asset.file_path) {
       return '<img src="/data/assets/' + asset.file_path + '" alt="' + escapeHtml(asset.name) + '" loading="lazy" onload="this.classList.add(\'loaded\')" />';
+    } else if (asset.asset_type === 'video' && asset.file_path) {
+      return '<video src="/data/assets/' + asset.file_path + '" controls></video>';
+    } else if (asset.asset_type === 'audio' && asset.file_path) {
+      return '<audio src="/data/assets/' + asset.file_path + '" controls></audio>';
     } else {
       return '\
         <svg class="placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">\
@@ -581,10 +618,11 @@
       var typeSelect = document.getElementById('asset-type');
       if (typeSelect) {
         var ext = file.name.split('.').pop().toLowerCase();
-        if (ext === 'glb' || ext === 'gltf') {
-          typeSelect.value = 'glb';
-        } else if (['png', 'jpg', 'jpeg', 'webp', 'gif'].indexOf(ext) !== -1) {
-          typeSelect.value = 'image';
+        var detectedType = ALLOWED_EXTENSIONS[ext];
+        if (detectedType) {
+          typeSelect.value = detectedType;
+        } else {
+          showToast('不支持的文件格式: .' + ext, 'warning');
         }
       }
 
@@ -602,6 +640,14 @@
 
     if (!fileInput.files.length) {
       showToast('请选择文件', 'warning');
+      return;
+    }
+
+    // Pre-validate extension before upload (backend remains authoritative)
+    var uploadFileName = fileInput.files[0].name;
+    var uploadExt = uploadFileName.split('.').pop().toLowerCase();
+    if (!ALLOWED_EXTENSIONS[uploadExt]) {
+      showToast('不支持的文件格式: .' + uploadExt, 'error');
       return;
     }
 
@@ -754,6 +800,10 @@
     var labels = {
       'glb': '3D模型',
       'image': '图片',
+      'video': '视频',
+      'audio': '音频',
+      'document': '文档',
+      'archive': '压缩包',
       'prompt_doc': 'Prompt文档',
       'spatial_anchor': '空间锚点',
       'prompt_only': '纯文本'

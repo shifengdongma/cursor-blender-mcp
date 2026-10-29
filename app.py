@@ -255,7 +255,14 @@ def _register_asset_routes(app, web_root, cfg):
             raise ApiError("no_filename", "上传文件名不能为空", status_code=400)
 
         name = request.form.get("name") or os.path.splitext(file.filename)[0]
-        asset_type = request.form.get("asset_type", "glb")
+        asset_type = asset_service.classify_filename(file.filename)
+        if asset_type is None:
+            raise ApiError(
+                "unsupported_file_type",
+                "不支持的文件格式",
+                status_code=400,
+                details={"allowed_extensions": asset_service.allowed_extensions_list()},
+            )
         venue_type = request.form.get("venue_type")
         description = request.form.get("description")
 

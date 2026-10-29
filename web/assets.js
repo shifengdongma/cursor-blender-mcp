@@ -21,6 +21,13 @@
   var historyTaskMap = {};
   var currentAssetsById = {};
 
+  // 3D preview state
+  var AUTO_PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
+  var PREVIEW_LOAD_TIMEOUT_MS = 90000;
+  var loadedPreviewAssetIds = {};
+  var previewObserver = null;
+  var previewLoadTimers = {};
+
   // Extension -> asset type whitelist (mirrors backend/asset_service.py)
   var ALLOWED_EXTENSIONS = {
     'glb': 'glb', 'gltf': 'glb', 'obj': 'glb', 'fbx': 'glb', 'stl': 'glb',
@@ -382,6 +389,7 @@
     if (!assetGrid || isLoading) return;
 
     isLoading = true;
+    resetPreviewState();
 
     // Show loading skeleton
     assetGrid.innerHTML = renderSkeletons();
@@ -431,6 +439,7 @@
   function loadGenerationHistory() {
     if (!assetGrid || isLoading) return;
     isLoading = true;
+    resetPreviewState();
     assetGrid.innerHTML = renderSkeletons();
     assetGrid.style.opacity = '1';
 
@@ -525,6 +534,7 @@
   }
 
   function renderAssets(assets) {
+    resetPreviewState();
     cacheAssetsById(assets);
     if (!assets.length) {
       assetGrid.innerHTML = '\
@@ -548,6 +558,7 @@
 
     // Attach event handlers with delegation
     attachAssetEventHandlers();
+    setupAssetPreviews();
   }
 
   function attachAssetEventHandlers() {
@@ -571,16 +582,6 @@
         e.stopPropagation();
         var id = this.dataset.id;
         downloadAsset(id);
-      });
-    });
-
-    // Add hover effect for model-viewer
-    document.querySelectorAll('model-viewer').forEach(function(mv) {
-      mv.addEventListener('mouseover', function() {
-        this.setAttribute('auto-rotate', '');
-      });
-      mv.addEventListener('mouseout', function() {
-        this.removeAttribute('auto-rotate');
       });
     });
   }
@@ -630,10 +631,10 @@
 
   function renderPreview(asset) {
     var fileUrl = asset.file_url ? escapeHtml(asset.file_url) : '';
-    if (asset.asset_type === 'glb' && fileUrl) {
-      return '<model-viewer src="' + fileUrl + '" camera-controls touch-action="pan-y" interaction-prompt="none"></model-viewer>';
+    if (asset.asset_type === 'glb') {
+      return renderModelPreview(asset);
     } else if (asset.asset_type === 'image' && fileUrl) {
-      return '<img src="' + fileUrl + '" alt="' + escapeHtml(asset.name) + '" loading="lazy" onload="this.classList.add(\'loaded\')" />';
+      return '<img src="' + fileUrl + '" alt="' + escapeHtml(asset.name || '') + '" loading="lazy" onload="this.classList.add(\'loaded\')" />';
     } else if (asset.asset_type === 'video' && fileUrl) {
       return '<video src="' + fileUrl + '" controls></video>';
     } else if (asset.asset_type === 'audio' && fileUrl) {
@@ -643,6 +644,235 @@
         <svg class="placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">\
           <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>\
         </svg>';
+    }
+  }
+
+  function modelPlaceholderIcon() {
+    return '\
+      <svg class="placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">\
+        <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>\
+      </svg>';
+  }
+
+  function isPreviewableAsset(asset) {
+    if (!asset) return false;
+    if (asset.previewable === true) return true;
+    if (asset.previewable === false) return false;
+    return asset.asset_type === 'glb' && asset.file_ext === 'glb';
+  }
+
+  function isLargePreviewAsset(asset) {
+    return typeof asset.file_size === 'number' && asset.file_size > AUTO_PREVIEW_MAX_BYTES;
+  }
+
+  function assetDownloadUrl(asset) {
+    if (asset && asset.download_url) return asset.download_url;
+    return '/api/assets/' + encodeURIComponent((asset && asset.id) || '') + '/download';
+  }
+
+  function renderModelPreview(asset) {
+    var assetId = escapeHtml(asset.id);
+    var downloadUrl = asset.file_url ? escapeHtml(assetDownloadUrl(asset)) : '';
+
+    if (!isPreviewableAsset(asset)) {
+      var reason = asset.preview_reason || '该格式不支持在线预览，请下载查看';
+      var extLabel = asset.file_ext ? String(asset.file_ext).toUpperCase() : '3D';
+      return '\
+        <div class="asset-preview-unavailable" data-asset-id="' + assetId + '">\
+          <svg class="placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">\
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>\
+            <polyline points="14 2 14 8 20 8"/>\
+          </svg>\
+          <span class="preview-format-chip">' + escapeHtml(extLabel) + '</span>\
+          <p class="preview-unavailable-text">' + escapeHtml(reason) + '</p>\
+          ' + (downloadUrl ? '<a class="preview-download-link" href="' + downloadUrl + '">下载文件</a>' : '') + '\
+        </div>';
+    }
+
+    if (!asset.file_url) {
+      return modelPlaceholderIcon();
+    }
+
+    if (isLargePreviewAsset(asset)) {
+      return '\
+        <div class="asset-preview-stage asset-preview-stage-manual" data-asset-id="' + assetId + '" data-preview-state="manual">\
+          <div class="asset-preview-placeholder">\
+            ' + modelPlaceholderIcon() + '\
+            <span class="preview-size-chip">' + escapeHtml(formatFileSize(asset.file_size || 0)) + '</span>\
+            <button type="button" class="asset-preview-load-btn">点击加载 3D 预览</button>\
+          </div>\
+        </div>';
+    }
+
+    return '\
+      <div class="asset-preview-stage" data-asset-id="' + assetId + '" data-preview-state="auto">\
+        <div class="asset-preview-placeholder asset-preview-placeholder-auto">\
+          ' + modelPlaceholderIcon() + '\
+          <span class="preview-load-hint">3D 预览待加载</span>\
+        </div>\
+      </div>';
+  }
+
+  function setupAssetPreviews() {
+    if (!assetGrid) return;
+    var pending = [];
+    var stages = assetGrid.querySelectorAll('.asset-preview-stage[data-asset-id]');
+    stages.forEach(function(container) {
+      var assetId = container.getAttribute('data-asset-id');
+      var asset = currentAssetsById[assetId];
+      if (!asset || !asset.file_url) return;
+      if (container.getAttribute('data-preview-state') === 'manual') {
+        bindDeferredPreview(container, asset);
+        return;
+      }
+      if (loadedPreviewAssetIds[assetId]) {
+        createModelViewer(container, asset.file_url, assetId);
+      } else if (typeof window.IntersectionObserver === 'function') {
+        pending.push(container);
+      } else {
+        createModelViewer(container, asset.file_url, assetId);
+      }
+    });
+
+    if (!pending.length) return;
+    previewObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (!entry.isIntersecting) return;
+        var container = entry.target;
+        previewObserver.unobserve(container);
+        if (!container.isConnected) return;
+        if (container.getAttribute('data-preview-state') !== 'auto') return;
+        var assetId = container.getAttribute('data-asset-id');
+        var asset = currentAssetsById[assetId];
+        if (!asset || !asset.file_url) return;
+        createModelViewer(container, asset.file_url, assetId);
+      });
+    }, { threshold: 0.01 });
+    pending.forEach(function(container) {
+      previewObserver.observe(container);
+    });
+  }
+
+  function bindDeferredPreview(container, asset) {
+    var button = container.querySelector('.asset-preview-load-btn');
+    if (!button) return;
+    button.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      createModelViewer(container, asset.file_url, asset.id);
+    });
+  }
+
+  function clearPreviewTimer(assetId) {
+    if (previewLoadTimers[assetId]) {
+      clearTimeout(previewLoadTimers[assetId]);
+      delete previewLoadTimers[assetId];
+    }
+  }
+
+  function resetPreviewState() {
+    if (previewObserver) {
+      previewObserver.disconnect();
+      previewObserver = null;
+    }
+    Object.keys(previewLoadTimers).forEach(function(assetId) {
+      clearTimeout(previewLoadTimers[assetId]);
+    });
+    previewLoadTimers = {};
+  }
+
+  function createModelViewer(container, src, assetId, attempt) {
+    if (!container || !src || !container.isConnected) return;
+    clearPreviewTimer(assetId);
+    var token = 'pv-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+    var loadSrc = src;
+    if (attempt) {
+      // model-viewer caches failed loads per URL; bust it so retry actually re-fetches.
+      loadSrc += (loadSrc.indexOf('?') === -1 ? '?' : '&') +
+        '_retry=' + attempt + '-' + Date.now().toString(36);
+    }
+    container.setAttribute('data-preview-token', token);
+    container.setAttribute('data-preview-state', 'loading');
+    container.innerHTML = '\
+      <div class="asset-preview-overlay asset-preview-overlay-loading">\
+        <span class="preview-spinner" aria-hidden="true"></span>\
+        <div class="preview-progress"><div class="preview-progress-bar"></div></div>\
+        <span class="preview-progress-text">加载中 0%</span>\
+      </div>';
+    var overlay = container.querySelector('.asset-preview-overlay-loading');
+    var progressBar = container.querySelector('.preview-progress-bar');
+    var progressText = container.querySelector('.preview-progress-text');
+
+    function isCurrent() {
+      return container.getAttribute('data-preview-token') === token;
+    }
+
+    var viewer = document.createElement('model-viewer');
+    viewer.setAttribute('camera-controls', '');
+    viewer.setAttribute('touch-action', 'pan-y');
+    viewer.setAttribute('interaction-prompt', 'none');
+    viewer.setAttribute('alt', '');
+    viewer.addEventListener('mouseover', function() {
+      viewer.setAttribute('auto-rotate', '');
+    });
+    viewer.addEventListener('mouseout', function() {
+      viewer.removeAttribute('auto-rotate');
+    });
+    viewer.addEventListener('progress', function(event) {
+      if (!isCurrent()) return;
+      var detail = event.detail || {};
+      var progress = typeof detail.totalProgress === 'number' ? detail.totalProgress : 0;
+      var percent = Math.max(0, Math.min(100, Math.round(progress * 100)));
+      if (progressBar) progressBar.style.width = percent + '%';
+      if (progressText) progressText.textContent = '加载中 ' + percent + '%';
+    });
+    viewer.addEventListener('load', function() {
+      if (!isCurrent()) return;
+      clearPreviewTimer(assetId);
+      loadedPreviewAssetIds[assetId] = true;
+      container.setAttribute('data-preview-state', 'loaded');
+      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    });
+    viewer.addEventListener('error', function() {
+      if (!isCurrent()) return;
+      showPreviewError(container, assetId, src, '预览加载失败，点击重试/下载', attempt);
+    });
+
+    container.appendChild(viewer);
+    previewLoadTimers[assetId] = setTimeout(function() {
+      delete previewLoadTimers[assetId];
+      if (container.getAttribute('data-preview-state') === 'loaded') return;
+      showPreviewError(container, assetId, src, '预览加载超时，点击重试/下载', attempt);
+    }, PREVIEW_LOAD_TIMEOUT_MS);
+
+    // The element upgrades asynchronously; setting src before that is supported.
+    viewer.setAttribute('src', loadSrc);
+  }
+
+  function showPreviewError(container, assetId, src, message, attempt) {
+    clearPreviewTimer(assetId);
+    container.removeAttribute('data-preview-token');
+    container.setAttribute('data-preview-state', 'error');
+    container.innerHTML = '\
+      <div class="asset-preview-overlay asset-preview-overlay-error">\
+        <svg class="preview-error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">\
+          <circle cx="12" cy="12" r="9"/>\
+          <line x1="12" y1="7.5" x2="12" y2="13"/>\
+          <line x1="12" y1="16.5" x2="12.01" y2="16.5"/>\
+        </svg>\
+        <p class="preview-error-text">' + escapeHtml(message) + '</p>\
+        <div class="preview-error-actions">\
+          <button type="button" class="asset-preview-retry">重试</button>\
+          <a class="asset-preview-download" href="/api/assets/' + encodeURIComponent(assetId) + '/download">下载</a>\
+        </div>\
+      </div>';
+    var retryButton = container.querySelector('.asset-preview-retry');
+    if (retryButton) {
+      retryButton.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        createModelViewer(container, src, assetId, (attempt || 0) + 1);
+      });
     }
   }
 
@@ -1175,9 +1405,9 @@
   // Utility functions
   function escapeHtml(text) {
     if (!text) return '';
-    var div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return String(text).replace(/[&<>"']/g, function(ch) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[ch];
+    });
   }
 
   // Custom confirm dialog (replaces browser native confirm())

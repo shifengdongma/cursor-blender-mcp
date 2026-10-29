@@ -1290,6 +1290,185 @@ main {
   --poster-color: transparent;
 }
 
+/* 3D preview: lazy stage, placeholder, loading and error states */
+.asset-preview-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.asset-preview-placeholder,
+.asset-preview-unavailable {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  padding: 18px;
+  text-align: center;
+}
+
+.asset-preview-placeholder .placeholder-icon {
+  width: 52px;
+  height: 52px;
+}
+
+.preview-size-chip,
+.preview-format-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+
+.preview-format-chip {
+  border-color: rgba(215, 168, 79, 0.28);
+  background: rgba(215, 168, 79, 0.08);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.preview-load-hint,
+.preview-unavailable-text {
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.preview-unavailable-text {
+  max-width: 260px;
+  line-height: 1.5;
+}
+
+.preview-download-link,
+.preview-error-actions .asset-preview-download {
+  font-size: 0.76rem;
+  color: var(--primary);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(215, 168, 79, 0.35);
+  transition: color var(--transition-base), border-color var(--transition-base);
+}
+
+.preview-download-link:hover,
+.preview-error-actions .asset-preview-download:hover {
+  color: var(--accent-cyan-strong);
+  border-color: rgba(120, 191, 210, 0.45);
+}
+
+.asset-preview-load-btn,
+.asset-preview-retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid rgba(215, 168, 79, 0.32);
+  border-radius: var(--radius-full);
+  background: rgba(215, 168, 79, 0.14);
+  color: var(--primary);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-base), border-color var(--transition-base), transform var(--transition-fast);
+}
+
+.asset-preview-load-btn:hover,
+.asset-preview-retry:hover {
+  background: rgba(215, 168, 79, 0.22);
+  border-color: rgba(215, 168, 79, 0.5);
+}
+
+.asset-preview-load-btn:active,
+.asset-preview-retry:active {
+  transform: translateY(1px);
+}
+
+.asset-preview-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 18px;
+  text-align: center;
+  background: rgba(6, 10, 16, 0.78);
+  backdrop-filter: blur(2px);
+}
+
+.preview-spinner {
+  width: 26px;
+  height: 26px;
+  border: 2px solid rgba(215, 168, 79, 0.2);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+.preview-progress {
+  width: min(70%, 200px);
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.preview-progress-bar {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary-dark), var(--primary));
+  transition: width 0.18s ease;
+}
+
+.preview-progress-text {
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.preview-error-icon {
+  width: 34px;
+  height: 34px;
+  color: var(--accent-red);
+  opacity: 0.9;
+}
+
+.preview-error-text {
+  max-width: 260px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.preview-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* model-viewer's built-in bar is normally covered by our overlay; keep it visible and on-theme. */
+model-viewer::part(default-progress-bar) {
+  display: block;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
 .asset-preview .placeholder-icon,
 .empty-icon,
 .upload-icon {
@@ -2190,6 +2369,8 @@ a:focus-visible,
 .tab-btn:focus-visible,
 .page-btn:focus-visible,
 .asset-btn:focus-visible,
+.asset-preview-load-btn:focus-visible,
+.asset-preview-retry:focus-visible,
 .modal-close:focus-visible,
 .upload-zone:focus-visible {
   box-shadow: 0 0 0 3px rgba(120, 191, 210, 0.16);
@@ -2221,8 +2402,7 @@ a:focus-visible,
 .skeleton,
 .skeleton-text,
 .skeleton-title,
-.skeleton-image,
-model-viewer::part(default-progress-bar) {
+.skeleton-image {
   all: unset;
 }
 
@@ -9518,5 +9698,17 @@ model-viewer::part(default-progress-bar) {
 
   .asset-edit-readonly {
     grid-template-columns: 1fr;
+  }
+
+  .asset-preview-load-btn,
+  .asset-preview-retry {
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 0.76rem;
+  }
+
+  .asset-preview-placeholder .placeholder-icon {
+    width: 44px;
+    height: 44px;
   }
 }

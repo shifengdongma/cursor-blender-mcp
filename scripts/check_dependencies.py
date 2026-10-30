@@ -30,15 +30,20 @@ def check_pip_packages():
     packages = ['flask', 'werkzeug', 'requests', 'psutil']
     results = []
     for pkg in packages:
+        required = pkg != 'psutil'
         try:
             __import__(pkg)
-            results.append({'name': pkg, 'status': 'OK', 'ok': True})
+            results.append({
+                'name': pkg, 'status': 'OK', 'ok': True, 'required': required,
+            })
         except ImportError:
-            results.append({'name': pkg, 'status': 'MISSING', 'ok': False})
+            results.append({
+                'name': pkg, 'status': 'MISSING', 'ok': False, 'required': required,
+            })
     return results
 
 
-def check_tool(name, binary=None):
+def check_tool(name, binary=None, required=False):
     """Check if an external tool is available in PATH."""
     tool_bin = binary or name
     available = shutil.which(tool_bin) is not None
@@ -46,8 +51,8 @@ def check_tool(name, binary=None):
         'name': name,
         'path': shutil.which(tool_bin) if available else None,
         'status': 'OK' if available else 'NOT FOUND',
-        'ok': True,  # optional tools are non-critical
-        'required': name in ('ffmpeg', 'ffprobe'),
+        'ok': available,
+        'required': required,
     }
 
 
@@ -71,21 +76,26 @@ def main():
     print("Pip Packages:")
     pkgs = check_pip_packages()
     for pkg in pkgs:
-        print("  [{0}] {1}".format(pkg['status'], pkg['name']))
-        if not pkg['ok']:
+        print("  [{0}] {1}{2}".format(
+            pkg['status'], pkg['name'],
+            '' if pkg.get('required', True) else ' [OPTIONAL]',
+        ))
+        if pkg.get('required', True) and not pkg['ok']:
             all_ok = False
     print()
 
     # External tools
     print("External Tools:")
     tools = [
-        ('blender', None),
-        ('ffmpeg', None),
-        ('ffprobe', None),
-        ('nvidia-smi', None),
+        ('ffmpeg', None, True),
+        ('ffprobe', None, True),
+        ('piper', os.environ.get('PIPER_BIN') or None, False),
+        ('fc-match', None, False),
+        ('blender', None, False),
+        ('nvidia-smi', None, False),
     ]
-    for name, binary in tools:
-        result = check_tool(name, binary)
+    for name, binary, required in tools:
+        result = check_tool(name, binary, required=required)
         tag = " [REQUIRED]" if result.get('required') else " [OPTIONAL]"
         print("  [{0}] {1}{2} ({3})".format(
             result['status'], result['name'], tag, result['path'] or 'not found'))
@@ -99,6 +109,22 @@ def main():
         print("[OK] Data directory: {0}".format(os.path.abspath(data_dir)))
     else:
         print("[WARN] Data directory not found: {0}".format(data_dir))
+
+    model_path = os.environ.get(
+        'PIPER_MODEL_PATH',
+        os.path.join(data_dir, 'tts_models', 'zh_CN-huayan-medium.onnx'),
+    )
+    voices_path = os.environ.get(
+        'TTS_VOICES_FILE', os.path.join(data_dir, 'tts_voices.json')
+    )
+    print("[{0}] Piper model: {1}".format(
+        'OK' if os.path.isfile(model_path) else 'OPTIONAL/MISSING',
+        model_path,
+    ))
+    print("[{0}] TTS voice registry: {1}".format(
+        'OK' if os.path.isfile(voices_path) else 'OPTIONAL/MISSING',
+        voices_path,
+    ))
 
     print()
     print("=" * 60)

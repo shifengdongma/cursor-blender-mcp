@@ -95,12 +95,28 @@ GENERATION_VIDEO_DEADLINE_S=7200
 GENERATION_POLL_INTERVAL_S=10
 GENERATION_POLL_MAX_ERRORS=8
 GENERATION_DOWNLOAD_TIMEOUT_S=180
+GENERATION_RECOVERY_INTERVAL_S=60
+PROVIDER_CONNECT_TIMEOUT_S=10
 MAX_GENERATION_DOWNLOAD_MB=500
 MAX_REFERENCE_IMAGE_MB=10
 MAX_CONCURRENT_TASKS_PER_USER=2
 DAILY_IMAGE_LIMIT=20
 DAILY_VIDEO_LIMIT=5
+
+# 本地 TTS / FFmpeg 后期
+PIPER_BIN=piper
+PIPER_MODEL_PATH=./data/tts_models/zh_CN-huayan-medium.onnx
+TTS_VOICES_FILE=./data/tts_voices.json
+TTS_MODEL_DIR=./data/tts_models
+TTS_DEFAULT_VOICE_ID=piper:zh_CN-huayan-medium
+FFMPEG_BIN=ffmpeg
+FFPROBE_BIN=ffprobe
+SUBTITLE_FONT_NAME=Noto Sans CJK SC
+MAX_COMPOSE_DURATION_S=900
+MAX_AUDIO_UPLOAD_MB=50
 ```
+
+TTS 不是外部生成 Provider，但同样遵循“未配置/不可用就明确报错”的原则：音色注册表只列出真实安装的 Piper 模型；云端 TTS 本期未启用，也没有伪造音色。
 
 ## 4. 图片生成
 
@@ -199,7 +215,14 @@ python3 -m pytest tests/test_comfyui_provider.py -q
 
 因此，真实生图成功仍需用户在方舟控制台开通至少一个 Seedream 模型后，通过 `/api-settings` 的“真实调用测试（可能计费）”验证。Seedance 视频真实测试尚未执行；创建后立即取消的测试入口已实现并通过 Mock 测试。ComfyUI/Atlas/Luma 未做真实调用验证。
 
-## 8. 已知限制
+## 8. 生成计时与性能诊断
+
+- `generation_tasks` 现在记录 `created_at_ms/claimed_at_ms/provider_request_started_at/provider_request_finished_at/provider_job_created_at/provider_finished_at/download_started_at/download_finished_at/persist_started_at/persist_finished_at/completed_at_ms`。
+- `GET /api/generation/tasks/<task_id>/timing`：任务所有者或管理员可读，返回各阶段时间戳与 durations_ms。
+- `GET /api/generation/timing/summary`：仅管理员，可按 task_type/provider/model/status/has_reference/hours 过滤，返回 count、成功率、均值/中位数/P95。
+- `provider_elapsed_ms` 包含服务商排队和运行，不等于纯推理时间。详细 benchmark 见 `docs/Performance-Report.md`。
+
+## 9. 已知限制
 
 - Seedream 的 `seed`/负面提示词能力按官方文档保守标注；不支持的参数会被拒绝或丢弃（负面提示词来自分镜默认值时丢弃，不发送）。
 - 后端已接受 `reference_asset_ids` 列表并按模型真实上限校验；创意工作台前端仍为单选参考图，完整多选 UI 尚未实现。

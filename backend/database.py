@@ -52,11 +52,22 @@ class Database(object):
         self._init_schema()
 
     def _ensure_column(self, cursor, table, col_name, col_type):
-        """Add a column to a table if it doesn't already exist."""
+        """Add a column to a table if it doesn't already exist.
+
+        Multiple gunicorn workers can initialise the schema concurrently, so a
+        losing ALTER race must be treated as success rather than crashing the
+        second worker.
+        """
         try:
             cursor.execute('SELECT {0} FROM {1} LIMIT 1'.format(col_name, table))
         except sqlite3.OperationalError:
-            cursor.execute('ALTER TABLE {0} ADD COLUMN {1} {2}'.format(table, col_name, col_type))
+            try:
+                cursor.execute(
+                    'ALTER TABLE {0} ADD COLUMN {1} {2}'.format(table, col_name, col_type)
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
     def _get_connection(self):
         """Get thread-local database connection."""
@@ -863,6 +874,157 @@ class Database(object):
         self._ensure_column(cursor, 'generation_tasks', 'cancel_requested', 'INTEGER DEFAULT 0')
         self._ensure_column(cursor, 'ops_events', 'actor_user_id', 'TEXT')
         self._ensure_column(cursor, 'ops_events', 'request_id', 'TEXT')
+
+        # ── Media workflow migrations (additive, rerunnable) ──
+        # v2: audio metadata, narration options, subtitle links, media versions.
+        self._ensure_column(cursor, 'assets', 'duration_s', 'REAL')
+        self._ensure_column(cursor, 'assets', 'audio_role', 'TEXT')
+        self._ensure_column(cursor, 'assets', 'media_info', 'TEXT')
+        self._ensure_column(cursor, 'storyboard_shots', 'subtitle_asset_id', 'TEXT')
+        self._ensure_column(cursor, 'storyboard_shots', 'audio_options', 'TEXT')
+        self._ensure_column(cursor, 'storyboard_shots', 'audio_duration_s', 'REAL')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS shot_media_versions (
+                id TEXT PRIMARY KEY,
+                creative_project_id TEXT NOT NULL,
+                shot_id TEXT NOT NULL,
+                media_kind TEXT NOT NULL,
+                asset_id TEXT,
+                task_id TEXT,
+                source TEXT NOT NULL,
+                label TEXT,
+                metadata TEXT,
+                is_selected INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER,
+                updated_at INTEGER,
+                FOREIGN KEY (creative_project_id) REFERENCES creative_projects(id),
+                FOREIGN KEY (shot_id) REFERENCES storyboard_shots(id),
+                FOREIGN KEY (asset_id) REFERENCES assets(id),
+                FOREIGN KEY (task_id) REFERENCES generation_tasks(id)
+            )
+        ''')
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_shot_media_versions_shot '
+            'ON shot_media_versions(shot_id, media_kind, created_at)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_shot_media_versions_project '
+            'ON shot_media_versions(creative_project_id)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_shot_media_versions_asset '
+            'ON shot_media_versions(asset_id)'
+        )
+
+        # v3: timeline versioning and final-video linkage.
+        self._ensure_column(
+            cursor, 'creative_projects', 'timeline_version', 'INTEGER NOT NULL DEFAULT 0'
+        )
+        self._ensure_column(cursor, 'creative_projects', 'final_video_asset_id', 'TEXT')
+        self._ensure_column(cursor, 'creative_projects', 'final_compose_task_id', 'TEXT')
+        self._ensure_column(cursor, 'creative_projects', 'final_timeline_version', 'INTEGER')
+        self._ensure_column(cursor, 'storyboard_shots', 'selected_video_asset_id', 'TEXT')
+        self._ensure_column(cursor, 'timeline_tracks', 'role', 'TEXT')
+        self._ensure_column(cursor, 'timeline_clips', 'volume', 'REAL NOT NULL DEFAULT 1.0')
+        self._ensure_column(cursor, 'timeline_clips', 'muted', 'INTEGER NOT NULL DEFAULT 0')
+        self._ensure_column(
+            cursor, 'timeline_clips', 'source_audio_enabled', 'INTEGER NOT NULL DEFAULT 1'
+        )
+        self._ensure_column(cursor, 'timeline_clips', 'fade_in', 'REAL NOT NULL DEFAULT 0')
+        self._ensure_column(cursor, 'timeline_clips', 'fade_out', 'REAL NOT NULL DEFAULT 0')
+        self._ensure_column(cursor, 'timeline_clips', 'subtitle_text', 'TEXT')
+        self._ensure_column(cursor, 'generation_tasks', 'timeline_version', 'INTEGER')
+        self._ensure_column(cursor, 'generation_tasks', 'timeline_snapshot', 'TEXT')
+        self._ensure_column(cursor, 'export_packages', 'asset_id', 'TEXT')
+        self._ensure_column(cursor, 'export_packages', 'timeline_version', 'INTEGER')
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_timeline_tracks_project '
+            'ON timeline_tracks(creative_project_id, sequence_no)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_timeline_clips_track_start '
+            'ON timeline_clips(track_id, start_time)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_timeline_clips_asset '
+            'ON timeline_clips(asset_id)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_gen_tasks_project_type_status '
+            'ON generation_tasks(creative_project_id, task_type, status)'
+        )
+
+        # v4: refined-video selection.
+        self._ensure_column(cursor, 'storyboard_shots', 'refined_video_asset_id', 'TEXT')
+        self._ensure_column(cursor, 'storyboard_shots', 'video_selection_source', 'TEXT')
+
+        # v5: per-stage generation timing.
+        for timing_column in (
+            'created_at_ms', 'claimed_at_ms',
+            'provider_request_started_at', 'provider_request_finished_at',
+            'provider_job_created_at', 'provider_finished_at',
+            'download_started_at', 'download_finished_at',
+            'persist_started_at', 'persist_finished_at', 'completed_at_ms',
+        ):
+            self._ensure_column(cursor, 'generation_tasks', timing_column, 'REAL')
+        self._ensure_column(cursor, 'generation_tasks', 'timing_json', 'TEXT')
+
+        for version, name in (
+            (2, 'media_workflow_v2a'),
+            (3, 'timeline_compose_v2b'),
+            (4, 'refine_versions_v2c'),
+            (5, 'generation_timing_v2d'),
+        ):
+            cursor.execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) "
+                "VALUES (?, ?, ?)",
+                (version, name, _now()),
+            )
+
+        # Backfill existing data without deleting user media.
+        cursor.execute(
+            "UPDATE storyboard_shots SET srt_path = NULL "
+            "WHERE srt_path IS NOT NULL AND lower(srt_path) LIKE '%.wav'"
+        )
+        cursor.execute(
+            "UPDATE storyboard_shots SET selected_video_asset_id = video_asset_id "
+            "WHERE (selected_video_asset_id IS NULL OR selected_video_asset_id = '') "
+            "AND video_asset_id IS NOT NULL AND video_asset_id <> ''"
+        )
+        cursor.execute(
+            "UPDATE storyboard_shots SET video_selection_source = 'original' "
+            "WHERE video_selection_source IS NULL AND selected_video_asset_id IS NOT NULL"
+        )
+        cursor.execute(
+            "UPDATE creative_projects SET timeline_version = 0 "
+            "WHERE timeline_version IS NULL"
+        )
+        cursor.execute(
+            "UPDATE timeline_tracks SET role = CASE track_type "
+            "WHEN 'video' THEN 'video' WHEN 'subtitle' THEN 'subtitle' "
+            "WHEN 'audio' THEN 'narration' ELSE 'effect' END "
+            "WHERE role IS NULL OR role = ''"
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO shot_media_versions "
+            "(id, creative_project_id, shot_id, media_kind, asset_id, source, "
+            " label, metadata, is_selected, created_at, updated_at) "
+            "SELECT 'legacy-video-' || id, creative_project_id, id, 'video', "
+            "       video_asset_id, 'legacy', 'AI 生成视频', NULL, 1, "
+            "       COALESCE(updated_at, created_at), COALESCE(updated_at, created_at) "
+            "FROM storyboard_shots "
+            "WHERE video_asset_id IS NOT NULL AND video_asset_id <> ''"
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO shot_media_versions "
+            "(id, creative_project_id, shot_id, media_kind, asset_id, source, "
+            " label, metadata, is_selected, created_at, updated_at) "
+            "SELECT 'legacy-audio-' || id, creative_project_id, id, 'audio', "
+            "       audio_asset_id, 'legacy', '历史配音', NULL, 1, "
+            "       COALESCE(updated_at, created_at), COALESCE(updated_at, created_at) "
+            "FROM storyboard_shots "
+            "WHERE audio_asset_id IS NOT NULL AND audio_asset_id <> ''"
+        )
 
         # Normalise legacy auth status/nickname values.
         cursor.execute(

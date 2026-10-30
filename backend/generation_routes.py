@@ -4,6 +4,8 @@ from __future__ import absolute_import
 
 import logging
 import os
+import statistics
+import time
 from datetime import datetime
 
 from flask import g, request, send_file
@@ -16,7 +18,7 @@ from .generation_models import list_models
 from .http_utils import ApiError, parse_json_body, parse_pagination
 from .models import GenerationTask
 from .task_service import get_task_service
-from .task_serializer import public_task_dict
+from .task_serializer import public_task_dict, public_task_dicts
 from . import generation_service
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,93 @@ def _parse_date(value, end_of_day=False):
 
 def _client_request_id(payload):
     return (request.headers.get("Idempotency-Key") or payload.get("client_request_id") or "")[:128] or None
+
+
+def _epoch_ms(task, name, integer_name=None):
+    value = getattr(task, name, None)
+    if value is not None:
+        try:
+            return float(value) * 1000.0
+        except (TypeError, ValueError):
+            return None
+    if integer_name:
+        value = getattr(task, integer_name, None)
+        if value is not None:
+            try:
+                return float(value) * 1000.0
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _safe_delta(end, start):
+    if end is None or start is None:
+        return None
+    value = float(end) - float(start)
+    return round(value, 1) if value >= 0 else None
+
+
+def _task_timing(task):
+    created = _epoch_ms(task, "created_at_ms", "created_at")
+    claimed = _epoch_ms(task, "claimed_at_ms", "claimed_at")
+    request_started = _epoch_ms(task, "provider_request_started_at")
+    request_finished = _epoch_ms(task, "provider_request_finished_at")
+    job_created = _epoch_ms(task, "provider_job_created_at")
+    provider_finished = _epoch_ms(task, "provider_finished_at")
+    download_started = _epoch_ms(task, "download_started_at")
+    download_finished = _epoch_ms(task, "download_finished_at")
+    persist_started = _epoch_ms(task, "persist_started_at")
+    persist_finished = _epoch_ms(task, "persist_finished_at")
+    completed = _epoch_ms(task, "completed_at_ms", "completed_at")
+    durations = {
+        "queue_wait_ms": _safe_delta(claimed, created),
+        "submission_ms": _safe_delta(request_finished, request_started),
+        "provider_elapsed_ms": _safe_delta(provider_finished, job_created),
+        "download_ms": _safe_delta(download_finished, download_started),
+        "persist_ms": _safe_delta(persist_finished, persist_started),
+        "total_ms": _safe_delta(completed, created),
+    }
+    return {
+        "task_id": task.id,
+        "task_type": task.task_type,
+        "provider": task.provider,
+        "model_id": task.model_id,
+        "status": task.status,
+        "created_at": task.created_at,
+        "completed_at": task.completed_at,
+        "timestamps": {
+            "created_at_ms": created,
+            "claimed_at_ms": claimed,
+            "provider_request_started_at": request_started,
+            "provider_request_finished_at": request_finished,
+            "provider_job_created_at": job_created,
+            "provider_finished_at": provider_finished,
+            "download_started_at": download_started,
+            "download_finished_at": download_finished,
+            "persist_started_at": persist_started,
+            "persist_finished_at": persist_finished,
+            "completed_at_ms": completed,
+        },
+        "durations_ms": durations,
+        "notes": [
+            "provider_elapsed 包含服务商排队与运行时间，不等于纯推理时间",
+            "queue_wait 为创建到 Worker 领取的本地排队时间",
+            "total 为创建到任务完成的端到端时间",
+        ],
+    }
+
+
+def _percentile(values, percentile):
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    index = (len(ordered) - 1) * percentile / 100.0
+    lower = int(index)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = index - lower
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
 def register_generation_routes(app, cfg, json_success, json_error):
@@ -143,12 +232,10 @@ def register_generation_routes(app, cfg, json_success, json_error):
             sort=sort,
         )
         asset_service = get_asset_service(cfg.DATA_DIR)
-        serialized = []
-        for item in result.get("items", []):
-            task = task_service.get_task(item.get("id"))
-            if task is not None:
-                serialized.append(_serialize_task(task, asset_service))
-        result["items"] = serialized
+        ids = [item.get("id") for item in result.get("items", []) if item.get("id")]
+        task_map = task_service.get_tasks_by_ids(ids)
+        ordered = [task_map[task_id] for task_id in ids if task_id in task_map]
+        result["items"] = public_task_dicts(ordered, asset_service, task_service)
         if scope == "all" and is_admin(g.current_user):
             creator_ids = sorted({
                 item.get("created_by") for item in result["items"] if item.get("created_by")
@@ -261,6 +348,101 @@ def register_generation_routes(app, cfg, json_success, json_error):
         _audit(cfg, "generation_retry", task_id)
         return json_success(_serialize_task(task_service.get_task(task_id), get_asset_service(cfg.DATA_DIR)),
                             message=message)
+
+    @app.route("/api/generation/tasks/<task_id>/timing", methods=["GET"])
+    def generation_task_timing(task_id):
+        task = require_task(task_id, demo_mode=cfg.DEMO_MODE)
+        return json_success(_task_timing(task))
+
+    @app.route("/api/generation/timing/summary", methods=["GET"])
+    @admin_required
+    def generation_timing_summary():
+        task_type = request.args.get("task_type")
+        if task_type and task_type not in (GenerationTask.TYPE_IMAGE, GenerationTask.TYPE_VIDEO):
+            raise ApiError("invalid_params", "task_type 只能是 image 或 video", status_code=400)
+        try:
+            hours = int(request.args.get("hours", 168))
+        except (TypeError, ValueError):
+            raise ApiError("invalid_params", "hours 必须是整数", status_code=400)
+        if hours < 0:
+            raise ApiError("invalid_params", "hours 不能为负", status_code=400)
+        conditions = []
+        params = []
+        if task_type:
+            conditions.append("task_type = ?")
+            params.append(task_type)
+        else:
+            conditions.append("task_type IN ('image','video')")
+        if request.args.get("provider"):
+            conditions.append("provider = ?")
+            params.append(request.args["provider"])
+        if request.args.get("model_id"):
+            conditions.append("model_id = ?")
+            params.append(request.args["model_id"])
+        if request.args.get("status"):
+            conditions.append("status = ?")
+            params.append(request.args["status"])
+        if hours:
+            conditions.append("created_at >= ?")
+            params.append(int(time.time()) - hours * 3600)
+        rows = task_service.db.fetch_all(
+            "SELECT * FROM generation_tasks WHERE {0} ORDER BY created_at DESC".format(
+                " AND ".join(conditions)
+            ),
+            tuple(params),
+        )
+        tasks = [GenerationTask.from_row(row) for row in rows]
+        has_reference = request.args.get("has_reference")
+        if has_reference in ("1", "0", "true", "false", "yes", "no"):
+            wants = has_reference in ("1", "true", "yes")
+            filtered = []
+            for task in tasks:
+                task_params = task.params or {}
+                has_ref = bool(
+                    task_params.get("reference_asset_id")
+                    or task_params.get("reference_asset_ids")
+                )
+                if has_ref == wants:
+                    filtered.append(task)
+            tasks = filtered
+        timings = [_task_timing(task) for task in tasks]
+        metrics = {}
+        for key in (
+            "queue_wait_ms", "submission_ms", "provider_elapsed_ms",
+            "download_ms", "persist_ms", "total_ms",
+        ):
+            values = [
+                item["durations_ms"].get(key)
+                for item in timings
+                if item["durations_ms"].get(key) is not None
+            ]
+            metrics[key] = {
+                "count": len(values),
+                "avg": round(statistics.mean(values), 1) if values else None,
+                "median": round(statistics.median(values), 1) if values else None,
+                "p95": round(_percentile(values, 95), 1) if values else None,
+            }
+        success = len([
+            task for task in tasks
+            if task.status == GenerationTask.STATUS_SUCCEEDED
+        ])
+        return json_success({
+            "count": len(tasks),
+            "success_rate": round(success / len(tasks), 4) if tasks else None,
+            "filters": {
+                "task_type": task_type or "image,video",
+                "hours": hours,
+                "provider": request.args.get("provider"),
+                "model_id": request.args.get("model_id"),
+                "status": request.args.get("status"),
+                "has_reference": has_reference,
+            },
+            "durations_ms": metrics,
+            "notes": [
+                "provider_elapsed_ms 包含服务商排队与运行时间，不等于纯模型推理时间",
+                "统计基于 generation_tasks 中已记录的真实阶段时间戳",
+            ],
+        })
 
     @app.route("/api/generation/assets/<asset_id>/download", methods=["GET"])
     def generation_asset_download(asset_id):

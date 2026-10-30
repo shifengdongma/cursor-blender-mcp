@@ -163,14 +163,25 @@ class BaseImageProvider(object):
 class BaseTTSProvider(object):
     """Abstract base for TTS providers (e.g., Piper)."""
 
-    def synthesize(self, text, voice_id, output_path):
+    provider_id = None
+
+    def list_voices(self):
+        """Return server-approved voices with availability and capabilities."""
+        return []
+
+    def get_capabilities(self, voice_id=None):
+        """Return supported synthesis options for a voice/provider."""
+        return {}
+
+    def synthesize(self, text, voice_id, output_path, options=None):
         """
         Synthesize text to speech audio.
 
         Args:
             text: Text to synthesize
-            voice_id: Voice/model identifier
+            voice_id: Stable, server-registered voice identifier
             output_path: Path to save the audio file
+            options: Provider options such as speech_rate / volume
 
         Returns:
             dict: {output_path, duration_s, format}

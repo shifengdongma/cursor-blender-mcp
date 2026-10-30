@@ -1258,3 +1258,43 @@ Browser → Nginx/HTTPS → Gunicorn (wsgi:app, 多 worker)
 - 自动化：`python3 -m pytest tests/`（当前全量通过；具体数字见交付报告）。
 - 真实 Ark/ComfyUI/Atlas/Luma 调用**未验证**（未使用付费密钥）；详见 `docs/AI-Provider-Integration.md`。
 - 未在本机之外的服务器执行部署；`deploy/` 为可执行样例，不代表已上线。
+
+---
+
+# 附录 G：真实媒体后期工作流（2026-10-30）
+
+> 本节记录第 04–06 步从本地演示升级为真实后端的实现；与 `docs/Media-Workflow.md` 配套。
+
+## G.1 新增后端服务
+
+- `backend/tts_service.py`：Piper 音色注册表（`data/tts_voices.json`），路径限制在 `TTS_MODEL_DIR`，只暴露可用音色与能力。
+- `backend/providers/tts_provider.py`：真实 Piper 合成 + FFprobe 校验 + FFmpeg `atempo`/`volume` 后处理；失败不生成假音频。
+- `backend/timeline_service.py`：时间线自动初始化、真实时长探测、事务保存、版本冲突、素材/分镜校验、SRT 生成。
+- `backend/media_filters.py`：精修滤镜白名单与范围校验。
+- `backend/media_service.py`：`compose_timeline()` 单 FFmpeg 图合成视频/配音/音乐/音效/字幕，`verify_output()` 做流/尺寸/帧率/时长/完整解码校验。
+- `backend/http_session.py`：线程局部 requests Session，供结果下载复用。
+
+## G.2 新增/扩展表
+
+`shot_media_versions`（分镜视频/音频/字幕历史）、`creative_projects.timeline_version/final_*`、`storyboard_shots.selected_video_asset_id/refined_video_asset_id/subtitle_asset_id/audio_options/audio_duration_s`、`timeline_tracks.role`、`timeline_clips.volume/muted/source_audio_enabled/fade_in/fade_out/subtitle_text`、`generation_tasks.timeline_version/timeline_snapshot` 与阶段计时字段、`export_packages.asset_id/timeline_version`。迁移版本 2–5，可重复执行；旧数据不删除。
+
+## G.3 任务与合成
+
+- `compose` 任务在创建时保存完整 `timeline_snapshot`，运行期间用户修改时间线不影响该任务。
+- 输出写入 `data/assets/videos/composed/<task_id>/final_video.mp4`，先写 `.part.mp4` 再原子替换，FFprobe + 解码校验通过后才创建资产/更新 `final_video_asset_id`。
+- 旁白/音乐/音效真实混入 MP4；无音频输入时生成静音 AAC 轨；字幕支持 none/mov_text/burn。
+- 精修生成独立视频资产与版本行，不覆盖原始 AI 视频；`video-selection` 选择版本并同步时间线 clip/版本号。
+
+## G.4 前端
+
+- 第 04 步：真实音色下拉、每镜头配音试听/下载/历史/使用/无配音、音乐/音效上传与试听、可编辑多轨时间线（起点/时长/入点/音量/淡入淡出/字幕文本/静音/删除，800ms 防抖保存、409 冲突提示）。
+- 第 05 步：真实双视频播放器（同源 + CSS 快速预览）、真实滤镜、精修版本列表与“用于成片/恢复原始版”。
+- 第 06 步：真实导出参数、MP4 合成进度、成片播放/下载、字幕下载、ZIP 素材包下载；刷新/重登后从 `/workflow` 恢复。
+- `pollTask` 自适应轮询、`AbortController`、项目守卫、页面隐藏降频；持久容器监听器改为一次绑定。
+
+## G.5 验证状态
+
+- 全量自动化测试通过（见交付报告）。
+- 本机真实 Piper 中文音色 + 真实 FFmpeg 的 E2E 已通过：TTS → 时间线 → 烧录字幕 MP4 → ZIP 下载。
+- 真实付费 LLM/图片/视频调用未新增；本地验证不触发计费。
+- 线上数据库迁移与进程重载只在隔离验收通过后执行；未执行前不得写成已上线。

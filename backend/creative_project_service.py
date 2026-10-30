@@ -117,14 +117,68 @@ class CreativeProjectService(object):
             (project_id,),
         ):
             asset_ids.add(row["asset_id"])
+        for row in self.db.fetch_all(
+            "SELECT DISTINCT asset_id FROM shot_media_versions "
+            "WHERE creative_project_id = ? AND asset_id IS NOT NULL",
+            (project_id,),
+        ):
+            asset_ids.add(row["asset_id"])
+        final_row = self.db.fetch_one(
+            "SELECT final_video_asset_id FROM creative_projects WHERE id = ?",
+            (project_id,),
+        )
+        if final_row and final_row["final_video_asset_id"]:
+            asset_ids.add(final_row["final_video_asset_id"])
 
-        self.db.delete("storyboard_shots", "creative_project_id = ?", (project_id,))
-        self.db.delete("timeline_clips", "creative_project_id = ?", (project_id,))
-        self.db.delete("timeline_tracks", "creative_project_id = ?", (project_id,))
-        self.db.delete("task_artifacts", "creative_project_id = ?", (project_id,))
-        self.db.delete("generation_tasks", "creative_project_id = ?", (project_id,))
-        self.db.delete("export_packages", "creative_project_id = ?", (project_id,))
-        deleted = self.db.delete("creative_projects", "id = ?", (project_id,))
+        export_task_ids = [
+            row["id"] for row in self.db.fetch_all(
+                "SELECT id FROM generation_tasks WHERE creative_project_id = ? "
+                "AND task_type = 'export'",
+                (project_id,),
+            )
+        ]
+        # Delete child rows before their FK parents in one transaction. media
+        # versions reference both shots and tasks; export_packages reference
+        # tasks.
+        with self.db.transaction() as cursor:
+            cursor.execute(
+                "DELETE FROM shot_media_versions WHERE creative_project_id = ?",
+                (project_id,),
+            )
+            cursor.execute(
+                "DELETE FROM timeline_clips WHERE creative_project_id = ?",
+                (project_id,),
+            )
+            cursor.execute(
+                "DELETE FROM timeline_tracks WHERE creative_project_id = ?",
+                (project_id,),
+            )
+            cursor.execute(
+                "DELETE FROM task_artifacts WHERE creative_project_id = ?",
+                (project_id,),
+            )
+            cursor.execute(
+                "DELETE FROM export_packages WHERE creative_project_id = ?",
+                (project_id,),
+            )
+            cursor.execute(
+                "DELETE FROM generation_tasks WHERE creative_project_id = ?",
+                (project_id,),
+            )
+            cursor.execute(
+                "DELETE FROM storyboard_shots WHERE creative_project_id = ?",
+                (project_id,),
+            )
+            cursor.execute("DELETE FROM creative_projects WHERE id = ?", (project_id,))
+            deleted = cursor.rowcount
+
+        if deleted:
+            import shutil
+            exports_root = os.path.realpath(os.path.join(self.data_dir, "exports"))
+            for task_id in export_task_ids:
+                path = os.path.realpath(os.path.join(exports_root, str(task_id)))
+                if path.startswith(exports_root + os.sep) and os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
 
         if deleted and asset_ids:
             from .asset_service import get_asset_service
@@ -133,7 +187,8 @@ class CreativeProjectService(object):
                 if sum(asset_service.asset_reference_breakdown(asset_id).values()):
                     continue
                 asset = asset_service.get_asset(asset_id)
-                if asset and (asset.metadata or {}).get("source") == "generation":
+                source = (asset.metadata or {}).get("source") if asset else None
+                if asset and source in ("generation", "tts", "compose", "refine"):
                     asset_service.delete_asset(asset_id)
         return deleted > 0
 

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "providers": {
+    "piper": {
+      "enabled": true,
+      "model_dir": "tts_models"
+    }
+  },
+  "voices": [
+    {
+      "id": "piper:zh_CN-huayan-medium",
+      "provider": "piper",
+      "label": "华言女声（中）",
+      "description": "Piper 中文 medium 音色，本地离线合成",
+      "language": "zh-CN",
+      "gender": "female",
+      "quality": "medium",
+      "model_path": "zh_CN-huayan-medium.onnx",
+      "config_path": "zh_CN-huayan-medium.onnx.json",
+      "license": "参见 rhasspy/piper-voices 模型卡",
+      "enabled": true
+    }
+  ]
+}

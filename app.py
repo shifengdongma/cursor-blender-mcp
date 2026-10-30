@@ -29,6 +29,7 @@ from backend.http_utils import (
     require_fields,
 )
 from backend.jobs import JobStore, build_initial_result, normalize_job_payload, start_job_worker
+from backend.media_service import MediaServiceError, probe_media_file
 from backend.prompt_doc_service import get_prompt_doc_service
 from backend.prompt_engine import PromptOrchestrator
 from backend.csrf import generate_csrf_token, get_csrf_token
@@ -383,6 +384,9 @@ def _register_asset_routes(app, web_root, cfg):
         pagination = parse_pagination(request)
         asset_type = request.args.get("asset_type")
         venue_type = request.args.get("venue_type")
+        audio_role = request.args.get("audio_role")
+        if audio_role and audio_role not in ("music", "sfx", "narration"):
+            raise ApiError("invalid_params", "不支持的音频角色", status_code=400)
         q = request.args.get("q")
         created_after = _parse_date_param(request.args.get("created_after"))
         created_before = _parse_date_param(request.args.get("created_before"), end_of_day=True)
@@ -410,6 +414,7 @@ def _register_asset_routes(app, web_root, cfg):
             created_after=created_after,
             created_before=created_before,
             sort=sort,
+            audio_role=audio_role,
         )
         total = asset_service.count_assets(
             asset_type=asset_type,
@@ -420,6 +425,7 @@ def _register_asset_routes(app, web_root, cfg):
             q=q,
             created_after=created_after,
             created_before=created_before,
+            audio_role=audio_role,
         )
 
         return _json_success(
@@ -515,6 +521,8 @@ def _register_asset_routes(app, web_root, cfg):
         breakdown = asset_service.asset_reference_breakdown(asset_id)
         hard_references = (
             breakdown["shots"] + breakdown["timeline"] + breakdown["active_tasks"]
+            + breakdown["versions"] + breakdown["final_video"]
+            + breakdown["export_packages"]
         )
         if hard_references:
             raise ApiError(
@@ -569,15 +577,41 @@ def _register_asset_routes(app, web_root, cfg):
             )
         venue_type = request.form.get("venue_type")
         description = request.form.get("description")
+        audio_role = (request.form.get("audio_role") or "").strip() or None
+        if audio_role and audio_role not in ("music", "sfx", "narration"):
+            raise ApiError("invalid_params", "音频角色必须是 music/sfx/narration", status_code=400)
+        if audio_role and asset_type != "audio":
+            raise ApiError("invalid_params", "只有音频素材可以设置 audio_role", status_code=400)
         user = g.current_user
 
+        max_mb = (
+            cfg.MAX_AUDIO_UPLOAD_MB
+            if asset_type == "audio"
+            else cfg.MAX_ASSET_UPLOAD_MB
+        )
+        rel_path = None
         try:
             rel_path, file_size, checksum = asset_service.store_file(
                 file,
                 asset_type,
                 venue_type,
-                max_bytes=cfg.MAX_ASSET_UPLOAD_MB * 1024 * 1024,
+                max_bytes=max_mb * 1024 * 1024,
             )
+            media_info = None
+            duration_s = None
+            if asset_type == "audio":
+                full_path = asset_service._safe_asset_path(rel_path, must_exist=True)
+                try:
+                    media_info = probe_media_file(cfg.FFPROBE_BIN, full_path)
+                except MediaServiceError as exc:
+                    raise ApiError(
+                        "invalid_audio",
+                        "音频文件校验失败：{0}".format(str(exc)),
+                        status_code=400,
+                    )
+                if not media_info.get("has_audio") or not media_info.get("duration_s"):
+                    raise ApiError("invalid_audio", "文件不包含有效音频流", status_code=400)
+                duration_s = media_info.get("duration_s")
             asset = asset_service.create_asset(
                 name=name,
                 asset_type=asset_type,
@@ -588,8 +622,21 @@ def _register_asset_routes(app, web_root, cfg):
                 owner_user_id=user.get("id"),
                 tenant_id=user.get("tenant_id"),
                 checksum_sha256=checksum,
+                duration_s=duration_s,
+                audio_role=audio_role,
+                media_info=media_info,
             )
+        except ApiError:
+            if rel_path:
+                path = asset_service._safe_asset_path(rel_path, must_exist=False)
+                if path and os.path.isfile(path):
+                    os.remove(path)
+            raise
         except AssetServiceError as exc:
+            if rel_path:
+                path = asset_service._safe_asset_path(rel_path, must_exist=False)
+                if path and os.path.isfile(path):
+                    os.remove(path)
             raise ApiError("invalid_upload", str(exc), status_code=400)
 
         return _json_success(

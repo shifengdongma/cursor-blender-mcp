@@ -31,6 +31,40 @@ sudo systemctl restart aigv aigv-worker
 
 Gunicorn 使用 `wsgi:app`，多 Worker 时 `START_TASK_WORKER=false`，避免每个 Web 进程各起一套后台线程。生成任务只由 `aigv-worker` 领取（SQLite `BEGIN IMMEDIATE` + 租约保证原子性）。
 
+**Legacy 创作 worker（TTS/合成/精修/导出）没有租约，启动时会回收 running 任务；只允许运行一个 legacy worker 进程。** 不要把 `START_TASK_WORKER=true` 与独立的 `run_generation_worker.py` 同时使用。
+
+### 2.1 媒体依赖（配音 / 时间线 / 成片）
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg fonts-noto-cjk fontconfig
+ffmpeg -version && ffprobe -version
+ffmpeg -hide_banner -filters | grep -E 'subtitles|amix|alimiter|sidechaincompress'
+fc-match 'Noto Sans CJK SC'
+
+# Piper：可放在独立 venv，避免污染 Flask 运行环境
+python3 -m venv /opt/piper-venv
+/opt/piper-venv/bin/pip install piper-tts
+sudo ln -sf /opt/piper-venv/bin/piper /usr/local/bin/piper
+# 中文音色与配置必须成对放入 data/tts_models/
+# 音色注册表 data/tts_voices.json 只列实际安装且验证可用的音色
+piper --model data/tts_models/zh_CN-huayan-medium.onnx \
+  --output_file /tmp/piper-test.wav <<< "中文配音测试"
+ffprobe -v error -show_entries format=duration,stream=codec_name -of json /tmp/piper-test.wav
+```
+
+`.env` 需设置 `PIPER_BIN`、`PIPER_MODEL_PATH`、`TTS_VOICES_FILE`、`TTS_MODEL_DIR`、`FFMPEG_BIN`、`FFPROBE_BIN`、`SUBTITLE_FONT_NAME`。没有安装的模型不会出现在 `/api/creative/tts/voices` 的可用列表里；没有授权文件时系统预设音乐库为空。
+
+### 2.2 媒体工作流数据库迁移
+
+```bash
+# 先备份，再执行增量迁移（可重复执行，不删除已有项目/分镜/任务）
+cp data/aigv.db data/aigv.db.bak-$(date +%Y%m%d%H%M%S)
+.venv/bin/python scripts/migrate_workflow_v2.py --backup
+```
+
+迁移新增时间线版本、音频元数据、分镜媒体版本、最终成片指针和阶段计时字段；旧的 WAV 误写入 `srt_path` 的指针会被清空，但音频文件保留。
+
 ## 3. Nginx
 
 ```bash

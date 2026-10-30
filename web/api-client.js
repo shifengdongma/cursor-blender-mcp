@@ -77,7 +77,9 @@
       method: method,
       headers: headers,
       credentials: 'same-origin',
-      body: body === undefined ? null : body
+      body: body === undefined ? null : body,
+      signal: options.signal || undefined,
+      keepalive: !!options.keepalive
     };
   }
 
@@ -91,6 +93,7 @@
     try {
       response = await fetch(path, buildOptions(method, options));
     } catch (error) {
+      if (error && error.name === 'AbortError') throw error;
       throw new ApiError('网络连接失败，请稍后重试', 0, 'network_error');
     }
     var payload = await parsePayload(response);

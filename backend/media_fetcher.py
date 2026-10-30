@@ -15,6 +15,8 @@ from urllib.parse import urljoin, urlsplit
 
 import requests
 
+from .http_session import get_session
+
 
 class MediaFetchError(RuntimeError):
     def __init__(self, message, code="download_error"):
@@ -115,8 +117,10 @@ def download_url(url, dest_dir, kind="video", max_bytes=500 * 1024 * 1024,
     for _ in range(4):
         validate_url(current, allowed_private_hosts=allowed_private_hosts)
         try:
-            response = requests.get(
-                current, stream=True, allow_redirects=False, timeout=timeout_s
+            connect_timeout = min(10, max(1, int(timeout_s)))
+            response = get_session().get(
+                current, stream=True, allow_redirects=False,
+                timeout=(connect_timeout, timeout_s),
             )
         except requests.exceptions.RequestException as exc:
             raise MediaFetchError("下载失败: {0}".format(str(exc)[:200]), "download_failed")

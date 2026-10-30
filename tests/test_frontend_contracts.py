@@ -39,6 +39,30 @@ def test_creative_studio_capability_note_is_compact_and_has_no_demo_label():
     html = _read("web/creative-studio.html")
     assert "已接入能力" in html
     assert "真实任务链路" in html
+    assert "最终 MP4" in html
+    assert "多轨时间线" in html
     assert "演示" not in html
     assert "已连接" not in html
     assert "实时预览" not in html
+
+
+def test_creative_studio_modules_use_real_media_apis():
+    js = _read("web/creative-studio.js")
+    assert "vp-001" not in js
+    assert "/api/creative/tts/voices" in js
+    assert "/audio/selection" in js
+    assert "/timeline" in js
+    assert "timeline_version" in js
+    assert "/video-selection" in js
+    assert "/compose" in js
+    assert "AbortController" in js
+    assert "CSS 快速预览" in js
+    assert "未接入" in js
+    assert "renderExportTreeHTML" not in js
+
+
+def test_creative_studio_does_not_attach_persistent_listeners_per_render():
+    js = _read("web/creative-studio.js")
+    assert "function bindEffectsForm" not in js
+    assert "function bindTimelineEvents" not in js
+    assert "data-concept-actions-bound" in js

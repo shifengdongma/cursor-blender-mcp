@@ -5,7 +5,7 @@ from __future__ import absolute_import
 import os
 
 from backend import asset_service, creative_project_service, prompt_doc_service
-from backend import storyboard_service, task_service
+from backend import storyboard_service, task_service, timeline_service
 from backend.auth_service import AuthService
 from backend.config import Config
 from backend.database import reset_database
@@ -21,6 +21,7 @@ def reset_globals():
     creative_project_service._creative_project_service = None
     storyboard_service._storyboard_service = None
     task_service._task_service = None
+    timeline_service._timeline_service = None
     try:
         prompt_doc_service._prompt_doc_service = None
     except Exception:

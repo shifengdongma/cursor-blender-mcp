@@ -4,6 +4,7 @@ Storyboard service for managing storyboard_shots.
 """
 from __future__ import absolute_import
 
+import json
 import logging
 import time
 
@@ -75,13 +76,18 @@ class StoryboardService(object):
             "lighting_mood", "environment_detail", "character_action",
             "visual_style", "prompt_cn", "prompt_en", "negative_prompt",
             "primary_image_asset_id", "keyframe_asset_id", "video_asset_id", "audio_asset_id",
+            "selected_video_asset_id", "refined_video_asset_id", "video_selection_source",
+            "subtitle_asset_id", "audio_options", "audio_duration_s",
             "srt_path", "video_url", "status", "metadata",
         ]
         update_data = {}
         for key in updatable:
             if key in kwargs and kwargs[key] is not None:
                 setattr(existing, key, kwargs[key])
-                update_data[key] = kwargs[key]
+                if key in ("metadata", "audio_options"):
+                    update_data[key] = json.dumps(kwargs[key], ensure_ascii=False)
+                else:
+                    update_data[key] = kwargs[key]
 
         if not update_data:
             return existing
@@ -101,10 +107,61 @@ class StoryboardService(object):
             )
         return self.get_shot(shot_id)
 
+    def set_media_pointers(self, shot_id, **fields):
+        """Explicitly set pointer fields, including clearing them with None."""
+        allowed = {
+            "audio_asset_id", "subtitle_asset_id", "srt_path",
+            "selected_video_asset_id", "refined_video_asset_id",
+            "video_selection_source", "audio_options", "audio_duration_s",
+        }
+        update_data = {}
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            if key == "audio_options" and value is not None:
+                update_data[key] = json.dumps(value, ensure_ascii=False)
+            else:
+                update_data[key] = value
+        if not update_data:
+            return self.get_shot(shot_id)
+        update_data["updated_at"] = _now()
+        columns = list(update_data.keys())
+        self.db.execute(
+            "UPDATE storyboard_shots SET {0} WHERE id = ?".format(
+                ", ".join("{0} = ?".format(column) for column in columns)
+            ),
+            tuple(update_data[column] for column in columns) + (shot_id,),
+        )
+        return self.get_shot(shot_id)
+
     def delete_shot(self, shot_id):
-        """Delete a shot."""
-        deleted = self.db.delete("storyboard_shots", "id = ?", (shot_id,))
-        return deleted > 0
+        """Delete a shot and its dependent timeline/version/task references."""
+        shot = self.get_shot(shot_id)
+        if not shot:
+            return False
+        now = _now()
+        with self.db.transaction() as cursor:
+            cursor.execute(
+                "DELETE FROM shot_media_versions WHERE shot_id = ?", (shot_id,)
+            )
+            cursor.execute(
+                "DELETE FROM timeline_clips WHERE shot_id = ?", (shot_id,)
+            )
+            removed_clips = cursor.rowcount
+            cursor.execute(
+                "UPDATE generation_tasks SET target_shot_id = NULL WHERE target_shot_id = ?",
+                (shot_id,),
+            )
+            cursor.execute("DELETE FROM storyboard_shots WHERE id = ?", (shot_id,))
+            if cursor.rowcount != 1:
+                raise RuntimeError("shot delete lost race")
+            if removed_clips:
+                cursor.execute(
+                    "UPDATE creative_projects SET timeline_version = "
+                    "COALESCE(timeline_version, 0) + 1, updated_at = ? WHERE id = ?",
+                    (now, shot.creative_project_id),
+                )
+        return True
 
     def reorder_shots(self, creative_project_id, ordered_ids):
         """

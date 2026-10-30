@@ -27,6 +27,9 @@ data/jobs/
 # Local asset files (runtime/user generated)
 data/assets/
 
+# Piper model weights are deployment assets, not source code
+data/tts_models/
+
 # Database (generated)
 data/aigv.db
 

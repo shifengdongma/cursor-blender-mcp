@@ -9,9 +9,8 @@ import tempfile
 import pytest
 from flask import Flask, g
 
-from backend import creative_project_service
-from backend import storyboard_service
-from backend import task_service
+from backend import asset_service, creative_project_service
+from backend import storyboard_service, task_service, timeline_service
 from backend.creative_routes import register_creative_routes
 from backend.database import get_database, reset_database
 from backend.http_utils import ApiError
@@ -92,6 +91,8 @@ def app():
     creative_project_service._creative_project_service = None
     storyboard_service._storyboard_service = None
     task_service._task_service = None
+    asset_service._asset_service = None
+    timeline_service._timeline_service = None
 
     app = Flask(__name__)
     app.testing = True
@@ -122,6 +123,8 @@ def app():
     creative_project_service._creative_project_service = None
     storyboard_service._storyboard_service = None
     task_service._task_service = None
+    asset_service._asset_service = None
+    timeline_service._timeline_service = None
 
 
 @pytest.fixture
@@ -301,9 +304,9 @@ class TestCreativeRoutes(object):
         pid = create_resp.get_json()["data"]["id"]
 
         resp = client.post("/api/creative/projects/{0}/compose".format(pid), json={})
-        assert resp.status_code == 201
+        assert resp.status_code == 400
         data = resp.get_json()
-        assert data["data"]["task_type"] == "compose"
+        assert data["error"] == "timeline_has_no_video"
 
     def test_export_endpoint(self, client):
         create_resp = client.post("/api/creative/projects", json={"name": "Export"})
@@ -318,20 +321,26 @@ class TestCreativeRoutes(object):
         create_resp = client.post("/api/creative/projects", json={"name": "Timeline"})
         pid = create_resp.get_json()["data"]["id"]
 
-        # Save timeline
+        # Save a subtitle-only timeline (valid without media assets).
         resp = client.put("/api/creative/projects/{0}/timeline".format(pid), json={
+            "timeline_version": 0,
             "tracks": [
-                {"name": "Video", "track_type": "video", "sequence_no": 0, "clips": [
-                    {"name": "Clip 1", "start_time": 0, "duration_s": 5}
+                {"name": "字幕", "track_type": "subtitle", "role": "subtitle",
+                 "sequence_no": 0, "clips": [
+                    {"name": "字幕 1", "start_time": 0, "duration_s": 2,
+                     "subtitle_text": "测试字幕"}
                 ]}
             ]
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json()["data"]["saved"] is True
+        assert resp.get_json()["data"]["timeline_version"] == 1
 
         # Load timeline
         resp = client.get("/api/creative/projects/{0}/timeline".format(pid))
         assert resp.status_code == 200
         data = resp.get_json()["data"]
-        assert len(data) == 1
-        assert data[0]["track"]["name"] == "Video"
-        assert len(data[0]["clips"]) == 1
+        assert len(data["tracks"]) == 1
+        assert data["tracks"][0]["track"]["name"] == "字幕"
+        assert len(data["tracks"][0]["clips"]) == 1
+        assert data["tracks"][0]["clips"][0]["subtitle_text"] == "测试字幕"

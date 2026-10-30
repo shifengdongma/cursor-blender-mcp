@@ -18,13 +18,17 @@ from .credential_service import CredentialError, CredentialService
 from .database import get_database
 from .http_utils import ApiError
 from .media_fetcher import MediaFetchError, download_url
-from .models import GenerationTask, StoryboardShot
+from .models import GenerationTask, ShotMediaVersion, StoryboardShot
 
 logger = logging.getLogger(__name__)
 
 
 def _now():
     return int(time.time())
+
+
+def _now_ms():
+    return time.time()
 
 
 def _task_dir(cfg, task):
@@ -600,7 +604,7 @@ def _fail_if_expired(cfg, task_service, task, lease_owner, stage="running"):
         task.id, lease_owner, status="failed", stage="failed",
         error_code="task_timeout",
         error_message="任务超过最长等待时间；第三方任务 ID 已保留，管理员可恢复轮询",
-        completed_at=_now(),
+        completed_at=_now(), completed_at_ms=_now_ms(),
     )
     return True
 
@@ -619,10 +623,11 @@ def submit_task(cfg, task_service, task, lease_owner):
     if task.cancel_requested:
         task_service.release_generation_lease(
             task.id, lease_owner, status="cancelled", completed_at=_now(),
-            stage="cancelled",
+            completed_at_ms=_now_ms(), stage="cancelled",
         )
         return
 
+    task_service.update_task(task.id, provider_request_started_at=_now_ms())
     provider = _provider_for_task(cfg, task)
     model = generation_models.get_model(
         cfg, (task.params or {}).get("model_key") or "", include_unavailable=True,
@@ -654,6 +659,8 @@ def submit_task(cfg, task_service, task, lease_owner):
                     submission_uncertain=0,
                     next_retry_at=_now() + cfg.GENERATION_POLL_INTERVAL_S,
                     last_polled_at=_now(), error_code=None, error_message=None,
+                    provider_request_finished_at=_now_ms(),
+                    provider_job_created_at=_now_ms(),
                 )
                 return
             size = "{0}x{1}".format(
@@ -667,7 +674,14 @@ def submit_task(cfg, task_service, task, lease_owner):
                 reference_image_urls=references,
                 watermark=bool(params.get("watermark")),
             )
+            task_service.update_task(
+                task.id,
+                provider_request_finished_at=_now_ms(),
+                provider_job_created_at=_now_ms(),
+                download_started_at=_now_ms(),
+            )
             files = _download_image_items(cfg, result.get("images"), _task_dir(cfg, task))
+            task_service.update_task(task.id, download_finished_at=_now_ms())
             if not files:
                 raise MediaFetchError("Provider 没有返回图片", "empty_output")
             finalize_task(cfg, task_service, task, lease_owner, files, "image")
@@ -729,6 +743,8 @@ def submit_task(cfg, task_service, task, lease_owner):
             provider_job_id=str(provider_job_id), provider_status="queued",
             submission_uncertain=0, next_retry_at=_now() + cfg.GENERATION_POLL_INTERVAL_S,
             last_polled_at=_now(), error_code=None, error_message=None,
+            provider_request_finished_at=_now_ms(),
+            provider_job_created_at=_now_ms(),
         )
     except ApiError:
         raise
@@ -744,19 +760,21 @@ def _handle_submission_error(cfg, task_service, task, lease_owner, exc):
             task.id, lease_owner, status="needs_review", stage="needs_review",
             submission_uncertain=1, error_code="submission_uncertain",
             error_message="提交结果不确定，需人工确认是否已在服务商侧创建任务",
-            completed_at=_now(),
+            completed_at=_now(), completed_at_ms=_now_ms(),
+            provider_request_finished_at=_now_ms(),
         )
         return
     if error_type == "provider_rate_limited" and (task.attempt_count or 0) < (task.max_attempts or 3):
         task_service.release_generation_lease(
             task.id, lease_owner, status="queued", stage="queued",
             next_retry_at=_now() + 60, error_code=error_type, error_message=message,
-            submission_uncertain=0,
+            submission_uncertain=0, provider_request_finished_at=_now_ms(),
         )
         return
     task_service.release_generation_lease(
         task.id, lease_owner, status="failed", stage="failed",
         error_code=error_type, error_message=message, completed_at=_now(),
+        completed_at_ms=_now_ms(), provider_request_finished_at=_now_ms(),
     )
 
 
@@ -774,7 +792,8 @@ def poll_task(cfg, task_service, task, lease_owner):
         message = None if cancelled else "服务商不支持取消运行中任务，任务可能仍产生费用"
         task_service.release_generation_lease(
             task.id, lease_owner, status="cancelled", stage="cancelled",
-            completed_at=_now(), error_code=None if cancelled else "cancel_not_guaranteed",
+            completed_at=_now(), completed_at_ms=_now_ms(),
+            error_code=None if cancelled else "cancel_not_guaranteed",
             error_message=message,
         )
         return
@@ -791,11 +810,17 @@ def poll_task(cfg, task_service, task, lease_owner):
                     last_polled_at=_now(),
                 )
                 return
+            task_service.update_task(
+                task.id,
+                provider_finished_at=_now_ms(),
+                download_started_at=_now_ms(),
+            )
             files = provider.download_results_from_history(
                 entry,
                 _task_dir(cfg, task),
                 max_bytes=cfg.MAX_GENERATION_DOWNLOAD_MB * 1024 * 1024,
             )
+            task_service.update_task(task.id, download_finished_at=_now_ms())
             if not files:
                 raise MediaFetchError("ComfyUI 没有返回图片", "empty_output")
             finalize_task(cfg, task_service, task, lease_owner, files, "image")
@@ -830,7 +855,13 @@ def poll_task(cfg, task_service, task, lease_owner):
                 video_url = provider.extract_video_url(data)
             if not video_url:
                 raise MediaFetchError("Provider 成功响应缺少视频地址", "provider_invalid_response")
+            task_service.update_task(
+                task.id,
+                provider_finished_at=_now_ms(),
+                download_started_at=_now_ms(),
+            )
             path = _download_video(cfg, video_url, _task_dir(cfg, task))
+            task_service.update_task(task.id, download_finished_at=_now_ms())
             finalize_task(cfg, task_service, task, lease_owner, [path], "video")
             return
 
@@ -838,7 +869,8 @@ def poll_task(cfg, task_service, task, lease_owner):
             if status in ("cancelled", "canceled"):
                 task_service.release_generation_lease(
                     task.id, lease_owner, status="cancelled", stage="cancelled",
-                    completed_at=_now(),
+                    completed_at=_now(), completed_at_ms=_now_ms(),
+                    provider_finished_at=_now_ms(),
                 )
             else:
                 error = {"code": "provider_failed", "message": "视频生成失败"}
@@ -853,7 +885,8 @@ def poll_task(cfg, task_service, task, lease_owner):
                     task.id, lease_owner, status="failed", stage="failed",
                     error_code=str(error.get("code") or "provider_failed")[:80],
                     error_message=error_message[:500],
-                    completed_at=_now(),
+                    completed_at=_now(), completed_at_ms=_now_ms(),
+                    provider_finished_at=_now_ms(),
                 )
             return
 
@@ -876,7 +909,7 @@ def _handle_poll_error(cfg, task_service, task, lease_owner, exc):
     task_service.release_generation_lease(
         task.id, lease_owner, status="failed", stage="failed",
         poll_error_count=attempt, error_code=getattr(exc, "code", None) or getattr(exc, "error_type", "poll_error"),
-        error_message=message, completed_at=_now(),
+        error_message=message, completed_at=_now(), completed_at_ms=_now_ms(),
     )
 
 
@@ -906,6 +939,16 @@ def finalize_task(cfg, task_service, task, lease_owner, files, kind):
     """
     asset_service = get_asset_service(cfg.DATA_DIR)
     tenant_id = _tenant_for_user(task.created_by)
+    owner_user_id = task.created_by
+    if task.creative_project_id:
+        project_row = get_database().fetch_one(
+            "SELECT user_id, tenant_id FROM creative_projects WHERE id = ?",
+            (task.creative_project_id,),
+        )
+        if project_row and project_row.get("user_id"):
+            owner_user_id = project_row["user_id"]
+            tenant_id = project_row.get("tenant_id") or tenant_id
+    persist_started_at = _now_ms()
     prepared = []
     for path in files:
         if not path or not os.path.isfile(path) or os.path.getsize(path) == 0:
@@ -945,7 +988,7 @@ def finalize_task(cfg, task_service, task, lease_owner, files, kind):
                         "model_id": task.model_id,
                         "generation_params": generation_params,
                     },
-                    owner_user_id=task.created_by,
+                    owner_user_id=owner_user_id,
                     tenant_id=tenant_id,
                     visibility="private",
                     checksum_sha256=item["digest"],
@@ -977,7 +1020,10 @@ def finalize_task(cfg, task_service, task, lease_owner, files, kind):
                 status="succeeded", stage="succeeded",
                 progress=100, result_payload=result_payload,
                 output_asset_id=output_asset_id,
-                completed_at=_now(), error_code=None, error_message=None,
+                completed_at=_now(), completed_at_ms=_now_ms(),
+                persist_started_at=persist_started_at,
+                persist_finished_at=_now_ms(),
+                error_code=None, error_message=None,
                 submission_uncertain=0,
             )
             if not affected:
@@ -1007,11 +1053,43 @@ def finalize_task(cfg, task_service, task, lease_owner, files, kind):
                         get_storyboard_service().update_shot(
                             shot.id, cursor=cursor,
                             video_asset_id=output_asset_id,
+                            selected_video_asset_id=output_asset_id,
+                            video_selection_source="original",
                             video_url=(
                                 "/api/assets/{0}/file".format(output_asset_id)
                                 if output_asset_id else None
                             ),
                             status=next_status,
+                        )
+                        cursor.execute(
+                            "UPDATE shot_media_versions SET is_selected = 0, updated_at = ? "
+                            "WHERE shot_id = ? AND media_kind = 'video'",
+                            (_now(), shot.id),
+                        )
+                        version = ShotMediaVersion(
+                            creative_project_id=shot.creative_project_id,
+                            shot_id=shot.id,
+                            media_kind="video",
+                            asset_id=output_asset_id,
+                            task_id=task.id,
+                            source="generation",
+                            label="AI 生成视频",
+                            metadata={
+                                "provider": task.provider,
+                                "model_id": task.model_id,
+                                "generation_params": generation_params,
+                            },
+                            is_selected=1,
+                            created_at=_now(),
+                            updated_at=_now(),
+                        )
+                        columns = list(version.to_insert_params().keys())
+                        params = version.to_insert_params()
+                        cursor.execute(
+                            "INSERT INTO shot_media_versions ({0}) VALUES ({1})".format(
+                                ", ".join(columns), ", ".join("?" for _ in columns)
+                            ),
+                            tuple(params[column] for column in columns),
                         )
     except _LeaseLost:
         for path in created_paths:

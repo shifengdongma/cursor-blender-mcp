@@ -30,13 +30,19 @@ class TaskService(object):
         Pass ``cursor`` to insert inside an existing ``db.transaction()`` block
         (used to make quota checks and inserts atomic).
         """
+        provided_created_at = kwargs.get("created_at")
+        provided_created_at_ms = kwargs.get("created_at_ms")
         task = GenerationTask(
             creative_project_id=creative_project_id,
             task_type=task_type,
             **kwargs
         )
-        task.created_at = _now()
-        task.updated_at = _now()
+        if provided_created_at is None:
+            task.created_at = _now()
+        if provided_created_at_ms is None:
+            task.created_at_ms = float(time.time())
+        if not task.updated_at:
+            task.updated_at = _now()
 
         params = task.to_insert_params()
         if cursor is None:
@@ -58,6 +64,18 @@ class TaskService(object):
             (task_id,),
         )
         return GenerationTask.from_row(row)
+
+    def get_tasks_by_ids(self, task_ids):
+        """Fetch many task rows in one query, preserving input order."""
+        ids = [task_id for task_id in (task_ids or []) if task_id]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.db.fetch_all(
+            "SELECT * FROM generation_tasks WHERE id IN ({0})".format(placeholders),
+            tuple(ids),
+        )
+        return {row["id"]: GenerationTask.from_row(row) for row in rows}
 
     # Fixed ORDER BY fragments; raw client input never reaches the SQL string.
     SORT_ORDERS = {
@@ -150,7 +168,12 @@ class TaskService(object):
         now = _now()
         affected = self.db.update(
             "generation_tasks",
-            {"status": GenerationTask.STATUS_RUNNING, "claimed_at": now, "updated_at": now},
+            {
+                "status": GenerationTask.STATUS_RUNNING,
+                "claimed_at": now,
+                "claimed_at_ms": time.time(),
+                "updated_at": now,
+            },
             "id = ? AND status = ?",
             (task_id, GenerationTask.STATUS_QUEUED),
         )
@@ -178,9 +201,14 @@ class TaskService(object):
             cursor.execute(
                 "UPDATE generation_tasks SET status = 'submitting', lease_owner = ?, "
                 "lease_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1, "
-                "submission_uncertain = 1, submission_started_at = ?, updated_at = ?, claimed_at = ? "
+                "submission_uncertain = 1, submission_started_at = ?, updated_at = ?, "
+                "claimed_at = ?, claimed_at_ms = COALESCE(claimed_at_ms, ?), "
+                "created_at_ms = COALESCE(created_at_ms, ?) "
                 "WHERE id = ? AND status = 'queued'",
-                (lease_owner, now + lease_seconds, now, now, now, task_id),
+                (
+                    lease_owner, now + lease_seconds, now, now, now,
+                    time.time(), time.time(), task_id,
+                ),
             )
             if cursor.rowcount != 1:
                 return None
@@ -220,8 +248,13 @@ class TaskService(object):
                 "status", "stage", "progress", "provider_status", "provider_job_id",
                 "next_retry_at", "poll_error_count", "last_polled_at",
                 "submission_uncertain", "error_code", "error_message",
-                "completed_at", "result_payload", "output_asset_id",
-                "cancel_requested",
+                "completed_at", "completed_at_ms", "result_payload",
+                "output_asset_id", "cancel_requested",
+                "provider_request_started_at", "provider_request_finished_at",
+                "provider_job_created_at", "provider_finished_at",
+                "download_started_at", "download_finished_at",
+                "persist_started_at", "persist_finished_at",
+                "claimed_at_ms", "created_at_ms", "timing_json",
             ):
                 if key == "result_payload":
                     update[key] = __import__("json").dumps(value, ensure_ascii=False)
@@ -299,12 +332,19 @@ class TaskService(object):
             "submission_uncertain", "submission_started_at", "poll_error_count",
             "last_polled_at", "output_asset_id", "client_request_id",
             "cost_estimate", "currency", "cancel_requested",
+            "timeline_version", "timeline_snapshot",
+            "created_at_ms", "claimed_at_ms",
+            "provider_request_started_at", "provider_request_finished_at",
+            "provider_job_created_at", "provider_finished_at",
+            "download_started_at", "download_finished_at",
+            "persist_started_at", "persist_finished_at", "completed_at_ms",
+            "timing_json",
         ]
         update_data = {}
         for key in updatable:
             if key in kwargs:
                 setattr(existing, key, kwargs[key])
-                if key in ("result_payload", "params"):
+                if key in ("result_payload", "params", "timeline_snapshot", "timing_json"):
                     update_data[key] = __import__("json").dumps(kwargs[key], ensure_ascii=False)
                 else:
                     update_data[key] = kwargs[key]
@@ -331,6 +371,7 @@ class TaskService(object):
                     {
                         "status": GenerationTask.STATUS_CANCELLED,
                         "completed_at": _now(),
+                        "completed_at_ms": time.time(),
                         "updated_at": _now(),
                     },
                     "id = ? AND status = 'queued'",
@@ -358,17 +399,18 @@ class TaskService(object):
             return task.status == GenerationTask.STATUS_CANCELLED
 
         if task.status in (GenerationTask.STATUS_QUEUED, GenerationTask.STATUS_RUNNING):
-            self.db.update(
+            affected = self.db.update(
                 "generation_tasks",
                 {
                     "status": GenerationTask.STATUS_CANCELLED,
                     "completed_at": _now(),
+                    "completed_at_ms": time.time(),
                     "updated_at": _now(),
                 },
-                "id = ?",
+                "id = ? AND status IN ('queued','running')",
                 (task_id,),
             )
-            return True
+            return affected > 0
 
         return False
 
@@ -462,6 +504,23 @@ class TaskService(object):
                 tuple(params[column] for column in columns),
             )
         return artifact
+
+    def list_artifacts_for_tasks(self, task_ids):
+        """Fetch artifacts for many tasks in one query, grouped by task_id."""
+        ids = [task_id for task_id in (task_ids or []) if task_id]
+        grouped = {task_id: [] for task_id in ids}
+        if not ids:
+            return grouped
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.db.fetch_all(
+            "SELECT * FROM task_artifacts WHERE task_id IN ({0}) "
+            "ORDER BY created_at DESC".format(placeholders),
+            tuple(ids),
+        )
+        for row in rows:
+            artifact = TaskArtifact.from_row(row)
+            grouped.setdefault(artifact.task_id, []).append(artifact)
+        return grouped
 
     def list_artifacts(self, creative_project_id=None, task_id=None):
         """List artifacts, optionally filtered."""

@@ -161,10 +161,18 @@ def test_legacy_tts_asset_is_private_and_owner_scoped(app, monkeypatch):
         def __init__(self, *args, **kwargs):
             pass
 
-        def synthesize(self, text, voice_id, output_path):
+        def synthesize(self, text, voice_id, output_path, options=None):
             with open(output_path, "wb") as handle:
                 handle.write(b"RIFF0000WAVEfmt ")
-            return {"duration_s": 1.0, "format": "wav"}
+            return {
+                "duration_s": 1.0,
+                "format": "wav",
+                "provider": "piper",
+                "voice_id": voice_id,
+                "voice_label": "Fake",
+                "speech_rate": (options or {}).get("speech_rate", 1.0),
+                "volume": (options or {}).get("volume", 1.0),
+            }
 
     monkeypatch.setattr(task_worker, "PiperTTSProvider", FakeTTS)
 

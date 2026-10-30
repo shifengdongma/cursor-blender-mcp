@@ -33,6 +33,7 @@ class AssetService(object):
     TYPE_SPATIAL_ANCHOR = 'spatial_anchor'
     TYPE_VIDEO = 'video'
     TYPE_AUDIO = 'audio'
+    TYPE_SUBTITLE = 'subtitle'
     TYPE_DOCUMENT = 'document'
     TYPE_ARCHIVE = 'archive'
 
@@ -48,6 +49,7 @@ class AssetService(object):
         TYPE_IMAGE: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tiff', 'tif', 'ico', 'heic', 'avif'],
         TYPE_VIDEO: ['mp4', 'mov', 'avi', 'webm', 'mkv', 'flv', 'm4v', 'mpeg', 'mpg', 'wmv'],
         TYPE_AUDIO: ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma', 'opus'],
+        TYPE_SUBTITLE: ['srt', 'vtt', 'ass'],
         TYPE_DOCUMENT: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'csv', 'rtf', 'odt', 'json', 'xml', 'yaml', 'yml'],
         TYPE_ARCHIVE: ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'],
     }
@@ -82,7 +84,7 @@ class AssetService(object):
             'models/theater', 'models/gallery', 'models/museum', 'models/concert',
             'images/textures', 'images/previews', 'images/references',
             'prompts/venues', 'prompts/shots', 'prompts/styles',
-            'videos', 'audio', 'documents', 'archives', 'generated',
+            'videos', 'audio', 'subtitles', 'documents', 'archives', 'generated',
         ]
         for subdir in subdirs:
             path = os.path.join(self.assets_dir, subdir)
@@ -113,6 +115,10 @@ class AssetService(object):
         if not candidate.startswith(real_base + os.sep):
             raise AssetServiceError("Asset path outside assets directory")
         return os.path.relpath(candidate, real_base)
+
+    def relative_path_for(self, full_path):
+        """Public wrapper used by media writers that store inside assets/."""
+        return self._relative_asset_path(full_path)
 
     def _validate_venue(self, venue_type):
         if venue_type in (None, ''):
@@ -165,6 +171,8 @@ class AssetService(object):
             return os.path.join('videos', filename) if filename else 'videos'
         elif asset_type == self.TYPE_AUDIO:
             return os.path.join('audio', filename) if filename else 'audio'
+        elif asset_type == self.TYPE_SUBTITLE:
+            return os.path.join('subtitles', filename) if filename else 'subtitles'
         elif asset_type == self.TYPE_DOCUMENT:
             return os.path.join('documents', filename) if filename else 'documents'
         elif asset_type == self.TYPE_ARCHIVE:
@@ -187,7 +195,7 @@ class AssetService(object):
     def _filter_conditions(self, asset_type=None, venue_type=None,
                            owner_user_id=None, include_shared=False,
                            tenant_id=None, q=None, created_after=None,
-                           created_before=None):
+                           created_before=None, audio_role=None):
         """Build the shared WHERE fragment for list/count queries."""
         conditions = []
         params = []
@@ -197,6 +205,9 @@ class AssetService(object):
         if venue_type:
             conditions.append('venue_type = ?')
             params.append(venue_type)
+        if audio_role:
+            conditions.append('audio_role = ?')
+            params.append(audio_role)
         if owner_user_id:
             if include_shared:
                 conditions.append(
@@ -223,7 +234,8 @@ class AssetService(object):
 
     def list_assets(self, asset_type=None, venue_type=None, limit=100, offset=0,
                     owner_user_id=None, include_shared=False, tenant_id=None, q=None,
-                    created_after=None, created_before=None, sort='newest'):
+                    created_after=None, created_before=None, sort='newest',
+                    audio_role=None):
         order_clause = self.SORT_ORDERS.get(sort or 'newest')
         if order_clause is None:
             raise AssetServiceError("Unsupported sort")
@@ -236,6 +248,7 @@ class AssetService(object):
             q=q,
             created_after=created_after,
             created_before=created_before,
+            audio_role=audio_role,
         )
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
         rows = self.db.fetch_all(
@@ -248,7 +261,7 @@ class AssetService(object):
 
     def count_assets(self, asset_type=None, venue_type=None, owner_user_id=None,
                      include_shared=False, tenant_id=None, q=None,
-                     created_after=None, created_before=None):
+                     created_after=None, created_before=None, audio_role=None):
         conditions, params = self._filter_conditions(
             asset_type=asset_type,
             venue_type=venue_type,
@@ -258,6 +271,7 @@ class AssetService(object):
             q=q,
             created_after=created_after,
             created_before=created_before,
+            audio_role=audio_role,
         )
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
         return self.db.count(Asset.TABLE_NAME, where_clause, tuple(params) if params else None)
@@ -266,12 +280,26 @@ class AssetService(object):
         row = self.db.fetch_one('SELECT * FROM assets WHERE id = ?', (asset_id,))
         return Asset.from_row(row)
 
+    def get_assets_by_ids(self, asset_ids):
+        """Fetch many assets in one query (order follows the input)."""
+        ids = [asset_id for asset_id in (asset_ids or []) if asset_id]
+        if not ids:
+            return {}
+        placeholders = ','.join('?' for _ in ids)
+        rows = self.db.fetch_all(
+            'SELECT * FROM assets WHERE id IN ({0})'.format(placeholders),
+            tuple(ids),
+        )
+        assets = {row['id']: Asset.from_row(row) for row in rows}
+        return assets
+
     # ── CRUD ──
 
     def create_asset(self, name, asset_type, venue_type=None, file_path=None,
                      file_size=0, description=None, metadata=None,
                      owner_user_id=None, tenant_id=None, visibility=None,
-                     checksum_sha256=None, cursor=None):
+                     checksum_sha256=None, duration_s=None, audio_role=None,
+                     media_info=None, cursor=None):
         venue_type = self._validate_venue(venue_type)
         asset = Asset(
             name=name,
@@ -285,6 +313,9 @@ class AssetService(object):
             tenant_id=tenant_id,
             visibility=visibility,
             checksum_sha256=checksum_sha256,
+            duration_s=duration_s,
+            audio_role=audio_role,
+            media_info=media_info,
         )
         params = asset.to_insert_params()
         if cursor is None:
@@ -339,11 +370,21 @@ class AssetService(object):
         db = self.db
         shots = db.count(
             'storyboard_shots',
-            '(primary_image_asset_id = ? OR keyframe_asset_id = ? OR video_asset_id = ? OR audio_asset_id = ?)',
-            (asset_id, asset_id, asset_id, asset_id),
+            '(primary_image_asset_id = ? OR keyframe_asset_id = ? '
+            'OR video_asset_id = ? OR audio_asset_id = ? '
+            'OR selected_video_asset_id = ? OR refined_video_asset_id = ? '
+            'OR subtitle_asset_id = ?)',
+            (asset_id, asset_id, asset_id, asset_id, asset_id, asset_id, asset_id),
         )
         artifacts = db.count('task_artifacts', 'asset_id = ?', (asset_id,))
         timeline = db.count('timeline_clips', 'asset_id = ?', (asset_id,))
+        versions = db.count('shot_media_versions', 'asset_id = ?', (asset_id,))
+        final_video = db.count(
+            'creative_projects', 'final_video_asset_id = ?', (asset_id,)
+        )
+        export_packages = db.count(
+            'export_packages', 'asset_id = ?', (asset_id,)
+        )
         # New tasks store target_asset_id; legacy queued tasks only mention the
         # asset inside params JSON, so match both while the task is active.
         active_tasks = db.count(
@@ -356,6 +397,9 @@ class AssetService(object):
             'shots': shots,
             'artifacts': artifacts,
             'timeline': timeline,
+            'versions': versions,
+            'final_video': final_video,
+            'export_packages': export_packages,
             'active_tasks': active_tasks,
         }
 
@@ -505,6 +549,9 @@ class AssetService(object):
             'file_size': asset.file_size,
             'description': asset.description,
             'metadata': asset.metadata,
+            'duration_s': asset.duration_s,
+            'audio_role': asset.audio_role,
+            'media_info': asset.media_info,
             'visibility': asset.visibility,
             'can_edit': can_write_asset(asset, viewer) if viewer else False,
             'checksum_sha256': asset.checksum_sha256,

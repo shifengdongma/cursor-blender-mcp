@@ -222,10 +222,27 @@ class Config(object):
     # Piper TTS
     PIPER_BIN = os.environ.get("PIPER_BIN", "piper")
     PIPER_MODEL_PATH = os.environ.get("PIPER_MODEL_PATH", "./data/tts_models/zh_CN-huayan-medium.onnx")
+    TTS_VOICES_FILE = os.environ.get(
+        "TTS_VOICES_FILE", os.path.join(DATA_DIR, "tts_voices.json")
+    )
+    TTS_MODEL_DIR = os.environ.get(
+        "TTS_MODEL_DIR", os.path.join(DATA_DIR, "tts_models")
+    )
+    TTS_DEFAULT_VOICE_ID = os.environ.get("TTS_DEFAULT_VOICE_ID", "")
+    MAX_TTS_TEXT_LENGTH = _to_int(os.environ.get("MAX_TTS_TEXT_LENGTH"), default=2000)
+    MAX_AUDIO_UPLOAD_MB = _to_int(os.environ.get("MAX_AUDIO_UPLOAD_MB"), default=50)
 
     # FFmpeg
     FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "ffmpeg")
     FFPROBE_BIN = os.environ.get("FFPROBE_BIN", "ffprobe")
+    FFMPEG_TIMEOUT_S = _to_int(os.environ.get("FFMPEG_TIMEOUT_S"), default=1800)
+    SUBTITLE_FONT_NAME = os.environ.get("SUBTITLE_FONT_NAME", "Noto Sans CJK SC")
+    SUBTITLE_FONT_SIZE = _to_int(os.environ.get("SUBTITLE_FONT_SIZE"), default=24)
+    MAX_COMPOSE_DURATION_S = _to_int(os.environ.get("MAX_COMPOSE_DURATION_S"), default=900)
+    MAX_COMPOSE_INPUTS = _to_int(os.environ.get("MAX_COMPOSE_INPUTS"), default=200)
+    MAX_COMPOSE_OUTPUT_MB = _to_int(os.environ.get("MAX_COMPOSE_OUTPUT_MB"), default=1500)
+    MIN_OUTPUT_BYTES = _to_int(os.environ.get("MIN_OUTPUT_BYTES"), default=4096)
+    PRESET_AUDIO_MANIFEST = os.environ.get("PRESET_AUDIO_MANIFEST", "")
 
     # ── Cloud Provider Credentials (env-only, NEVER stored in DB) ──
     ALIYUN_ACCESS_KEY = os.environ.get("ALIYUN_ACCESS_KEY", "")
@@ -273,6 +290,12 @@ class Config(object):
     GENERATION_DOWNLOAD_TIMEOUT_S = _to_int(os.environ.get("GENERATION_DOWNLOAD_TIMEOUT_S"), default=180)
     GENERATION_IMAGE_DEADLINE_S = _to_int(os.environ.get("GENERATION_IMAGE_DEADLINE_S"), default=1800)
     GENERATION_VIDEO_DEADLINE_S = _to_int(os.environ.get("GENERATION_VIDEO_DEADLINE_S"), default=7200)
+    GENERATION_RECOVERY_INTERVAL_S = max(
+        10, _to_int(os.environ.get("GENERATION_RECOVERY_INTERVAL_S"), default=60)
+    )
+    PROVIDER_CONNECT_TIMEOUT_S = max(
+        1, _to_int(os.environ.get("PROVIDER_CONNECT_TIMEOUT_S"), default=10)
+    )
 
     # ── Quotas / upload limits ──
     MAX_CONTENT_LENGTH = _to_int(os.environ.get("MAX_CONTENT_LENGTH"), default=200 * 1024 * 1024)

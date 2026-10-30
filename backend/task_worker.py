@@ -5,6 +5,7 @@ Daemon thread pattern: claim → execute → update status.
 """
 from __future__ import absolute_import
 
+import hashlib
 import json
 import logging
 import os
@@ -12,12 +13,16 @@ import subprocess
 import threading
 import time
 
+from .access import can_read_asset
 from .asset_service import get_asset_service
 from .config import Config
 from .creative_project_service import get_creative_project_service
 from .credential_service import CredentialError, CredentialService
-from .media_service import get_media_service, MediaServiceError
-from .models import CreativeProject, GenerationTask, StoryboardShot, TaskArtifact, Asset, ExportPackage
+from .media_service import get_media_service, probe_media_file, MediaServiceError
+from .models import (
+    Asset, CreativeProject, ExportPackage, GenerationTask, ShotMediaVersion,
+    StoryboardShot, TaskArtifact,
+)
 from .providers.base import ProviderError
 from .providers.llm_provider import LLMProvider
 from .providers.image_provider import ComfyUIProvider
@@ -25,6 +30,8 @@ from .providers.tts_provider import PiperTTSProvider
 from .provider_router import ProviderRouter
 from .storyboard_service import get_storyboard_service
 from .task_service import get_task_service
+from .timeline_service import TimelineService, get_timeline_service
+from .tts_service import TTSVoiceRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +117,113 @@ def _owned_asset_fields(task, db):
         "tenant_id": row["tenant_id"] if row else None,
         "visibility": "private",
     }
+
+
+def _project_asset_fields(db, task):
+    """Project-scoped outputs belong to the project owner, not the admin who
+    happened to click the button.  Falls back to the task creator."""
+    project = db.fetch_one(
+        "SELECT user_id, tenant_id FROM creative_projects WHERE id = ?",
+        (task.creative_project_id,),
+    )
+    if project and project.get("user_id"):
+        return {
+            "owner_user_id": project["user_id"],
+            "tenant_id": project.get("tenant_id"),
+            "visibility": "private",
+        }
+    return _owned_asset_fields(task, db)
+
+
+def _raise_if_cancelled(task_service, task_id):
+    fresh = task_service.get_task(task_id)
+    if not fresh or fresh.status == GenerationTask.STATUS_CANCELLED or fresh.cancel_requested:
+        raise ProviderError("任务已取消", error_type="task_cancelled")
+
+
+def _task_user(db, task):
+    if not task.created_by:
+        return {}
+    row = db.fetch_one("SELECT * FROM auth_users WHERE id = ?", (task.created_by,))
+    if not row:
+        return {}
+    return {
+        "id": row["id"],
+        "tenant_id": row.get("tenant_id"),
+        "role": row.get("role") or "user",
+        "status": row.get("status") or "active",
+    }
+
+
+def _insert_row(cursor, table, params):
+    columns = list(params.keys())
+    cursor.execute(
+        "INSERT INTO {0} ({1}) VALUES ({2})".format(
+            table,
+            ", ".join(columns),
+            ", ".join("?" for _ in columns),
+        ),
+        tuple(params[column] for column in columns),
+    )
+
+
+def _resolve_compose_inputs(cfg, db, task, snapshot):
+    """Resolve snapshot asset IDs to safe local paths and stream metadata."""
+    asset_service = get_asset_service(cfg.DATA_DIR)
+    user = _task_user(db, task)
+    resolved = {}
+    for item in snapshot.get("tracks") or []:
+        track = item.get("track") or {}
+        role = track.get("role")
+        if not role:
+            if track.get("track_type") == "video":
+                role = "video"
+            elif track.get("track_type") == "subtitle":
+                role = "subtitle"
+        if role == "subtitle":
+            continue
+        expected_type = "video" if role == "video" else "audio"
+        for clip in item.get("clips") or []:
+            asset_id = clip.get("asset_id")
+            if not asset_id or asset_id in resolved:
+                continue
+            asset = asset_service.get_asset(asset_id)
+            if not asset:
+                raise ProviderError(
+                    "时间线引用的素材不存在：{0}".format(asset_id),
+                    error_type="compose_asset_missing",
+                )
+            if user and not can_read_asset(
+                asset, user, demo_mode=getattr(cfg, "DEMO_MODE", False)
+            ):
+                raise ProviderError(
+                    "无权使用时间线引用的素材",
+                    error_type="compose_asset_forbidden",
+                )
+            if asset.asset_type != expected_type:
+                raise ProviderError(
+                    "素材类型与轨道不匹配：{0}".format(asset_id),
+                    error_type="compose_asset_type_mismatch",
+                )
+            path = asset_service.get_file_path_for_asset(asset)
+            if not path:
+                raise ProviderError(
+                    "素材文件缺失：{0}".format(asset_id),
+                    error_type="compose_asset_file_missing",
+                )
+            try:
+                info = probe_media_file(cfg.FFPROBE_BIN, path)
+            except MediaServiceError as exc:
+                raise ProviderError(
+                    "素材无法探测：{0}".format(str(exc)),
+                    error_type="compose_asset_probe_failed",
+                )
+            resolved[asset_id] = {
+                "path": path,
+                "has_audio": bool(info.get("has_audio")),
+                "duration_s": float(info.get("duration_s") or 0.0),
+            }
+    return resolved, user
 
 
 def _execute_storyboard(task, cfg, db):
@@ -309,220 +423,710 @@ def _execute_video(task, cfg, db):
         raise ProviderError("No video URL in response", error_type="video_empty_output")
 
 
+def _sha256_file(path):
+    hasher = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _srt_timestamp(seconds):
+    seconds = max(0.0, float(seconds))
+    millis = int(round(seconds * 1000))
+    hours, remainder = divmod(millis, 3600000)
+    minutes, remainder = divmod(remainder, 60000)
+    whole_seconds, millis = divmod(remainder, 1000)
+    return "{0:02d}:{1:02d}:{2:02d},{3:03d}".format(
+        hours, minutes, whole_seconds, millis
+    )
+
+
+def _write_shot_srt(path, text, duration_s):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    content = (
+        "1\n{0} --> {1}\n{2}\n\n".format(
+            _srt_timestamp(0), _srt_timestamp(duration_s), text.strip()
+        )
+    )
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    return content
+
+
+def _record_media_version(db, task, shot, kind, asset, source, label,
+                          metadata, selected=True, clear_selection=True):
+    if clear_selection:
+        db.update(
+            "shot_media_versions",
+            {"is_selected": 0, "updated_at": int(time.time())},
+            "shot_id = ? AND media_kind = ?",
+            (shot.id, kind),
+        )
+    version = ShotMediaVersion(
+        creative_project_id=task.creative_project_id,
+        shot_id=shot.id,
+        media_kind=kind,
+        asset_id=asset.id,
+        task_id=task.id,
+        source=source,
+        label=label,
+        metadata=metadata,
+        is_selected=1 if selected else 0,
+    )
+    db.insert("shot_media_versions", version.to_insert_params())
+    return version
+
+
 def _execute_tts(task, cfg, db):
-    """Execute TTS narration generation via Piper."""
+    """Generate real per-shot narration with history, metadata and SRT."""
     task_service = get_task_service()
     storyboard_service = get_storyboard_service()
     asset_service = get_asset_service(cfg.DATA_DIR)
 
     task_service.update_task(task.id, stage="generating", progress=10)
+    _raise_if_cancelled(task_service, task.id)
 
-    # Get all shots with dialogue
+    params = task.params or {}
     shots = storyboard_service.list_shots(task.creative_project_id)
+    requested_ids = params.get("shot_ids") or []
+    if requested_ids:
+        by_id = {shot.id: shot for shot in shots}
+        missing = [shot_id for shot_id in requested_ids if shot_id not in by_id]
+        if missing:
+            raise ProviderError(
+                "分镜不属于当前项目：{0}".format(", ".join(missing)),
+                error_type="tts_shot_not_found",
+            )
+        targets = [by_id[shot_id] for shot_id in requested_ids]
+    else:
+        targets = shots
+
+    mode = params.get("mode") or "all"
+    if mode not in ("all", "missing"):
+        raise ProviderError("不支持的 TTS 模式", error_type="invalid_tts_mode")
+    if mode == "missing":
+        targets = [shot for shot in targets if not shot.audio_asset_id]
+
+    explicit_text = (params.get("text") or "").strip()
+    if explicit_text and len(targets) != 1:
+        raise ProviderError(
+            "为单个分镜指定文案时只能选择一个分镜",
+            error_type="invalid_tts_params",
+        )
+
+    registry = TTSVoiceRegistry(cfg)
+    voice = None
+    requested_voice_id = params.get("voice_id")
+    try:
+        voices = registry.list_voices()
+        if voices:
+            voice = registry.resolve_voice(requested_voice_id)
+    except ProviderError:
+        if requested_voice_id:
+            raise
+    voice_id = voice["id"] if voice else requested_voice_id
+    voice_label = voice["label"] if voice else None
 
     tts_provider = PiperTTSProvider(
         piper_bin=cfg.PIPER_BIN,
         piper_model_path=cfg.PIPER_MODEL_PATH,
         ffprobe_bin=cfg.FFPROBE_BIN,
+        ffmpeg_bin=cfg.FFMPEG_BIN,
+        registry=registry,
     )
+    options = {
+        "speech_rate": params.get("speech_rate", 1.0),
+        "volume": params.get("volume", 1.0),
+    }
 
-    task_service.update_task(task.id, progress=20)
-
-    output_dir = os.path.join(cfg.DATA_DIR, "assets", "audio", "generated")
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    audio_root = os.path.join(
+        cfg.DATA_DIR, "assets", "audio", "generated", str(task.id)
+    )
+    subtitle_root = os.path.join(
+        cfg.DATA_DIR, "assets", "subtitles", "generated", str(task.id)
+    )
+    os.makedirs(audio_root, exist_ok=True)
+    os.makedirs(subtitle_root, exist_ok=True)
 
     audio_assets = []
     total_duration = 0.0
+    skipped = 0
+    asset_fields = _project_asset_fields(db, task)
 
-    for i, shot in enumerate(shots):
-        if not shot.dialogue:
+    for index, shot in enumerate(targets):
+        _raise_if_cancelled(task_service, task.id)
+        text = explicit_text or (shot.dialogue or "").strip()
+        if not text:
+            skipped += 1
             continue
 
-        voice_id = shot.voice_id or cfg.PIPER_MODEL_PATH
-        output_path = os.path.join(output_dir, "shot_{0}.wav".format(shot.id))
+        output_path = os.path.join(audio_root, "shot_{0}.wav".format(shot.id))
+        result = tts_provider.synthesize(
+            text, voice_id, output_path, options=options
+        )
+        duration_s = float(result.get("duration_s") or 0.0)
+        if duration_s <= 0:
+            raise ProviderError(
+                "TTS 没有返回有效音频时长", error_type="tts_invalid_audio"
+            )
 
-        result = tts_provider.synthesize(shot.dialogue, voice_id, output_path)
-
-        # Create asset record
+        metadata = {
+            "source": "tts",
+            "task_id": task.id,
+            "project_id": task.creative_project_id,
+            "shot_id": shot.id,
+            "provider": result.get("provider") or "piper",
+            "voice_id": result.get("voice_id") or voice_id,
+            "voice_label": result.get("voice_label") or voice_label,
+            "text": text,
+            "speech_rate": result.get("speech_rate", options["speech_rate"]),
+            "volume": result.get("volume", options["volume"]),
+            "duration_s": duration_s,
+            "media_info": result.get("media_info"),
+        }
         asset = asset_service.create_asset(
-            name="{0}_narration".format(shot.scene_title or "shot_{0}".format(i)),
+            name="{0}_narration".format(shot.scene_title or "shot_{0}".format(index + 1)),
             asset_type="audio",
-            file_path=output_path,
+            file_path=asset_service.relative_path_for(output_path),
             file_size=os.path.getsize(output_path),
-            **_owned_asset_fields(task, db)
+            description=text[:500],
+            metadata=metadata,
+            duration_s=duration_s,
+            audio_role="narration",
+            media_info=result.get("media_info"),
+            checksum_sha256=_sha256_file(output_path),
+            **asset_fields
         )
 
-        storyboard_service.update_shot(shot.id, audio_asset_id=asset.id, srt_path=output_path)
+        srt_path = os.path.join(
+            subtitle_root, "shot_{0}.srt".format(shot.id)
+        )
+        _write_shot_srt(srt_path, text, duration_s)
+        subtitle_asset = asset_service.create_asset(
+            name="{0}_subtitle".format(shot.scene_title or "shot_{0}".format(index + 1)),
+            asset_type="subtitle",
+            file_path=asset_service.relative_path_for(srt_path),
+            file_size=os.path.getsize(srt_path),
+            description=text[:500],
+            metadata={
+                "source": "tts",
+                "task_id": task.id,
+                "project_id": task.creative_project_id,
+                "shot_id": shot.id,
+                "timing_method": "audio_duration",
+                "duration_s": duration_s,
+            },
+            checksum_sha256=_sha256_file(srt_path),
+            **asset_fields
+        )
 
-        audio_assets.append({"shot_id": shot.id, "asset_id": asset.id, "duration_s": result["duration_s"]})
-        total_duration += result["duration_s"]
+        audio_options = {
+            "provider": result.get("provider") or "piper",
+            "voice_id": result.get("voice_id") or voice_id,
+            "voice_label": result.get("voice_label") or voice_label,
+            "speech_rate": result.get("speech_rate", options["speech_rate"]),
+            "volume": result.get("volume", options["volume"]),
+            "text": text,
+            "duration_s": duration_s,
+            "task_id": task.id,
+            "subtitle_asset_id": subtitle_asset.id,
+        }
+        storyboard_service.update_shot(
+            shot.id,
+            audio_asset_id=asset.id,
+            subtitle_asset_id=subtitle_asset.id,
+            audio_options=audio_options,
+            audio_duration_s=duration_s,
+            srt_path=srt_path,
+            voice_id=audio_options["voice_id"],
+        )
+        _record_media_version(
+            db, task, shot, "audio", asset, "tts",
+            audio_options.get("voice_label") or "TTS 配音",
+            audio_options,
+        )
+        _record_media_version(
+            db, task, shot, "subtitle", subtitle_asset, "tts",
+            "分镜字幕",
+            {"task_id": task.id, "timing_method": "audio_duration"},
+        )
+        try:
+            get_timeline_service(cfg).sync_shot_media(
+                task.creative_project_id,
+                shot.id,
+                audio_asset_id=asset.id,
+                audio_duration_s=duration_s,
+                audio_options=audio_options,
+                subtitle_text=text,
+                subtitle_duration_s=duration_s,
+            )
+        except Exception:
+            logger.warning(
+                "Could not sync TTS result into timeline for shot %s",
+                shot.id, exc_info=True,
+            )
 
-        progress = 20 + int((i + 1) / max(len(shots), 1) * 70)
+        task_service.add_artifact(
+            task_id=task.id,
+            creative_project_id=task.creative_project_id,
+            name=os.path.basename(output_path),
+            artifact_type=TaskArtifact.TYPE_AUDIO,
+            file_path=os.path.relpath(output_path, cfg.DATA_DIR),
+            file_size=os.path.getsize(output_path),
+            asset_id=asset.id,
+            metadata={
+                "shot_id": shot.id,
+                "voice_id": audio_options["voice_id"],
+                "duration_s": duration_s,
+            },
+        )
+        task_service.add_artifact(
+            task_id=task.id,
+            creative_project_id=task.creative_project_id,
+            name=os.path.basename(srt_path),
+            artifact_type="subtitle",
+            file_path=os.path.relpath(srt_path, cfg.DATA_DIR),
+            file_size=os.path.getsize(srt_path),
+            asset_id=subtitle_asset.id,
+            metadata={"shot_id": shot.id, "timing_method": "audio_duration"},
+        )
+
+        audio_assets.append({
+            "shot_id": shot.id,
+            "asset_id": asset.id,
+            "subtitle_asset_id": subtitle_asset.id,
+            "duration_s": duration_s,
+            "voice_id": audio_options["voice_id"],
+        })
+        total_duration += duration_s
+
+        progress = 20 + int((index + 1) / max(len(targets), 1) * 70)
         task_service.update_task(task.id, progress=progress)
 
-    task_service.update_task(task.id, progress=100)
-    return {"audio_assets": audio_assets, "total_duration_s": total_duration}
+    first_asset_id = audio_assets[0]["asset_id"] if audio_assets else None
+    task_service.update_task(
+        task.id, progress=100, output_asset_id=first_asset_id
+    )
+    return {
+        "audio_assets": audio_assets,
+        "total_duration_s": total_duration,
+        "skipped": skipped,
+        "voice_id": voice_id,
+    }
 
 
 def _execute_compose(task, cfg, db):
-    """Execute video composition via MediaService."""
+    """Compose the task's saved timeline snapshot into a verified MP4."""
     task_service = get_task_service()
-    storyboard_service = get_storyboard_service()
-
-    task_service.update_task(task.id, stage="composing", progress=10)
-
+    project_service = get_creative_project_service(cfg.DATA_DIR)
+    asset_service = get_asset_service(cfg.DATA_DIR)
     media_service = get_media_service(cfg.FFMPEG_BIN, cfg.FFPROBE_BIN)
 
-    output_dir = os.path.join(cfg.DATA_DIR, "assets", "videos", "composed")
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    task_service.update_task(task.id, stage="composing", progress=5)
+    _raise_if_cancelled(task_service, task.id)
+    snapshot = task.timeline_snapshot
+    if not snapshot or not snapshot.get("tracks"):
+        raise ProviderError(
+            "合成任务缺少时间线快照", error_type="compose_no_timeline"
+        )
+    project = project_service.get_project(task.creative_project_id)
+    if not project:
+        raise ProviderError("项目不存在", error_type="project_not_found")
 
-    output_path = os.path.join(output_dir, "{0}_composed.mp4".format(task.creative_project_id))
-
-    params = task.params or {}
-    width = params.get("width", 1920)
-    height = params.get("height", 1080)
-    fps = params.get("fps", 24)
-
-    # Collect local clips/assets from shots. Remote URLs are never passed to FFmpeg.
-    shots = storyboard_service.list_shots(task.creative_project_id)
-    clip_specs = []
-    audio_files = []
-    asset_service = get_asset_service(cfg.DATA_DIR)
-
-    for shot in shots:
-        video_path = None
-        if shot.video_asset_id:
-            asset = asset_service.get_asset(shot.video_asset_id)
-            video_path = asset_service.get_file_path_for_asset(asset) if asset else None
-        if video_path:
-            clip_specs.append({
-                "file_path": video_path,
-                "duration_s": shot.duration_s or 4,
-            })
-        if shot.audio_asset_id:
-            audio_asset = asset_service.get_asset(shot.audio_asset_id)
-            audio_path = asset_service.get_file_path_for_asset(audio_asset) if audio_asset else None
-            if audio_path:
-                audio_files.append(audio_path)
-
-    task_service.update_task(task.id, progress=40)
-
-    # Compose video
-    media_service.compose_video(clip_specs, output_path, width=width, height=height, fps=fps)
-
-    task_service.update_task(task.id, progress=70)
-
-    # Mix audio if available
-    audio_output = os.path.join(output_dir, "{0}_audio.aac".format(task.creative_project_id))
-    if audio_files:
-        media_service.mix_audio(audio_files, audio_output)
-
-    task_service.update_task(task.id, progress=90)
-
-    # Create asset record
-    asset_service = get_asset_service(cfg.DATA_DIR)
-    if os.path.exists(output_path):
-        asset = asset_service.create_asset(
-            name="composed_video",
-            asset_type="video",
-            file_path=output_path,
-            file_size=os.path.getsize(output_path),
-            **_owned_asset_fields(task, db)
+    inputs, user = _resolve_compose_inputs(cfg, db, task, snapshot)
+    settings = dict((task.params or {}).get("export_settings") or {})
+    settings["subtitle_mode"] = settings.get("subtitle_mode") or "none"
+    settings["subtitle_font_name"] = settings.get(
+        "subtitle_font_name", getattr(cfg, "SUBTITLE_FONT_NAME", "Noto Sans CJK SC")
+    )
+    settings["subtitle_font_size"] = settings.get(
+        "subtitle_font_size", getattr(cfg, "SUBTITLE_FONT_SIZE", 24)
+    )
+    timeline_end = TimelineService.timeline_end(snapshot)
+    if timeline_end <= 0:
+        raise ProviderError("时间线没有视频内容", error_type="timeline_has_no_video")
+    max_duration = int(getattr(cfg, "MAX_COMPOSE_DURATION_S", 900))
+    if timeline_end > max_duration:
+        raise ProviderError(
+            "时间线超过最长合成时长（{0} 秒）".format(max_duration),
+            error_type="timeline_too_long",
         )
 
-        task_service.update_task(task.id, progress=100)
-        return {"video_asset_id": asset.id, "output_path": output_path}
+    output_dir = os.path.join(
+        cfg.DATA_DIR, "assets", "videos", "composed", str(task.id)
+    )
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "final_video.mp4")
 
-    task_service.update_task(task.id, progress=100)
-    return {"output_path": output_path}
+    subtitle_asset_path = None
+    subtitle_srt = None
+    if settings["subtitle_mode"] in ("burn", "mov_text"):
+        subtitle_srt = TimelineService.build_srt_from_timeline(snapshot)
+        if not subtitle_srt.strip():
+            # A requested subtitle mode with no text silently produces no
+            # subtitle asset; never claim subtitles exist when they do not.
+            settings["subtitle_mode"] = "none"
+        else:
+            subtitle_dir = os.path.join(
+                cfg.DATA_DIR, "assets", "subtitles", "generated", str(task.id)
+            )
+            os.makedirs(subtitle_dir, exist_ok=True)
+            subtitle_asset_path = os.path.join(subtitle_dir, "subtitles.srt")
+            with open(subtitle_asset_path, "w", encoding="utf-8") as handle:
+                handle.write(subtitle_srt)
+            settings["subtitle_path"] = subtitle_asset_path
+
+    def progress(value):
+        task_service.update_task(
+            task.id, stage="composing", progress=max(5, min(95, int(value)))
+        )
+
+    result = media_service.compose_timeline(
+        snapshot, output_path, settings, inputs=inputs, progress_cb=progress
+    )
+    _raise_if_cancelled(task_service, task.id)
+    task_service.update_task(task.id, progress=96)
+
+    owner_user_id = project.user_id or task.created_by
+    tenant_id = project.tenant_id or (user or {}).get("tenant_id")
+    stored_settings = dict(settings)
+    stored_settings.pop("subtitle_path", None)
+    now = int(time.time())
+    subtitle_asset = None
+    try:
+        with task_service.db.transaction() as cursor:
+            asset = asset_service.create_asset(
+                name="{0} 成片".format(project.name or "AIGV"),
+                asset_type="video",
+                file_path=asset_service.relative_path_for(output_path),
+                file_size=os.path.getsize(output_path),
+                description="时间线合成成片",
+                metadata={
+                    "source": "compose",
+                    "task_id": task.id,
+                    "project_id": project.id,
+                    "timeline_version": snapshot.get("timeline_version"),
+                    "export_settings": stored_settings,
+                    "width": result["width"],
+                    "height": result["height"],
+                    "fps": result["fps"],
+                    "duration_s": result["duration_s"],
+                    "subtitle_mode": settings["subtitle_mode"],
+                },
+                owner_user_id=owner_user_id,
+                tenant_id=tenant_id,
+                visibility="private",
+                checksum_sha256=_sha256_file(output_path),
+                duration_s=result["duration_s"],
+                media_info=result["media_info"],
+                cursor=cursor,
+            )
+            task_service.add_artifact(
+                task_id=task.id,
+                creative_project_id=project.id,
+                name=os.path.basename(output_path),
+                artifact_type=TaskArtifact.TYPE_VIDEO,
+                file_path=os.path.relpath(output_path, cfg.DATA_DIR),
+                file_size=os.path.getsize(output_path),
+                asset_id=asset.id,
+                metadata={
+                    "timeline_version": snapshot.get("timeline_version"),
+                    "width": result["width"],
+                    "height": result["height"],
+                    "fps": result["fps"],
+                    "duration_s": result["duration_s"],
+                },
+                cursor=cursor,
+            )
+            subtitle_asset = None
+            if subtitle_asset_path and settings["subtitle_mode"] != "none":
+                subtitle_asset = asset_service.create_asset(
+                    name="{0} 字幕".format(project.name or "AIGV"),
+                    asset_type="subtitle",
+                    file_path=asset_service.relative_path_for(subtitle_asset_path),
+                    file_size=os.path.getsize(subtitle_asset_path),
+                    description="最终成片字幕",
+                    metadata={
+                        "source": "compose",
+                        "task_id": task.id,
+                        "project_id": project.id,
+                        "timeline_version": snapshot.get("timeline_version"),
+                        "subtitle_mode": settings["subtitle_mode"],
+                    },
+                    owner_user_id=owner_user_id,
+                    tenant_id=tenant_id,
+                    visibility="private",
+                    checksum_sha256=_sha256_file(subtitle_asset_path),
+                    cursor=cursor,
+                )
+                task_service.add_artifact(
+                    task_id=task.id,
+                    creative_project_id=project.id,
+                    name=os.path.basename(subtitle_asset_path),
+                    artifact_type="subtitle",
+                    file_path=os.path.relpath(subtitle_asset_path, cfg.DATA_DIR),
+                    file_size=os.path.getsize(subtitle_asset_path),
+                    asset_id=subtitle_asset.id,
+                    metadata={"timeline_version": snapshot.get("timeline_version")},
+                    cursor=cursor,
+                )
+            result_payload = {
+                "video_asset_id": asset.id,
+                "subtitle_asset_id": subtitle_asset.id if subtitle_asset else None,
+                "duration_s": result["duration_s"],
+                "timeline_version": snapshot.get("timeline_version"),
+                "width": result["width"],
+                "height": result["height"],
+                "fps": result["fps"],
+            }
+            cursor.execute(
+                "UPDATE generation_tasks SET output_asset_id = ?, result_payload = ?, "
+                "progress = 100, stage = 'composing', updated_at = ? WHERE id = ?",
+                (
+                    asset.id,
+                    json.dumps(result_payload, ensure_ascii=False),
+                    now,
+                    task.id,
+                ),
+            )
+            cursor.execute(
+                "UPDATE creative_projects SET final_video_asset_id = ?, "
+                "final_compose_task_id = ?, final_timeline_version = ?, updated_at = ? "
+                "WHERE id = ?",
+                (
+                    asset.id,
+                    task.id,
+                    snapshot.get("timeline_version"),
+                    now,
+                    project.id,
+                ),
+            )
+            export_package = ExportPackage(
+                id="{0}_mp4".format(task.id),
+                creative_project_id=project.id,
+                task_id=task.id,
+                format=ExportPackage.FORMAT_MP4,
+                file_path=output_path,
+                file_size=os.path.getsize(output_path),
+                status=ExportPackage.STATUS_COMPLETED,
+                manifest={
+                    "timeline_version": snapshot.get("timeline_version"),
+                    "export_settings": stored_settings,
+                    "duration_s": result["duration_s"],
+                },
+                download_url="/api/assets/{0}/download".format(asset.id),
+                asset_id=asset.id,
+                timeline_version=snapshot.get("timeline_version"),
+                created_at=now,
+                updated_at=now,
+                created_by=task.created_by,
+            )
+            _insert_row(cursor, "export_packages", export_package.to_insert_params())
+    except Exception:
+        try:
+            if os.path.exists(output_path):
+                os.remove(output_path)
+        except OSError:
+            pass
+        raise
+
+    logger.info("Composed timeline for project %s -> %s", project.id, output_path)
+    return result_payload
 
 
 def _execute_refine(task, cfg, db):
-    """Execute video refinement via MediaService filter chain."""
+    """Apply a real FFmpeg refinement to one shot and keep both versions."""
     task_service = get_task_service()
+    project_service = get_creative_project_service(cfg.DATA_DIR)
+    storyboard_service = get_storyboard_service()
+    asset_service = get_asset_service(cfg.DATA_DIR)
+    media_service = get_media_service(cfg.FFMPEG_BIN, cfg.FFPROBE_BIN)
 
     task_service.update_task(task.id, stage="refining", progress=10)
-
-    media_service = get_media_service(cfg.FFMPEG_BIN, cfg.FFPROBE_BIN)
+    _raise_if_cancelled(task_service, task.id)
     params = task.params or {}
-
-    input_asset_id = params.get("input_asset_id")
-    asset_service = get_asset_service(cfg.DATA_DIR)
+    shot_id = params.get("shot_id")
+    if not shot_id:
+        raise ProviderError("精修任务缺少 shot_id", error_type="refine_no_shot")
+    shot = storyboard_service.get_shot(shot_id)
+    if not shot or shot.creative_project_id != task.creative_project_id:
+        raise ProviderError("精修分镜不属于当前项目", error_type="refine_shot_not_found")
+    input_asset_id = params.get("input_asset_id") or shot.selected_video_asset_id or shot.video_asset_id
     input_asset = asset_service.get_asset(input_asset_id) if input_asset_id else None
     if not input_asset or input_asset.asset_type != "video":
-        raise ProviderError("Refine input must be an owned video asset", error_type="refine_no_input")
+        raise ProviderError("精修输入必须是视频素材", error_type="refine_no_input")
+    user = _task_user(db, task)
+    if user and not can_read_asset(
+        input_asset, user, demo_mode=getattr(cfg, "DEMO_MODE", False)
+    ):
+        raise ProviderError("无权使用精修输入素材", error_type="refine_asset_forbidden")
     input_path = asset_service.get_file_path_for_asset(input_asset)
     if not input_path:
-        raise ProviderError("Refine input file not found", error_type="refine_no_input")
+        raise ProviderError("精修输入文件不存在", error_type="refine_no_input")
 
-    output_dir = os.path.join(cfg.DATA_DIR, "assets", "videos", "refined")
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    filters = params.get("filters") or {}
+    if not filters:
+        raise ProviderError("精修参数不能为空", error_type="empty_filters")
+    output_dir = os.path.join(
+        cfg.DATA_DIR, "assets", "videos", "refined", str(task.id)
+    )
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "refined.mp4")
 
-    output_path = os.path.join(output_dir, "{0}_refined.mp4".format(task.creative_project_id))
+    task_service.update_task(task.id, progress=35)
+    try:
+        media_service.apply_filter_chain(input_path, output_path, filters)
+    except MediaServiceError as exc:
+        raise ProviderError(str(exc), error_type="refine_failed")
 
-    raw_filters = params.get("filters") or {}
-    filters = {
-        "brightness": raw_filters.get("brightness", params.get("brightness")),
-        "contrast": raw_filters.get("contrast", params.get("contrast")),
-        "saturation": raw_filters.get("saturation", params.get("saturation")),
-        "gamma": raw_filters.get("gamma", params.get("gamma")),
-        "sharpen": raw_filters.get("sharpen", params.get("sharpen")),
-        "denoise": raw_filters.get("denoise", params.get("denoise")),
-        "crop": raw_filters.get("crop", params.get("crop")),
-        "scale": raw_filters.get("scale", params.get("scale")),
-        "fps": raw_filters.get("fps", params.get("fps")),
+    _raise_if_cancelled(task_service, task.id)
+    task_service.update_task(task.id, progress=85)
+    try:
+        info = probe_media_file(cfg.FFPROBE_BIN, output_path)
+    except MediaServiceError as exc:
+        raise ProviderError(
+            "精修输出无法验证：{0}".format(str(exc)),
+            error_type="refine_invalid_output",
+        )
+    if not info.get("has_video") or float(info.get("duration_s") or 0) <= 0:
+        raise ProviderError("精修输出没有有效视频轨", error_type="refine_invalid_output")
+    duration_s = float(info.get("duration_s") or 0)
+
+    project = project_service.get_project(task.creative_project_id)
+    owner_user_id = (project.user_id if project else None) or task.created_by
+    tenant_id = (project.tenant_id if project else None) or (user or {}).get("tenant_id")
+    asset = asset_service.create_asset(
+        name="{0} 精修版".format(shot.scene_title or "镜头"),
+        asset_type="video",
+        file_path=asset_service.relative_path_for(output_path),
+        file_size=os.path.getsize(output_path),
+        description="FFmpeg 单镜头精修",
+        metadata={
+            "source": "refine",
+            "task_id": task.id,
+            "project_id": task.creative_project_id,
+            "shot_id": shot.id,
+            "input_asset_id": input_asset.id,
+            "filters": filters,
+            "duration_s": duration_s,
+            "media_info": info,
+        },
+        owner_user_id=owner_user_id,
+        tenant_id=tenant_id,
+        visibility="private",
+        checksum_sha256=_sha256_file(output_path),
+        duration_s=duration_s,
+        media_info=info,
+    )
+    storyboard_service.set_media_pointers(
+        shot.id, refined_video_asset_id=asset.id
+    )
+    _record_media_version(
+        db, task, shot, "video", asset, "refine",
+        "FFmpeg 精修版",
+        {"filters": filters, "input_asset_id": input_asset.id},
+        selected=False,
+        clear_selection=False,
+    )
+    task_service.add_artifact(
+        task_id=task.id,
+        creative_project_id=task.creative_project_id,
+        name=os.path.basename(output_path),
+        artifact_type=TaskArtifact.TYPE_VIDEO,
+        file_path=os.path.relpath(output_path, cfg.DATA_DIR),
+        file_size=os.path.getsize(output_path),
+        asset_id=asset.id,
+        metadata={
+            "shot_id": shot.id,
+            "filters": filters,
+            "input_asset_id": input_asset.id,
+            "duration_s": duration_s,
+        },
+    )
+    task_service.update_task(
+        task.id, progress=100, output_asset_id=asset.id
+    )
+    return {
+        "video_asset_id": asset.id,
+        "shot_id": shot.id,
+        "input_asset_id": input_asset.id,
+        "filters": filters,
+        "duration_s": duration_s,
+        "output_path": output_path,
     }
 
-    task_service.update_task(task.id, progress=40)
 
-    media_service.apply_filter_chain(input_path, output_path, filters)
-
-    task_service.update_task(task.id, progress=90)
-
-    asset_service = get_asset_service(cfg.DATA_DIR)
-    if os.path.exists(output_path):
-        asset = asset_service.create_asset(
-            name="refined_video",
-            asset_type="video",
-            file_path=output_path,
-            file_size=os.path.getsize(output_path),
-            **_owned_asset_fields(task, db)
-        )
-
-        task_service.update_task(task.id, progress=100)
-        return {"video_asset_id": asset.id, "output_path": output_path}
-
-    task_service.update_task(task.id, progress=100)
-    return {"output_path": output_path}
+def _safe_arc_name(value, fallback="file"):
+    import re as _re
+    text = _re.sub(r"[^0-9A-Za-z一-龥._-]+", "_", str(value or ""))
+    return text.strip("._") or fallback
 
 
 def _execute_export(task, cfg, db):
-    """Execute export package creation."""
+    """Export a task-scoped ZIP containing the real project media and final MP4."""
     task_service = get_task_service()
+    project_service = get_creative_project_service(cfg.DATA_DIR)
     storyboard_service = get_storyboard_service()
     asset_service = get_asset_service(cfg.DATA_DIR)
+    media_service = get_media_service(cfg.FFMPEG_BIN, cfg.FFPROBE_BIN)
+    timeline_service = get_timeline_service(cfg)
 
     task_service.update_task(task.id, stage="exporting", progress=10)
-
-    media_service = get_media_service(cfg.FFMPEG_BIN, cfg.FFPROBE_BIN)
-
+    _raise_if_cancelled(task_service, task.id)
+    project = project_service.get_project(task.creative_project_id)
+    if not project:
+        raise ProviderError("项目不存在", error_type="project_not_found")
+    user = _task_user(db, task)
     shots = storyboard_service.list_shots(task.creative_project_id)
+    timeline = timeline_service.get_timeline(
+        task.creative_project_id, ensure=False, user=user
+    )
 
-    output_dir = os.path.join(cfg.DATA_DIR, "exports", task.creative_project_id)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    output_dir = os.path.join(cfg.DATA_DIR, "exports", str(task.id))
+    os.makedirs(output_dir, exist_ok=True)
+    zip_path = os.path.join(output_dir, "project_package.zip")
+    manifest = {
+        "project_id": project.id,
+        "project_name": project.name,
+        "timeline_version": project.timeline_version,
+        "exported_timeline_version": timeline.get("timeline_version"),
+        "final_video": None,
+        "shots": [],
+        "audio": [],
+        "subtitles": None,
+        "generated_at": int(time.time()),
+    }
+    files = []
+    seen_arcnames = set()
 
-    zip_path = os.path.join(output_dir, "{0}_package.zip".format(task.creative_project_id))
+    def add_asset(asset_id, arcname, category=None):
+        if not asset_id or not arcname or arcname in seen_arcnames:
+            return None
+        asset = asset_service.get_asset(asset_id)
+        if not asset:
+            return None
+        if user and not can_read_asset(
+            asset, user, demo_mode=getattr(cfg, "DEMO_MODE", False)
+        ):
+            return None
+        path = asset_service.get_file_path_for_asset(asset)
+        if not path:
+            return None
+        ext = os.path.splitext(path)[1].lower()
+        if ext:
+            base, requested_ext = os.path.splitext(arcname)
+            if requested_ext.lower() != ext:
+                arcname = base + ext
+        seen_arcnames.add(arcname)
+        files.append((path, arcname))
+        return {"asset_id": asset.id, "arcname": arcname, "category": category,
+                "file_size": asset.file_size, "metadata": asset.metadata}
 
-    files_to_zip = []
-    manifest = {"project_id": task.creative_project_id, "shots": []}
+    final_asset_id = project.final_video_asset_id
+    final_video = add_asset(final_asset_id, "final/final_video.mp4", "final")
+    manifest["final_video"] = final_video
 
-    task_service.update_task(task.id, progress=30)
-
-    # Collect all assets
     for shot in shots:
         shot_manifest = {
             "shot_id": shot.id,
@@ -530,108 +1134,119 @@ def _execute_export(task, cfg, db):
             "scene_title": shot.scene_title,
             "dialogue": shot.dialogue,
         }
-
-        if shot.video_asset_id:
-            video_asset = asset_service.get_asset(shot.video_asset_id)
-            video_path = asset_service.get_file_path_for_asset(video_asset) if video_asset else None
-            if video_path and os.path.exists(video_path):
-                arcname = "video/{0:03d}_video.mp4".format(shot.sequence_no)
-                files_to_zip.append((video_path, arcname))
-                shot_manifest["video_file"] = arcname
-                shot_manifest["video_asset_id"] = shot.video_asset_id
-
-        if shot.primary_image_asset_id:
-            asset = asset_service.get_asset(shot.primary_image_asset_id)
-            if asset and asset.file_path and os.path.exists(asset.file_path):
-                arcname = "shots/{0:03d}_image.png".format(shot.sequence_no)
-                files_to_zip.append((asset.file_path, arcname))
-                shot_manifest["image_file"] = arcname
-
-        if shot.audio_asset_id:
-            asset = asset_service.get_asset(shot.audio_asset_id)
-            if asset and asset.file_path and os.path.exists(asset.file_path):
-                arcname = "audio/{0:03d}_narration.wav".format(shot.sequence_no)
-                files_to_zip.append((asset.file_path, arcname))
-                shot_manifest["audio_file"] = arcname
-
+        video_id = shot.selected_video_asset_id or shot.video_asset_id
+        entry = add_asset(
+            video_id, "videos/shot_{0:03d}_video.mp4".format(shot.sequence_no), "video"
+        )
+        if entry:
+            shot_manifest["video"] = entry
+        image_entry = add_asset(
+            shot.primary_image_asset_id,
+            "images/shot_{0:03d}_image.png".format(shot.sequence_no), "image",
+        )
+        if image_entry:
+            shot_manifest["image"] = image_entry
+        narration_entry = add_asset(
+            shot.audio_asset_id,
+            "audio/narration/shot_{0:03d}_narration.wav".format(shot.sequence_no),
+            "narration",
+        )
+        if narration_entry:
+            shot_manifest["narration"] = narration_entry
         manifest["shots"].append(shot_manifest)
 
-    task_service.update_task(task.id, progress=60)
-
-    # Generate SRT if dialogues exist
-    srt_content = ""
-    cumulative_time = 0.0
-    for shot in shots:
-        if shot.dialogue:
-            start_sec = cumulative_time
-            end_sec = cumulative_time + (shot.duration_s or 4)
-            cumulative_time = end_sec
-
-            start_str = "{0:02d}:{1:02d}:{2:06.3f}".format(
-                int(start_sec // 3600), int((start_sec % 3600) // 60), start_sec % 60
-            ).replace(".", ",")
-            end_str = "{0:02d}:{1:02d}:{2:06.3f}".format(
-                int(end_sec // 3600), int((end_sec % 3600) // 60), end_sec % 60
-            ).replace(".", ",")
-
-            srt_content += "{0}\n{1} --> {2}\n{3}\n\n".format(
-                shot.sequence_no, start_str, end_str, shot.dialogue
+    for item in timeline.get("tracks") or []:
+        track = item.get("track") or {}
+        role = track.get("role")
+        if role not in ("music", "sfx"):
+            continue
+        for clip in item.get("clips") or []:
+            if clip.get("muted"):
+                continue
+            asset_id = clip.get("asset_id")
+            if not asset_id:
+                continue
+            asset = asset_service.get_asset(asset_id)
+            name = _safe_arc_name((asset.name if asset else "audio"), "audio")
+            folder = "music" if role == "music" else "effects"
+            entry = add_asset(
+                asset_id,
+                "audio/{0}/{1}.wav".format(folder, name),
+                role,
             )
+            if entry:
+                manifest["audio"].append(entry)
 
-    srt_path = os.path.join(output_dir, "subtitles.srt")
-    with open(srt_path, "w") as f:
-        f.write(srt_content)
-    files_to_zip.append((srt_path, "subtitles.srt"))
+    srt_content = TimelineService.build_srt_from_timeline(timeline)
+    if not srt_content:
+        # Do not read arbitrary shot.srt_path values.  Rebuild safe cue text
+        # from validated shot metadata when no timeline subtitle clip exists.
+        cumulative = 0.0
+        cues = []
+        for shot in shots:
+            text = (shot.dialogue or "").strip()
+            duration = float(shot.audio_duration_s or shot.duration_s or 4.0)
+            if text:
+                cues.append((
+                    cumulative, cumulative + max(0.1, duration), text
+                ))
+            cumulative += max(0.1, duration)
+        for index, (start, end, text) in enumerate(cues, start=1):
+            srt_content += "{0}\n{1} --> {2}\n{3}\n\n".format(
+                index, _srt_timestamp(start), _srt_timestamp(end), text
+            )
+    if srt_content.strip():
+        srt_path = os.path.join(output_dir, "subtitles.srt")
+        with open(srt_path, "w", encoding="utf-8") as handle:
+            handle.write(srt_content)
+        files.append((srt_path, "subtitles/subtitles.srt"))
+        manifest["subtitles"] = "subtitles/subtitles.srt"
 
-    # Generate cover thumbnail from the first locally stored video asset.
-    cover_path = os.path.join(output_dir, "cover.png")
-    first_video_path = None
-    if shots and shots[0].video_asset_id:
-        first_video_asset = asset_service.get_asset(shots[0].video_asset_id)
-        first_video_path = asset_service.get_file_path_for_asset(first_video_asset) if first_video_asset else None
-    if first_video_path:
-        try:
-            media_service.generate_thumbnail(first_video_path, cover_path, width=640, height=360)
-            files_to_zip.append((cover_path, "cover.png"))
-        except Exception as e:
-            logger.warning("Failed to generate cover: %s", str(e))
+    project_json_path = os.path.join(output_dir, "project.json")
+    with open(project_json_path, "w", encoding="utf-8") as handle:
+        json.dump(project.to_dict(), handle, ensure_ascii=False, indent=2)
+    files.append((project_json_path, "project.json"))
 
-    task_service.update_task(task.id, progress=80)
-
-    # Create ZIP
-    media_service.create_zip_package(files_to_zip, zip_path, manifest)
-
+    _raise_if_cancelled(task_service, task.id)
+    task_service.update_task(task.id, progress=55)
+    media_service.create_zip_package(files, zip_path, manifest)
+    _raise_if_cancelled(task_service, task.id)
     task_service.update_task(task.id, progress=95)
 
-    # Create export package record
     now = int(time.time())
     download_url = "/api/creative/tasks/{0}/export/download".format(task.id)
-    db.insert("export_packages", {
-        "id": str(task.id) + "_export",
-        "creative_project_id": task.creative_project_id,
-        "task_id": task.id,
-        "format": "zip",
-        "file_path": zip_path,
-        "file_size": os.path.getsize(zip_path) if os.path.exists(zip_path) else 0,
-        "status": "completed",
-        "manifest": json.dumps(manifest, ensure_ascii=False),
-        "download_url": download_url,
-        "created_by": task.created_by,
-        "created_at": now,
-        "updated_at": now,
-    })
+    export_package = ExportPackage(
+        id="{0}_export".format(task.id),
+        creative_project_id=task.creative_project_id,
+        task_id=task.id,
+        format=ExportPackage.FORMAT_ZIP,
+        file_path=zip_path,
+        file_size=os.path.getsize(zip_path),
+        status=ExportPackage.STATUS_COMPLETED,
+        manifest=manifest,
+        download_url=download_url,
+        timeline_version=project.timeline_version,
+        created_at=now,
+        updated_at=now,
+        created_by=task.created_by,
+    )
+    db.insert("export_packages", export_package.to_insert_params())
     task_service.add_artifact(
         task_id=task.id,
         creative_project_id=task.creative_project_id,
         name=os.path.basename(zip_path),
         artifact_type="archive",
         file_path=os.path.relpath(zip_path, cfg.DATA_DIR),
-        file_size=os.path.getsize(zip_path) if os.path.exists(zip_path) else 0,
-        metadata={"download_url": download_url},
+        file_size=os.path.getsize(zip_path),
+        metadata={"download_url": download_url, "manifest": manifest},
     )
-
     task_service.update_task(task.id, progress=100)
-    return {"zip_path": zip_path, "manifest": manifest, "download_url": download_url}
+    return {
+        "zip_path": zip_path,
+        "zip_size": os.path.getsize(zip_path),
+        "manifest": manifest,
+        "download_url": download_url,
+    }
 
 
 # Executor map. Image/video are handled by the resumable GenerationWorker.
@@ -768,8 +1383,11 @@ def _process_task(task_service, cfg, db, task):
             task_service.update_task(
                 task.id,
                 status=GenerationTask.STATUS_SUCCEEDED,
+                stage="succeeded",
                 result_payload=result,
                 progress=100,
+                completed_at=int(time.time()),
+                completed_at_ms=time.time(),
             )
             logger.info("Task %s succeeded", task.id)
         else:
@@ -783,8 +1401,11 @@ def _process_task(task_service, cfg, db, task):
             task_service.update_task(
                 task.id,
                 status=GenerationTask.STATUS_FAILED,
+                stage="failed",
                 error_code=e.error_type or "provider_error",
                 error_message=str(e),
+                completed_at=int(time.time()),
+                completed_at_ms=time.time(),
             )
         _reset_project_after_failure(task_service, task)
         logger.error("Task %s failed (provider): %s", task.id, str(e))
@@ -794,7 +1415,10 @@ def _process_task(task_service, cfg, db, task):
             task_service.update_task(
                 task.id,
                 status=GenerationTask.STATUS_FAILED,
+                stage="failed",
                 error_message=str(e),
+                completed_at=int(time.time()),
+                completed_at_ms=time.time(),
             )
         _reset_project_after_failure(task_service, task)
         logger.exception("Task %s failed with exception", task.id)

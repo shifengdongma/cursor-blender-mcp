@@ -12,6 +12,12 @@ AIGV Studio is an AI-powered video generation platform for cultural venues (thea
 
 Tech stack: **Python 3.10 + Flask 2.0.3 + Vanilla JS SPA + SQLite + JSON dual storage + Blender (optional)**
 
+## Git Workflow
+
+- Commit and push directly to `master` (the default branch). Do not create feature branches for this project.
+- After completing changes, push to `origin/master` unless the user explicitly says otherwise.
+- Do not commit runtime data, model weights, databases, uploaded assets, or secrets; `.gitignore` covers these.
+
 ## Commands
 
 ### Start the Server

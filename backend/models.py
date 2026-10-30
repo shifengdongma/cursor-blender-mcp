@@ -60,6 +60,7 @@ class Asset(BaseModel):
         'id', 'name', 'asset_type', 'venue_type', 'file_path',
         'file_size', 'description', 'metadata', 'thumbnail_path',
         'owner_user_id', 'tenant_id', 'visibility', 'checksum_sha256',
+        'duration_s', 'audio_role', 'media_info',
         'created_at', 'updated_at'
     ]
 
@@ -77,6 +78,9 @@ class Asset(BaseModel):
         self.tenant_id = kwargs.get('tenant_id')
         self.visibility = kwargs.get('visibility') or ('shared' if not self.owner_user_id else 'private')
         self.checksum_sha256 = kwargs.get('checksum_sha256')
+        self.duration_s = kwargs.get('duration_s')
+        self.audio_role = kwargs.get('audio_role')
+        self.media_info = kwargs.get('media_info')
         self.created_at = kwargs.get('created_at') or _now()
         self.updated_at = kwargs.get('updated_at') or _now()
 
@@ -98,6 +102,9 @@ class Asset(BaseModel):
             tenant_id=row.get('tenant_id'),
             visibility=row.get('visibility'),
             checksum_sha256=row.get('checksum_sha256'),
+            duration_s=row.get('duration_s'),
+            audio_role=row.get('audio_role'),
+            media_info=_json_loads(row.get('media_info')),
             created_at=row.get('created_at'),
             updated_at=row.get('updated_at')
         )
@@ -117,6 +124,9 @@ class Asset(BaseModel):
             'tenant_id': self.tenant_id,
             'visibility': self.visibility,
             'checksum_sha256': self.checksum_sha256,
+            'duration_s': self.duration_s,
+            'audio_role': self.audio_role,
+            'media_info': self.media_info,
             'created_at': self.created_at,
             'updated_at': self.updated_at
         }
@@ -136,6 +146,9 @@ class Asset(BaseModel):
             'tenant_id': self.tenant_id,
             'visibility': self.visibility,
             'checksum_sha256': self.checksum_sha256,
+            'duration_s': self.duration_s,
+            'audio_role': self.audio_role,
+            'media_info': _json_dumps(self.media_info),
             'created_at': self.created_at,
             'updated_at': self.updated_at
         }
@@ -1260,7 +1273,9 @@ class CreativeProject(BaseModel):
     COLUMNS = [
         'id', 'tenant_id', 'project_id', 'user_id', 'name', 'description',
         'status', 'genre', 'target_duration', 'concept', 'requirements',
-        'creative_brief', 'settings', 'created_at', 'updated_at'
+        'creative_brief', 'settings', 'timeline_version',
+        'final_video_asset_id', 'final_compose_task_id', 'final_timeline_version',
+        'created_at', 'updated_at'
     ]
 
     def __init__(self, **kwargs):
@@ -1277,6 +1292,10 @@ class CreativeProject(BaseModel):
         self.requirements = kwargs.get('requirements')
         self.creative_brief = kwargs.get('creative_brief')
         self.settings = kwargs.get('settings')
+        self.timeline_version = kwargs.get('timeline_version', 0)
+        self.final_video_asset_id = kwargs.get('final_video_asset_id')
+        self.final_compose_task_id = kwargs.get('final_compose_task_id')
+        self.final_timeline_version = kwargs.get('final_timeline_version')
         self.created_at = kwargs.get('created_at') or _now()
         self.updated_at = kwargs.get('updated_at') or _now()
 
@@ -1298,6 +1317,10 @@ class CreativeProject(BaseModel):
             requirements=_json_loads(row.get('requirements')),
             creative_brief=_json_loads(row.get('creative_brief')),
             settings=_json_loads(row.get('settings')),
+            timeline_version=row.get('timeline_version'),
+            final_video_asset_id=row.get('final_video_asset_id'),
+            final_compose_task_id=row.get('final_compose_task_id'),
+            final_timeline_version=row.get('final_timeline_version'),
             created_at=row.get('created_at'),
             updated_at=row.get('updated_at'),
         )
@@ -1317,6 +1340,10 @@ class CreativeProject(BaseModel):
             'requirements': self.requirements,
             'creative_brief': self.creative_brief,
             'settings': self.settings,
+            'timeline_version': self.timeline_version,
+            'final_video_asset_id': self.final_video_asset_id,
+            'final_compose_task_id': self.final_compose_task_id,
+            'final_timeline_version': self.final_timeline_version,
             'created_at': self.created_at,
             'updated_at': self.updated_at,
         }
@@ -1336,6 +1363,10 @@ class CreativeProject(BaseModel):
             'requirements': _json_dumps(self.requirements),
             'creative_brief': _json_dumps(self.creative_brief),
             'settings': _json_dumps(self.settings),
+            'timeline_version': self.timeline_version,
+            'final_video_asset_id': self.final_video_asset_id,
+            'final_compose_task_id': self.final_compose_task_id,
+            'final_timeline_version': self.final_timeline_version,
             'created_at': self.created_at,
             'updated_at': self.updated_at,
         }
@@ -1358,6 +1389,8 @@ class StoryboardShot(BaseModel):
         'environment_detail', 'character_action', 'visual_style',
         'prompt_cn', 'prompt_en', 'negative_prompt',
         'primary_image_asset_id', 'keyframe_asset_id', 'video_asset_id', 'audio_asset_id',
+        'selected_video_asset_id', 'refined_video_asset_id', 'video_selection_source',
+        'subtitle_asset_id', 'audio_options', 'audio_duration_s',
         'srt_path', 'video_url', 'status', 'metadata',
         'created_at', 'updated_at'
     ]
@@ -1384,6 +1417,12 @@ class StoryboardShot(BaseModel):
         self.keyframe_asset_id = kwargs.get('keyframe_asset_id')
         self.video_asset_id = kwargs.get('video_asset_id')
         self.audio_asset_id = kwargs.get('audio_asset_id')
+        self.selected_video_asset_id = kwargs.get('selected_video_asset_id')
+        self.refined_video_asset_id = kwargs.get('refined_video_asset_id')
+        self.video_selection_source = kwargs.get('video_selection_source')
+        self.subtitle_asset_id = kwargs.get('subtitle_asset_id')
+        self.audio_options = kwargs.get('audio_options')
+        self.audio_duration_s = kwargs.get('audio_duration_s')
         self.srt_path = kwargs.get('srt_path')
         self.video_url = kwargs.get('video_url')
         self.status = kwargs.get('status', self.STATUS_PENDING)
@@ -1417,6 +1456,12 @@ class StoryboardShot(BaseModel):
             keyframe_asset_id=row.get('keyframe_asset_id'),
             video_asset_id=row.get('video_asset_id'),
             audio_asset_id=row.get('audio_asset_id'),
+            selected_video_asset_id=row.get('selected_video_asset_id'),
+            refined_video_asset_id=row.get('refined_video_asset_id'),
+            video_selection_source=row.get('video_selection_source'),
+            subtitle_asset_id=row.get('subtitle_asset_id'),
+            audio_options=_json_loads(row.get('audio_options')),
+            audio_duration_s=row.get('audio_duration_s'),
             srt_path=row.get('srt_path'),
             video_url=row.get('video_url'),
             status=row.get('status'),
@@ -1448,6 +1493,12 @@ class StoryboardShot(BaseModel):
             'keyframe_asset_id': self.keyframe_asset_id,
             'video_asset_id': self.video_asset_id,
             'audio_asset_id': self.audio_asset_id,
+            'selected_video_asset_id': self.selected_video_asset_id,
+            'refined_video_asset_id': self.refined_video_asset_id,
+            'video_selection_source': self.video_selection_source,
+            'subtitle_asset_id': self.subtitle_asset_id,
+            'audio_options': self.audio_options,
+            'audio_duration_s': self.audio_duration_s,
             'srt_path': self.srt_path,
             'video_url': self.video_url,
             'status': self.status,
@@ -1479,10 +1530,103 @@ class StoryboardShot(BaseModel):
             'keyframe_asset_id': self.keyframe_asset_id,
             'video_asset_id': self.video_asset_id,
             'audio_asset_id': self.audio_asset_id,
+            'selected_video_asset_id': self.selected_video_asset_id,
+            'refined_video_asset_id': self.refined_video_asset_id,
+            'video_selection_source': self.video_selection_source,
+            'subtitle_asset_id': self.subtitle_asset_id,
+            'audio_options': _json_dumps(self.audio_options),
+            'audio_duration_s': self.audio_duration_s,
             'srt_path': self.srt_path,
             'video_url': self.video_url,
             'status': self.status,
             'metadata': _json_dumps(self.metadata),
+            'created_at': self.created_at,
+            'updated_at': self.updated_at,
+        }
+
+
+class ShotMediaVersion(BaseModel):
+    """A historical, selectable media variant attached to one shot."""
+
+    TABLE_NAME = 'shot_media_versions'
+
+    KIND_VIDEO = 'video'
+    KIND_AUDIO = 'audio'
+    KIND_SUBTITLE = 'subtitle'
+
+    SOURCE_GENERATION = 'generation'
+    SOURCE_TTS = 'tts'
+    SOURCE_REFINE = 'refine'
+    SOURCE_UPLOAD = 'upload'
+    SOURCE_LEGACY = 'legacy'
+
+    COLUMNS = [
+        'id', 'creative_project_id', 'shot_id', 'media_kind', 'asset_id',
+        'task_id', 'source', 'label', 'metadata', 'is_selected',
+        'created_at', 'updated_at',
+    ]
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get('id') or _generate_id()
+        self.creative_project_id = kwargs.get('creative_project_id')
+        self.shot_id = kwargs.get('shot_id')
+        self.media_kind = kwargs.get('media_kind')
+        self.asset_id = kwargs.get('asset_id')
+        self.task_id = kwargs.get('task_id')
+        self.source = kwargs.get('source')
+        self.label = kwargs.get('label')
+        self.metadata = kwargs.get('metadata')
+        self.is_selected = kwargs.get('is_selected', 0)
+        self.created_at = kwargs.get('created_at') or _now()
+        self.updated_at = kwargs.get('updated_at') or _now()
+
+    @classmethod
+    def from_row(cls, row):
+        if row is None:
+            return None
+        return cls(
+            id=row.get('id'),
+            creative_project_id=row.get('creative_project_id'),
+            shot_id=row.get('shot_id'),
+            media_kind=row.get('media_kind'),
+            asset_id=row.get('asset_id'),
+            task_id=row.get('task_id'),
+            source=row.get('source'),
+            label=row.get('label'),
+            metadata=_json_loads(row.get('metadata')),
+            is_selected=row.get('is_selected'),
+            created_at=row.get('created_at'),
+            updated_at=row.get('updated_at'),
+        )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'creative_project_id': self.creative_project_id,
+            'shot_id': self.shot_id,
+            'media_kind': self.media_kind,
+            'asset_id': self.asset_id,
+            'task_id': self.task_id,
+            'source': self.source,
+            'label': self.label,
+            'metadata': self.metadata,
+            'is_selected': bool(self.is_selected),
+            'created_at': self.created_at,
+            'updated_at': self.updated_at,
+        }
+
+    def to_insert_params(self):
+        return {
+            'id': self.id,
+            'creative_project_id': self.creative_project_id,
+            'shot_id': self.shot_id,
+            'media_kind': self.media_kind,
+            'asset_id': self.asset_id,
+            'task_id': self.task_id,
+            'source': self.source,
+            'label': self.label,
+            'metadata': _json_dumps(self.metadata),
+            'is_selected': 1 if self.is_selected else 0,
             'created_at': self.created_at,
             'updated_at': self.updated_at,
         }
@@ -1518,7 +1662,13 @@ class GenerationTask(BaseModel):
         'submission_uncertain', 'submission_started_at',
         'poll_error_count', 'last_polled_at', 'output_asset_id',
         'client_request_id', 'cost_estimate', 'currency',
-        'cancel_requested'
+        'cancel_requested', 'timeline_version', 'timeline_snapshot',
+        'created_at_ms', 'claimed_at_ms',
+        'provider_request_started_at', 'provider_request_finished_at',
+        'provider_job_created_at', 'provider_finished_at',
+        'download_started_at', 'download_finished_at',
+        'persist_started_at', 'persist_finished_at', 'completed_at_ms',
+        'timing_json'
     ]
 
     def __init__(self, **kwargs):
@@ -1557,6 +1707,20 @@ class GenerationTask(BaseModel):
         self.cost_estimate = kwargs.get('cost_estimate')
         self.currency = kwargs.get('currency')
         self.cancel_requested = kwargs.get('cancel_requested', 0)
+        self.timeline_version = kwargs.get('timeline_version')
+        self.timeline_snapshot = kwargs.get('timeline_snapshot')
+        self.created_at_ms = kwargs.get('created_at_ms')
+        self.claimed_at_ms = kwargs.get('claimed_at_ms')
+        self.provider_request_started_at = kwargs.get('provider_request_started_at')
+        self.provider_request_finished_at = kwargs.get('provider_request_finished_at')
+        self.provider_job_created_at = kwargs.get('provider_job_created_at')
+        self.provider_finished_at = kwargs.get('provider_finished_at')
+        self.download_started_at = kwargs.get('download_started_at')
+        self.download_finished_at = kwargs.get('download_finished_at')
+        self.persist_started_at = kwargs.get('persist_started_at')
+        self.persist_finished_at = kwargs.get('persist_finished_at')
+        self.completed_at_ms = kwargs.get('completed_at_ms')
+        self.timing_json = kwargs.get('timing_json')
 
     @classmethod
     def from_row(cls, row):
@@ -1598,6 +1762,20 @@ class GenerationTask(BaseModel):
             cost_estimate=row.get('cost_estimate'),
             currency=row.get('currency'),
             cancel_requested=row.get('cancel_requested'),
+            timeline_version=row.get('timeline_version'),
+            timeline_snapshot=_json_loads(row.get('timeline_snapshot')),
+            created_at_ms=row.get('created_at_ms'),
+            claimed_at_ms=row.get('claimed_at_ms'),
+            provider_request_started_at=row.get('provider_request_started_at'),
+            provider_request_finished_at=row.get('provider_request_finished_at'),
+            provider_job_created_at=row.get('provider_job_created_at'),
+            provider_finished_at=row.get('provider_finished_at'),
+            download_started_at=row.get('download_started_at'),
+            download_finished_at=row.get('download_finished_at'),
+            persist_started_at=row.get('persist_started_at'),
+            persist_finished_at=row.get('persist_finished_at'),
+            completed_at_ms=row.get('completed_at_ms'),
+            timing_json=_json_loads(row.get('timing_json')),
         )
 
     def to_dict(self):
@@ -1636,6 +1814,20 @@ class GenerationTask(BaseModel):
             'cost_estimate': self.cost_estimate,
             'currency': self.currency,
             'cancel_requested': self.cancel_requested,
+            'timeline_version': self.timeline_version,
+            'timeline_snapshot': self.timeline_snapshot,
+            'created_at_ms': self.created_at_ms,
+            'claimed_at_ms': self.claimed_at_ms,
+            'provider_request_started_at': self.provider_request_started_at,
+            'provider_request_finished_at': self.provider_request_finished_at,
+            'provider_job_created_at': self.provider_job_created_at,
+            'provider_finished_at': self.provider_finished_at,
+            'download_started_at': self.download_started_at,
+            'download_finished_at': self.download_finished_at,
+            'persist_started_at': self.persist_started_at,
+            'persist_finished_at': self.persist_finished_at,
+            'completed_at_ms': self.completed_at_ms,
+            'timing_json': self.timing_json,
         }
 
     def to_insert_params(self):
@@ -1675,6 +1867,20 @@ class GenerationTask(BaseModel):
             'cost_estimate': self.cost_estimate,
             'currency': self.currency,
             'cancel_requested': self.cancel_requested,
+            'timeline_version': self.timeline_version,
+            'timeline_snapshot': _json_dumps(self.timeline_snapshot),
+            'created_at_ms': self.created_at_ms,
+            'claimed_at_ms': self.claimed_at_ms,
+            'provider_request_started_at': self.provider_request_started_at,
+            'provider_request_finished_at': self.provider_request_finished_at,
+            'provider_job_created_at': self.provider_job_created_at,
+            'provider_finished_at': self.provider_finished_at,
+            'download_started_at': self.download_started_at,
+            'download_finished_at': self.download_finished_at,
+            'persist_started_at': self.persist_started_at,
+            'persist_finished_at': self.persist_finished_at,
+            'completed_at_ms': self.completed_at_ms,
+            'timing_json': _json_dumps(self.timing_json),
         }
 
 
@@ -1764,15 +1970,22 @@ class TimelineTrack(BaseModel):
     TYPE_EFFECT = 'effect'
 
     COLUMNS = [
-        'id', 'creative_project_id', 'name', 'track_type',
+        'id', 'creative_project_id', 'name', 'track_type', 'role',
         'sequence_no', 'settings', 'created_at', 'updated_at'
     ]
+
+    ROLE_VIDEO = 'video'
+    ROLE_NARRATION = 'narration'
+    ROLE_MUSIC = 'music'
+    ROLE_SFX = 'sfx'
+    ROLE_SUBTITLE = 'subtitle'
 
     def __init__(self, **kwargs):
         self.id = kwargs.get('id') or _generate_id()
         self.creative_project_id = kwargs.get('creative_project_id')
         self.name = kwargs.get('name', '')
         self.track_type = kwargs.get('track_type')
+        self.role = kwargs.get('role')
         self.sequence_no = kwargs.get('sequence_no', 0)
         self.settings = kwargs.get('settings')
         self.created_at = kwargs.get('created_at') or _now()
@@ -1787,6 +2000,7 @@ class TimelineTrack(BaseModel):
             creative_project_id=row.get('creative_project_id'),
             name=row.get('name'),
             track_type=row.get('track_type'),
+            role=row.get('role'),
             sequence_no=row.get('sequence_no'),
             settings=_json_loads(row.get('settings')),
             created_at=row.get('created_at'),
@@ -1799,6 +2013,7 @@ class TimelineTrack(BaseModel):
             'creative_project_id': self.creative_project_id,
             'name': self.name,
             'track_type': self.track_type,
+            'role': self.role,
             'sequence_no': self.sequence_no,
             'settings': self.settings,
             'created_at': self.created_at,
@@ -1811,6 +2026,7 @@ class TimelineTrack(BaseModel):
             'creative_project_id': self.creative_project_id,
             'name': self.name,
             'track_type': self.track_type,
+            'role': self.role,
             'sequence_no': self.sequence_no,
             'settings': _json_dumps(self.settings),
             'created_at': self.created_at,
@@ -1824,8 +2040,9 @@ class TimelineClip(BaseModel):
     COLUMNS = [
         'id', 'track_id', 'creative_project_id', 'shot_id',
         'asset_id', 'name', 'start_time', 'duration_s',
-        'trim_in', 'trim_out', 'properties',
-        'created_at', 'updated_at'
+        'trim_in', 'trim_out', 'volume', 'muted',
+        'source_audio_enabled', 'fade_in', 'fade_out',
+        'subtitle_text', 'properties', 'created_at', 'updated_at'
     ]
 
     def __init__(self, **kwargs):
@@ -1839,6 +2056,12 @@ class TimelineClip(BaseModel):
         self.duration_s = kwargs.get('duration_s', 0.0)
         self.trim_in = kwargs.get('trim_in', 0.0)
         self.trim_out = kwargs.get('trim_out')
+        self.volume = kwargs.get('volume', 1.0)
+        self.muted = kwargs.get('muted', 0)
+        self.source_audio_enabled = kwargs.get('source_audio_enabled', 1)
+        self.fade_in = kwargs.get('fade_in', 0.0)
+        self.fade_out = kwargs.get('fade_out', 0.0)
+        self.subtitle_text = kwargs.get('subtitle_text')
         self.properties = kwargs.get('properties')
         self.created_at = kwargs.get('created_at') or _now()
         self.updated_at = kwargs.get('updated_at') or _now()
@@ -1858,6 +2081,12 @@ class TimelineClip(BaseModel):
             duration_s=row.get('duration_s'),
             trim_in=row.get('trim_in'),
             trim_out=row.get('trim_out'),
+            volume=row.get('volume'),
+            muted=row.get('muted'),
+            source_audio_enabled=row.get('source_audio_enabled'),
+            fade_in=row.get('fade_in'),
+            fade_out=row.get('fade_out'),
+            subtitle_text=row.get('subtitle_text'),
             properties=_json_loads(row.get('properties')),
             created_at=row.get('created_at'),
             updated_at=row.get('updated_at'),
@@ -1875,6 +2104,12 @@ class TimelineClip(BaseModel):
             'duration_s': self.duration_s,
             'trim_in': self.trim_in,
             'trim_out': self.trim_out,
+            'volume': self.volume,
+            'muted': bool(self.muted),
+            'source_audio_enabled': bool(self.source_audio_enabled),
+            'fade_in': self.fade_in,
+            'fade_out': self.fade_out,
+            'subtitle_text': self.subtitle_text,
             'properties': self.properties,
             'created_at': self.created_at,
             'updated_at': self.updated_at,
@@ -1892,6 +2127,12 @@ class TimelineClip(BaseModel):
             'duration_s': self.duration_s,
             'trim_in': self.trim_in,
             'trim_out': self.trim_out,
+            'volume': self.volume,
+            'muted': 1 if self.muted else 0,
+            'source_audio_enabled': 1 if self.source_audio_enabled else 0,
+            'fade_in': self.fade_in,
+            'fade_out': self.fade_out,
+            'subtitle_text': self.subtitle_text,
             'properties': _json_dumps(self.properties),
             'created_at': self.created_at,
             'updated_at': self.updated_at,
@@ -2432,7 +2673,8 @@ class ExportPackage(BaseModel):
     COLUMNS = [
         'id', 'creative_project_id', 'task_id', 'format',
         'file_path', 'file_size', 'status', 'manifest',
-        'download_url', 'created_at', 'updated_at', 'created_by'
+        'download_url', 'asset_id', 'timeline_version',
+        'created_at', 'updated_at', 'created_by'
     ]
 
     def __init__(self, **kwargs):
@@ -2445,6 +2687,8 @@ class ExportPackage(BaseModel):
         self.status = kwargs.get('status', self.STATUS_PENDING)
         self.manifest = kwargs.get('manifest')
         self.download_url = kwargs.get('download_url')
+        self.asset_id = kwargs.get('asset_id')
+        self.timeline_version = kwargs.get('timeline_version')
         self.created_at = kwargs.get('created_at') or _now()
         self.updated_at = kwargs.get('updated_at') or _now()
         self.created_by = kwargs.get('created_by')
@@ -2463,6 +2707,8 @@ class ExportPackage(BaseModel):
             status=row.get('status'),
             manifest=_json_loads(row.get('manifest')),
             download_url=row.get('download_url'),
+            asset_id=row.get('asset_id'),
+            timeline_version=row.get('timeline_version'),
             created_at=row.get('created_at'),
             updated_at=row.get('updated_at'),
             created_by=row.get('created_by'),
@@ -2479,6 +2725,8 @@ class ExportPackage(BaseModel):
             'status': self.status,
             'manifest': self.manifest,
             'download_url': self.download_url,
+            'asset_id': self.asset_id,
+            'timeline_version': self.timeline_version,
             'created_at': self.created_at,
             'updated_at': self.updated_at,
             'created_by': self.created_by,
@@ -2495,6 +2743,8 @@ class ExportPackage(BaseModel):
             'status': self.status,
             'manifest': _json_dumps(self.manifest),
             'download_url': self.download_url,
+            'asset_id': self.asset_id,
+            'timeline_version': self.timeline_version,
             'created_at': self.created_at,
             'updated_at': self.updated_at,
             'created_by': self.created_by,

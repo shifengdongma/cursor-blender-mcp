@@ -72,22 +72,28 @@ class TestMediaService(object):
 
     def test_apply_filter_chain_color(self):
         svc = self.make_svc()
-        with patch.object(svc, "_run_ffmpeg") as mock_run:
-            svc.apply_filter_chain("input.mp4", "output.mp4", {
-                "brightness": 0.1,
-                "contrast": 0.2,
-                "saturation": 1.2,
-            })
-            args = mock_run.call_args[0][0]
-            arg_str = " ".join(args)
-            assert "-vf" in arg_str
-            assert "eq=" in arg_str
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+            f.write(b"input")
+            input_path = f.name
+        try:
+            with patch.object(svc, "_run_ffmpeg") as mock_run, \
+                    patch("backend.media_service.os.replace"):
+                svc.apply_filter_chain(input_path, input_path + ".out.mp4", {
+                    "brightness": 0.1,
+                    "contrast": 0.2,
+                    "saturation": 1.2,
+                })
+                args = mock_run.call_args[0][0]
+                arg_str = " ".join(args)
+                assert "-vf" in arg_str
+                assert "eq=" in arg_str
+        finally:
+            os.remove(input_path)
 
     def test_apply_filter_chain_no_filters(self):
         svc = self.make_svc()
-        with patch("backend.media_service.shutil.copy2") as mock_copy:
+        with pytest.raises(MediaServiceError):
             svc.apply_filter_chain("input.mp4", "output.mp4", {})
-            mock_copy.assert_called_once()
 
     def test_create_zip_package(self):
         svc = self.make_svc()

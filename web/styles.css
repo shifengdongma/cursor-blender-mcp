@@ -3627,6 +3627,36 @@ a:focus-visible,
   margin-top: var(--space-sm);
 }
 
+.capability-note {
+  display: grid;
+  gap: 10px;
+}
+
+.capability-note-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.capability-note-head .content-note-title {
+  margin: 0;
+}
+
+.capability-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.capability-chip-list .meta-chip {
+  padding: 5px 10px;
+  border: 1px solid rgba(215, 168, 79, 0.22);
+  background: rgba(215, 168, 79, 0.06);
+  color: var(--text-secondary, #b7c0cc);
+}
+
+
 
 .shot-actions {
   display: flex;

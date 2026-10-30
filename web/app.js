@@ -188,7 +188,39 @@
       state.selectedModel = preferred;
       renderReadiness();
       renderCapabilityControls();
+      renderModelGrid();
     });
+  }
+
+  function renderModelGrid() {
+    if (!els.modelGrid) return;
+    if (!state.models.length) {
+      els.modelGrid.innerHTML = '<p class="empty-state">尚未接入视频生成模型。</p>';
+      return;
+    }
+    els.modelGrid.innerHTML = state.models.map(function (model) {
+      var caps = model.capabilities || {};
+      var details = [];
+      if (caps.duration_range) {
+        details.push('时长 ' + caps.duration_range[0] + '-' + caps.duration_range[1] + 's');
+      } else if (caps.durations && caps.durations.length) {
+        details.push('时长 ' + caps.durations.join('/') + 's');
+      }
+      if (caps.resolutions && caps.resolutions.length) {
+        details.push('分辨率 ' + caps.resolutions.join('/'));
+      }
+      details.push(caps.supports_audio ? '支持音频' : '无音频');
+      var statusText = model.available ? '可用' : '未配置';
+      var statusClass = model.available ? 'native' : 'preview-only';
+      return '<article class="model-card">' +
+        '<header><h3>' + escapeHtml(model.display_name || model.key) + '</h3>' +
+        '<span class="route-badge ' + statusClass + '">' + statusText + '</span></header>' +
+        '<p>' + escapeHtml(model.model_id || '—') + ' · ' + escapeHtml(model.provider || '') + '</p>' +
+        '<p>' + escapeHtml(details.join(' · ')) + '</p>' +
+        (model.available ? '' : '<p class="field-hint">' +
+          escapeHtml(model.unavailable_reason || '请在 API 配置中保存密钥') + '</p>') +
+        '</article>';
+    }).join('');
   }
 
   function renderReadiness() {
@@ -797,6 +829,7 @@
     els.jobResult = $('job-result');
     els.readinessBanner = $('readiness-banner');
     els.assetGrid = $('asset-grid');
+    els.modelGrid = $('model-grid');
   }
 
   function bootstrap() {

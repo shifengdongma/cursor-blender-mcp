@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AIGV Studio - 快速生成视频</title>
+    <title>AIGV Studio - 文创视频智能生成平台</title>
     <link rel="stylesheet" href="/web/styles.css" />
   </head>
   <body>
-    <a class="skip-link" href="#workspace">跳转到快速生成</a>
+    <a class="skip-link" href="#workspace">跳转到创作工作台</a>
     <div class="page-bg" aria-hidden="true"></div>
 
     <nav class="navbar" aria-label="主导航">
@@ -27,27 +27,91 @@
     </nav>
 
     <main>
-      <header class="page-header page-header-curated quick-header">
-        <div class="page-header-text">
-          <div class="hero-badge">Quick Generate</div>
-          <h1 class="page-title">快速生成单条视频</h1>
-          <p class="page-desc">
-            选择场馆、模型和参数，生成一条可播放、可下载的视频。结果会自动保存到素材库与生成历史。
+      <header class="hero hero-curated hero-compact">
+        <div class="hero-content">
+          <div class="hero-badge">AI 驱动的视频生产引擎</div>
+          <h1 class="hero-title">
+            <span class="gradient-text">面向文创场景的AIGV创意素材生成体系</span>
+          </h1>
+          <p class="hero-desc hero-desc-compact">
+            将黄金六模块 Prompt、Blender 空间锚点与多模型路由收敛进同一条创作链路，让视觉提案从概念展示自然进入执行流程。
           </p>
-          <p class="page-desc">
-            需要多镜头、分镜、配音和素材包导出？进入
-            <a class="field-hint-link" href="/creative-studio">项目工作流</a>。
-          </p>
+          <div class="hero-actions">
+            <a href="#workspace" class="btn-primary">
+              <span>进入工作台</span>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M6 12L10 8L6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </a>
+            <a href="/assets" class="btn-secondary">浏览资产库</a>
+            <a href="/creative-studio" class="btn-secondary">进入项目工作流</a>
+          </div>
+          <div class="hero-summary hero-summary-minimal">
+            <div class="summary-chip summary-chip-strong">Prompt × 空间 × 模型</div>
+            <div class="summary-chip">展示与操作并重</div>
+          </div>
+        </div>
+
+        <div class="hero-visual hero-visual-curated">
+          <div class="visual-frame visual-frame-curated">
+            <div class="visual-header">
+              <div class="visual-dots" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <span class="visual-title">创作工作流概览</span>
+            </div>
+            <div class="visual-content">
+              <div class="visual-grid visual-grid-curated">
+                <div class="visual-card venue-card visual-card-highlight">
+                  <div class="card-icon theater" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="7" cy="9" r="3"/><circle cx="17" cy="9" r="3"/><path d="M4 15c0 2 1.5 5 3 5s3-3 3-5v-1"/><path d="M14 15c0 2 1.5 5 3 5s3-3 3-5v-1"/></svg></div>
+                  <strong>场馆语境</strong>
+                  <span>大剧院 / 画廊 / 博物馆 / 音乐厅</span>
+                </div>
+                <div class="visual-card venue-card">
+                  <div class="card-icon gallery" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>
+                  <strong>镜头编排</strong>
+                  <span>镜头语言与空间锚点协同</span>
+                </div>
+                <div class="visual-card venue-card">
+                  <div class="card-icon museum" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/></svg></div>
+                  <strong>执行路由</strong>
+                  <span>按 provider 与 route mode 分发</span>
+                </div>
+                <div class="visual-card venue-card">
+                  <div class="card-icon concert" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="3" r="2"/><path d="M12 5v12"/><path d="M8 13a4 4 0 1 0 8 0"/></svg></div>
+                  <strong>状态反馈</strong>
+                  <span>预览、轮询、结果一体化监控</span>
+                </div>
+              </div>
+              <div class="visual-flow" aria-label="工作流流程">
+                <div class="flow-node">
+                  <span class="node-icon prompt" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h16v4H4z"/><path d="M4 10h10v10H4z"/></svg></span>
+                  <span class="node-label">策划输入</span>
+                </div>
+                <div class="flow-arrow" aria-hidden="true"></div>
+                <div class="flow-node">
+                  <span class="node-icon blender" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2l8 4.5v9L12 20l-8-4.5v-9z"/><path d="M12 2v18"/><path d="M4 6.5l8 4.5 8-4.5"/></svg></span>
+                  <span class="node-label">空间约束</span>
+                </div>
+                <div class="flow-arrow" aria-hidden="true"></div>
+                <div class="flow-node">
+                  <span class="node-icon ai" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2l3 6 6.5 1-4.5 4.5 1 6.5L12 16l-6 4 1-6.5L2.5 9l6.5-1z"/></svg></span>
+                  <span class="node-label">生成交付</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </header>
 
       <section id="workspace" class="section workspace-section workspace-section-priority" data-ui-status="loading">
         <div class="section-header section-header-split">
           <div>
-            <span class="section-label">Quick Create</span>
-            <h2 class="section-title">生成配置</h2>
+            <span class="section-label">Creative Workspace</span>
+            <h2 class="section-title">视频创作工作台</h2>
             <p class="section-desc workspace-desc">
-              这里只生成一条视频；企业调度、计费和监控请前往
+              以双栏工作台组织输入、Prompt 预览、阶段反馈与结果输出；生成结果自动保存到素材库。
+              企业调度、计费和监控请前往
               <a class="field-hint-link" href="/compute-platform">算力调度</a>。
             </p>
           </div>
@@ -243,6 +307,112 @@
         </div>
       </section>
 
+      <section id="features" class="section features-section section-muted">
+        <div class="section-header">
+          <span class="section-label">Core Capabilities</span>
+          <h2 class="section-title">三大核心能力</h2>
+          <p class="section-desc">将知识库、空间锚点与模型路由收敛为一个更稳定的创作链路。</p>
+        </div>
+
+        <div class="features-grid">
+          <article class="feature-card">
+            <div class="feature-icon knowledge" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16v14H4z"/><path d="M12 2v4"/><circle cx="12" cy="13" r="1"/></svg></div>
+            <h3>知识增强引擎</h3>
+            <p>结构化 Prompt 六格公式，融合场馆环境、光影词库、材质语义与风格锚点，自动补全专业级视频生成参数。</p>
+            <ul class="feature-tags">
+              <li>场馆预设</li>
+              <li>镜头词库</li>
+              <li>材质语义</li>
+            </ul>
+          </article>
+
+          <article class="feature-card featured">
+            <div class="feature-icon spatial" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="M12 2v20"/><path d="M2 12h20"/></svg></div>
+            <div class="featured-badge">空间预演</div>
+            <h3>空间智能锚点</h3>
+            <p>基于 Blender 的白模场景与相机轨迹，为 Prompt 提供空间约束和预演参考；空间锚点不作为视频模型首帧。</p>
+            <ul class="feature-tags">
+              <li>相机轨迹</li>
+              <li>白模预演</li>
+              <li>空间约束</li>
+            </ul>
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-icon router" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="4" cy="15" r="2"/><circle cx="20" cy="15" r="2"/><path d="M12 7v4"/><path d="M10 9l-4 4"/><path d="M14 9l4 4"/></svg></div>
+            <h3>多模型路由</h3>
+            <p>统一接入火山方舟 Seedance、Atlas Cloud 与 Luma 等真实生成通道，并按凭据和模型能力展示可用状态。</p>
+            <ul class="feature-tags">
+              <li>真实通道</li>
+              <li>能力约束</li>
+              <li>状态反馈</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="models" class="section models-section">
+        <div class="section-header">
+          <span class="section-label">Model Router</span>
+          <h2 class="section-title">支持的视频生成模型</h2>
+          <p class="section-desc">来自真实模型注册表；可用性表示凭据已配置，模型开通状态以生成结果为准。</p>
+        </div>
+        <div class="models-grid" id="model-grid"></div>
+      </section>
+
+      <section class="section formula-section section-muted">
+        <div class="section-header">
+          <span class="section-label">Prompt Formula</span>
+          <h2 class="section-title">黄金六格 Prompt 公式</h2>
+          <p class="section-desc">用更清晰的六模块结构组织镜头、主体、动态、环境、光影与风格。</p>
+        </div>
+
+        <div class="formula-showcase">
+          <div class="formula-item">
+            <div class="formula-number">01</div>
+            <div class="formula-content">
+              <h4>镜头语言</h4>
+              <p>先锁定三维坐标系与观众视角，避免画面退化为静帧或透视失真。</p>
+            </div>
+          </div>
+          <div class="formula-item">
+            <div class="formula-number">02</div>
+            <div class="formula-content">
+              <h4>主体材质</h4>
+              <p>用 velvet、patina、mahogany 等物理词汇描述核心对象与触感。</p>
+            </div>
+          </div>
+          <div class="formula-item">
+            <div class="formula-number">03</div>
+            <div class="formula-content">
+              <h4>动态行为</h4>
+              <p>通过尘埃、烟雾、反射锚定时间流逝，增强场景生命感。</p>
+            </div>
+          </div>
+          <div class="formula-item">
+            <div class="formula-number">04</div>
+            <div class="formula-content">
+              <h4>环境空间</h4>
+              <p>定义大剧院、白立方画廊、古典博物馆等物理容器与建筑逻辑。</p>
+            </div>
+          </div>
+          <div class="formula-item">
+            <div class="formula-number">05</div>
+            <div class="formula-content">
+              <h4>光影氛围</h4>
+              <p>通过体积光、明暗对照、月光蓝建立情绪和空间深度。</p>
+            </div>
+          </div>
+          <div class="formula-item">
+            <div class="formula-number">06</div>
+            <div class="formula-content">
+              <h4>风格锚点</h4>
+              <p>用电影级风格与负向词控制整体完成度和稳定性。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="assets" class="section assets-section">
         <div class="section-header">
           <span class="section-label">Recent Assets</span>
@@ -269,7 +439,7 @@
           <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span>
           <span>AIGV Studio</span>
         </div>
-        <p class="footer-desc">文创视频生成 · 快速生成 / 项目工作流</p>
+        <p class="footer-desc">Flask + Blender + MCP + 多模型路由的文创视频智能生成平台 · 快速生成 / 项目工作流</p>
       </div>
     </footer>
 

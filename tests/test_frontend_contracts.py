@@ -35,9 +35,10 @@ def test_history_has_task_delete_action():
     assert "deleteGenerationTask" in assets_js
 
 
-def test_creative_studio_declares_real_and_demo_scope():
+def test_creative_studio_capability_note_is_compact_and_has_no_demo_label():
     html = _read("web/creative-studio.html")
-    assert "真实" in html
-    assert "演示" in html
+    assert "已接入能力" in html
+    assert "真实任务链路" in html
+    assert "演示" not in html
     assert "已连接" not in html
     assert "实时预览" not in html

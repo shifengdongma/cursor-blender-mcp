@@ -3630,11 +3630,21 @@ a:focus-visible,
 .capability-note {
   display: grid;
   gap: 10px;
+  width: min(1100px, calc(100% - 2 * var(--space-xl)));
+  max-width: 1100px;
+  margin: 0 auto var(--space-xl);
+  padding: 16px 24px;
+  text-align: center;
+}
+
+.creative-studio-page .capability-note {
+  align-items: center;
 }
 
 .capability-note-head {
   display: flex;
   align-items: center;
+  justify-content: center;
   flex-wrap: wrap;
   gap: 10px;
 }
@@ -3646,7 +3656,15 @@ a:focus-visible,
 .capability-chip-list {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .capability-note {
+    width: calc(100% - 2 * var(--space-md));
+    padding: 14px 16px;
+  }
 }
 
 .capability-chip-list .meta-chip {

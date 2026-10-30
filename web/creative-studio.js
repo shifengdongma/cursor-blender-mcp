@@ -138,6 +138,78 @@
     setTimeout(function() { confirmBtn.focus(); }, 50);
   }
 
+  function showPromptDialog(title, message, defaultValue, confirmText, onSubmit) {
+    title = title || '输入';
+    message = message || '';
+    defaultValue = defaultValue || '';
+    confirmText = confirmText || '确定';
+    onSubmit = onSubmit || function() {};
+
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    overlay.innerHTML =
+      '<div class="modal-content modal-dialog-sm">' +
+      '  <div class="studio-modal-header">' +
+      '    <span class="studio-modal-title">' + escapeHtml(title) + '</span>' +
+      '    <button class="studio-modal-close" aria-label="关闭">&times;</button>' +
+      '  </div>' +
+      '  <div class="studio-modal-body">' +
+      '    <p class="modal-message">' + escapeHtml(message) + '</p>' +
+      '    <div class="modal-form-group">' +
+      '      <label class="modal-form-label" for="prompt-dialog-input">项目名称</label>' +
+      '      <input type="text" class="modal-form-input" id="prompt-dialog-input" maxlength="80" />' +
+      '    </div>' +
+      '  </div>' +
+      '  <div class="modal-form-actions">' +
+      '    <button class="modal-btn-cancel">取消</button>' +
+      '    <button class="modal-btn-confirm">' + escapeHtml(confirmText) + '</button>' +
+      '  </div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+
+    var input = overlay.querySelector('.modal-form-input');
+    var closeBtn = overlay.querySelector('.studio-modal-close');
+    var cancelBtn = overlay.querySelector('.modal-btn-cancel');
+    var confirmBtn = overlay.querySelector('.modal-btn-confirm');
+    input.value = defaultValue;
+
+    function closeModal() {
+      document.removeEventListener('keydown', onKeyDown);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }
+
+    function submit() {
+      var value = (input.value || '').trim();
+      if (!value) {
+        showToast('项目名称不能为空', 'warning');
+        input.focus();
+        return;
+      }
+      closeModal();
+      onSubmit(value);
+    }
+
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) closeModal();
+    });
+    closeBtn.addEventListener('click', closeModal);
+    cancelBtn.addEventListener('click', closeModal);
+    confirmBtn.addEventListener('click', submit);
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') submit();
+    });
+
+    function onKeyDown(e) {
+      if (e.key === 'Escape') closeModal();
+    }
+    document.addEventListener('keydown', onKeyDown);
+
+    // Preselect the current name so typing replaces it.
+    setTimeout(function() { input.focus(); input.select(); }, 50);
+  }
+
   function showEditShotDialog(shot, onSave) {
     if (!shot) return;
     onSave = onSave || function() {};
@@ -444,6 +516,8 @@
     els.projectActions = $('project-actions');
     els.btnNewProject = $('btn-new-project');
     els.btnSaveProject = $('btn-save-project');
+    els.btnRenameProject = $('btn-rename-project');
+    els.btnDeleteProject = $('btn-delete-project');
     els.btnResetProject = $('btn-reset-project');
     els.flowNav = $('flow-nav');
     els.studioContentPanel = $('studio-content-panel');
@@ -519,12 +593,6 @@
 
   function init() {
     cacheElements();
-    var dataStatus = $('demo-data-status');
-    if (dataStatus) {
-      dataStatus.textContent = (window.AIGV && window.AIGV.runtime && window.AIGV.runtime.demoMode)
-        ? '演示模式（项目与任务仍来自后端）'
-        : '真实项目数据';
-    }
 
     // Try restoring UI prefs from localStorage
     loadFromLocalStorage();
@@ -1014,6 +1082,16 @@
       });
     }
 
+    // Rename project button
+    if (els.btnRenameProject) {
+      els.btnRenameProject.addEventListener('click', renameActiveProject);
+    }
+
+    // Delete project button
+    if (els.btnDeleteProject) {
+      els.btnDeleteProject.addEventListener('click', deleteActiveProject);
+    }
+
     // Reset button
     if (els.btnResetProject) {
       els.btnResetProject.addEventListener('click', function() {
@@ -1155,6 +1233,87 @@
     });
   }
 
+  function renameActiveProject() {
+    if (!state.projectId || !state.project) {
+      showToast('请先选择一个项目', 'warning');
+      return;
+    }
+    var projectId = state.projectId;
+    var currentName = state.project.name || '';
+    showPromptDialog('重命名项目', '输入新的项目名称。', currentName, '保存', function (name) {
+      api('/api/creative/projects/' + encodeURIComponent(projectId), {
+        method: 'PUT',
+        body: { name: name }
+      }).then(function (project) {
+        state.project = project;
+        state.activeProject = project;
+        for (var i = 0; i < state.projects.length; i++) {
+          if (state.projects[i].id === project.id) {
+            state.projects[i] = project;
+            break;
+          }
+        }
+        state.requirementsForm.projectName = project.name || '';
+        populateProjectSelector();
+        renderCurrentModule();
+        updateProjectMetrics();
+        saveToLocalStorage();
+        showToast('项目已重命名', 'success');
+      }).catch(function (error) {
+        showToast('重命名失败: ' + error.message, 'error');
+      });
+    });
+  }
+
+  function deleteActiveProject() {
+    if (!state.projectId || !state.project) {
+      showToast('请先选择一个项目', 'warning');
+      return;
+    }
+    var projectId = state.projectId;
+    var projectName = state.project.name || '未命名项目';
+    showConfirmDialog(
+      '删除项目',
+      '确定删除项目「' + projectName + '」吗？该项目的分镜、生成任务和导出记录将一并删除，此操作不可恢复。',
+      '删除',
+      function () {
+        api('/api/creative/projects/' + encodeURIComponent(projectId), {
+          method: 'DELETE'
+        }).then(function () {
+          state.projects = state.projects.filter(function (item) {
+            return item.id !== projectId;
+          });
+          state.projectId = null;
+          state.project = null;
+          state.activeProjectId = null;
+          state.activeProject = null;
+          state.newProjectDraft = false;
+          state.activeShotIndex = 0;
+          state.shots = [];
+          state.conceptImages = {};
+          state.videoResults = {};
+          state.projectImageTasks = {};
+          state.projectVideoTasks = {};
+          state.stepsCompleted = [false, false, false, false, false, false];
+          state.requirementsForm = defaultRequirementsForm();
+          if (state.projects.length) {
+            switchProject(state.projects[0].id);
+          } else {
+            populateProjectSelector();
+            renderCurrentModule();
+            updateFlowNav();
+            updatePreviewPanel(state.activeStep);
+            updateProjectMetrics();
+            saveToLocalStorage();
+          }
+          showToast('项目已删除', 'success');
+        }).catch(function (error) {
+          showToast('删除失败: ' + error.message, 'error');
+        });
+      }
+    );
+  }
+
   function switchProject(id) {
     state.activeProjectId = id || null;
     state.newProjectDraft = false;
@@ -1173,14 +1332,14 @@
       updateProjectMetrics();
       return;
     }
-    loadProjectFromBackend(id).then(function () {
+    return loadProjectFromBackend(id).then(function () {
       populateProjectSelector();
       renderCurrentModule();
       updateFlowNav();
       updatePreviewPanel(state.activeStep);
       updateProjectMetrics();
+      saveToLocalStorage();
     });
-    saveToLocalStorage();
   }
 
   async function loadProjectFromBackend(projectId) {

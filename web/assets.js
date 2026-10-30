@@ -681,10 +681,14 @@
         if (seq !== loadSeq) return;
         responseData = responseData || {};
         var items = responseData.items || [];
-        renderGenerationTasks(items);
         var totalItems = typeof responseData.total === 'number' ? responseData.total : items.length;
         totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-        if (currentPage > totalPages) currentPage = totalPages;
+        if (currentPage > totalPages) {
+          currentPage = totalPages;
+          loadGenerationHistory();
+          return;
+        }
+        renderGenerationTasks(items);
         renderPagination();
       })
       .catch(function(error) {
@@ -1210,8 +1214,11 @@
             <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>\
           </svg>\
           <h3 class="empty-title">还没有生成记录</h3>\
-          <p class="empty-desc">前往创意工作台提交第一张图片或第一段视频。</p>\
-          <a class="btn-primary" href="/creative-studio">开始生成</a>\
+          <p class="empty-desc">可以用快速生成创建一条视频，或在项目工作流中制作多镜头项目。</p>\
+          <div class="action-buttons">\
+            <a class="btn-primary" href="/">快速生成</a>\
+            <a class="btn-outline" href="/creative-studio">项目工作流</a>\
+          </div>\
         </div>';
       return;
     }
@@ -1266,6 +1273,15 @@
     if (task.status === 'succeeded' || task.status === 'failed') {
       actions += '<button class="asset-btn history-regenerate" data-task-id="' + escapeText(task.id) + '">重新生成</button>';
     }
+    var artifacts = task.artifacts || [];
+    var hasArtifactAsset = artifacts.some(function (artifact) {
+      return !!(artifact && artifact.asset_id);
+    });
+    if (!asset && !hasArtifactAsset &&
+        (task.status === 'failed' || task.status === 'cancelled')) {
+      actions += '<button class="asset-btn delete history-delete-task" data-task-id="' +
+        escapeText(task.id) + '">删除记录</button>';
+    }
 
     return '\
       <div class="asset-preview">\
@@ -1303,6 +1319,12 @@
         cancelGenerationTask(this.dataset.taskId);
       });
     });
+    document.querySelectorAll('.history-delete-task').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        deleteGenerationTask(this.dataset.taskId);
+      });
+    });
     document.querySelectorAll('.history-use-image').forEach(function(btn) {
       btn.addEventListener('click', function(e) {
         e.stopPropagation();
@@ -1329,6 +1351,32 @@
         showToast((error && error.message) || '取消失败', 'error');
       });
     });
+  }
+
+  function deleteGenerationTask(taskId) {
+    showConfirmDialog(
+      '删除生成记录',
+      '仅删除本地生成记录，已产生的费用不会退回；若失败任务仍保留第三方任务 ID，会尽力请求取消。确定删除？',
+      '删除记录',
+      function() {
+        if (currentPage > 1 && Object.keys(historyTaskMap).length === 1) {
+          currentPage -= 1;
+        }
+        window.AIGV.api('/api/generation/tasks/' + encodeURIComponent(taskId), {
+          method: 'DELETE'
+        }).then(function() {
+          showToast('生成记录已删除', 'success');
+          requestAssets();
+        }).catch(function(error) {
+          if (error && error.status === 404) {
+            showToast('记录已不存在，正在刷新', 'info');
+            requestAssets();
+            return;
+          }
+          showToast((error && error.message) || '删除失败，请重试', 'error');
+        });
+      }
+    );
   }
 
   function regenerateTask(taskId) {

@@ -143,10 +143,12 @@ def register_generation_routes(app, cfg, json_success, json_error):
             sort=sort,
         )
         asset_service = get_asset_service(cfg.DATA_DIR)
-        result["items"] = [
-            _serialize_task(task_service.get_task(item.get("id")), asset_service)
-            for item in result.get("items", [])
-        ]
+        serialized = []
+        for item in result.get("items", []):
+            task = task_service.get_task(item.get("id"))
+            if task is not None:
+                serialized.append(_serialize_task(task, asset_service))
+        result["items"] = serialized
         if scope == "all" and is_admin(g.current_user):
             creator_ids = sorted({
                 item.get("created_by") for item in result["items"] if item.get("created_by")
@@ -184,6 +186,34 @@ def register_generation_routes(app, cfg, json_success, json_error):
         task = task_service.get_task(task_id)
         _audit(cfg, "generation_cancel", task_id)
         return json_success(_serialize_task(task, get_asset_service(cfg.DATA_DIR)), message="取消请求已记录")
+
+    @app.route("/api/generation/tasks/<task_id>", methods=["DELETE"])
+    def generation_task_delete(task_id):
+        task = require_task(
+            task_id, write=True, demo_mode=cfg.DEMO_MODE, creator_only=True
+        )
+        if task.task_type not in (GenerationTask.TYPE_IMAGE, GenerationTask.TYPE_VIDEO):
+            raise ApiError("invalid_task", "不是可删除的生成任务", status_code=400)
+        deleted = task_service.delete_terminal_task(task_id)
+        deleted_task = deleted["task"]
+        provider_cancel = {"attempted": False, "succeeded": False}
+        if (deleted_task.status == GenerationTask.STATUS_FAILED
+                and deleted_task.provider_job_id):
+            provider_cancel = generation_service.cancel_provider_job(cfg, deleted_task)
+        generation_service.remove_task_directory(cfg, deleted_task)
+        _audit(
+            cfg, "generation_delete", task_id,
+            metadata={
+                "task_type": deleted_task.task_type,
+                "status_at_delete": deleted_task.status,
+                "provider": deleted_task.provider,
+                "model_id": deleted_task.model_id,
+                "had_provider_job": bool(deleted_task.provider_job_id),
+                "provider_cancel_succeeded": provider_cancel.get("succeeded"),
+                "artifact_count": len(deleted.get("artifacts") or []),
+            },
+        )
+        return json_success({"deleted": True}, message="生成记录已删除")
 
     @app.route("/api/generation/tasks/<task_id>/retry", methods=["POST"])
     @admin_required
@@ -242,7 +272,9 @@ def register_generation_routes(app, cfg, json_success, json_error):
         return send_file(path, as_attachment=True, download_name=os.path.basename(path))
 
 
-def _audit(cfg, action, task_id):
+def _audit(cfg, action, task_id, metadata=None, result="success"):
+    if not getattr(cfg, "AUDIT_ENABLED", True):
+        return None
     try:
         from .audit_service import get_audit_service
         get_audit_service(cfg.DATA_DIR).record_audit(
@@ -252,7 +284,8 @@ def _audit(cfg, action, task_id):
             action=action,
             target_type="generation_task",
             target_id=task_id,
-            result="success",
+            result=result,
+            metadata=metadata,
             request_id=getattr(g, "request_id", None),
         )
     except Exception:

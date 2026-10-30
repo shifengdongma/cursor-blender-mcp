@@ -31,14 +31,24 @@
       <header class="page-header page-header-curated">
         <div class="page-header-text page-header-grid">
           <div class="page-header-copy">
-            <div class="hero-badge">Creative Production Studio</div>
-            <h1 class="page-title">多模态 AIGV 创意生产工作台</h1>
+            <div class="hero-badge">Project Workflow</div>
+            <h1 class="page-title">多镜头项目工作流</h1>
             <p class="page-desc">
-              从创意需求、分镜、概念图、动态镜头到多平台素材输出
+              从需求、分镜、概念图、视频到素材包导出。只生成一条视频？返回
+              <a class="field-hint-link" href="/">快速生成</a>。
             </p>
           </div>
         </div>
       </header>
+
+      <section class="content-note" aria-label="真实与演示能力说明">
+        <strong class="content-note-title">真实能力与演示能力</strong>
+        <p class="content-note-desc">
+          <strong>真实：</strong>LLM 需求分析与分镜、概念图、视频生成、Piper 配音、基础 FFmpeg 精修、ZIP 素材包导出。
+          <strong>演示/本地：</strong>音色选择与克隆、背景音乐、音效、时间线、专业调色、部分 AI 批处理、平台转码与成片合成。
+          演示控件会标注“演示”，不会进入最终导出包。
+        </p>
+      </section>
 
       <section class="creative-studio-shell" aria-label="创意生产主体区域">
 
@@ -80,15 +90,15 @@
           </button>
           <button class="flow-step" data-step="4">
             <span class="flow-step-number">04</span>
-            <span class="flow-step-label">多媒体增强</span>
+            <span class="flow-step-label">配音与素材</span>
           </button>
           <button class="flow-step" data-step="5">
             <span class="flow-step-number">05</span>
-            <span class="flow-step-label">后期精调</span>
+            <span class="flow-step-label">单镜头试调（可选）</span>
           </button>
           <button class="flow-step" data-step="6">
             <span class="flow-step-number">06</span>
-            <span class="flow-step-label">输出适配</span>
+            <span class="flow-step-label">导出素材包</span>
           </button>
         </nav>
 
@@ -99,11 +109,11 @@
           </div>
           <aside class="studio-preview-panel" id="studio-preview-panel">
             <div class="preview-header">
-              <h3 class="preview-title">实时预览</h3>
+              <h3 class="preview-title">步骤概览</h3>
               <span class="preview-step-label" id="preview-step-label">模块 1</span>
             </div>
             <div class="preview-body" id="preview-body">
-              <p class="preview-placeholder-text">选择项目并完成各步骤，预览将在此显示</p>
+              <p class="preview-placeholder-text">这里显示步骤摘要与数量，不是视频预览</p>
             </div>
           </aside>
         </div>
@@ -113,14 +123,13 @@
 
     <footer class="status-bar">
       <div class="status-bar-content">
-        <span class="status-indicator" id="connection-status">已连接</span>
-        <span class="status-version">AIGV Studio v2.0</span>
+        <span class="status-indicator" id="connection-status">正在检查服务...</span>
+        <span class="status-version">AIGV Studio</span>
       </div>
     </footer>
 
     <script src="/web/runtime-config.js"></script>
     <script src="/web/api-client.js"></script>
-    <script src="/web/aigv-demo-data.js"></script>
     <script src="/web/creative-studio.js"></script>
     <script src="/web/session-nav.js"></script>
   </body>

@@ -217,12 +217,20 @@
     var overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
 
-    var shotTypeOptions = ['wide-shot', 'close-up', 'macro', 'medium-shot', 'aerial', 'orbit'];
+    var shotTypeOptions = [
+      'wide', 'medium', 'close_up', 'establishing', 'detail', 'tracking',
+      'macro', 'aerial', 'orbit'
+    ];
+    var currentType = String(shot.shotType || '').toLowerCase()
+      .replace('wide-shot', 'wide')
+      .replace('medium-shot', 'medium')
+      .replace('close-up', 'close_up');
     var shotTypeSelect = '';
     for (var i = 0; i < shotTypeOptions.length; i++) {
       var s = shotTypeOptions[i];
-      var sel = (shot.shotType || '').toLowerCase() === s ? ' selected' : '';
-      shotTypeSelect += '<option value="' + s + '"' + sel + '>' + s + '</option>';
+      var sel = currentType === s ? ' selected' : '';
+      shotTypeSelect += '<option value="' + s + '"' + sel + '>' +
+        shotTypeLabel(s) + '</option>';
     }
 
     overlay.innerHTML =
@@ -591,6 +599,18 @@
   // Core Functions
   // ---------------------------------------------------------------
 
+  function checkServiceHealth() {
+    var statusEl = document.getElementById('connection-status');
+    if (!statusEl) return;
+    api('/api/health').then(function () {
+      statusEl.textContent = '服务正常';
+      statusEl.setAttribute('data-status-tone', 'success');
+    }).catch(function () {
+      statusEl.textContent = '服务不可用';
+      statusEl.setAttribute('data-status-tone', 'error');
+    });
+  }
+
   function init() {
     cacheElements();
 
@@ -614,6 +634,7 @@
 
     // Bind events
     bindEvents();
+    checkServiceHealth();
 
     // Render shell immediately, then hydrate real projects/tasks/modules.
     renderCurrentModule();
@@ -951,8 +972,12 @@
     await loadProjectTasks();
     hydrateConceptImages();
     hydrateVideoResults();
+    state.stepsCompleted[0] = state.shots.some(function (item) { return item.status === 'confirmed'; });
     state.stepsCompleted[1] = state.shots.some(function (item) { return !!item.primary_image_asset_id; });
     state.stepsCompleted[2] = state.shots.some(function (item) { return !!item.video_asset_id; });
+    state.stepsCompleted[3] = state.shots.some(function (item) { return !!item.audio_asset_id; });
+    // Step 5 is an optional standalone refine; it does not complete the flow.
+    state.stepsCompleted[4] = false;
     updateFlowNav();
     updateProjectMetrics();
   }
@@ -1375,9 +1400,11 @@
       hydrateConceptImages();
       state.videoResults = {};
       hydrateVideoResults();
-      state.stepsCompleted[0] = state.shots.length > 0;
+      state.stepsCompleted[0] = state.shots.some(function (shot) { return shot.status === 'confirmed'; });
       state.stepsCompleted[1] = state.shots.some(function (shot) { return !!shot.primary_image_asset_id; });
       state.stepsCompleted[2] = state.shots.some(function (shot) { return !!shot.video_asset_id; });
+      state.stepsCompleted[3] = state.shots.some(function (shot) { return !!shot.audio_asset_id; });
+      state.stepsCompleted[4] = false;
       // Update form fields
       if (project) {
         state.requirementsForm.projectName = project.name || '';
@@ -1421,28 +1448,33 @@
     for (var i = 0; i < shots.length; i++) {
       totalDuration += (shots[i].duration_s || shots[i].duration || 0);
     }
-    var readyCount = 0;
+    var videoCount = 0;
     for (var j = 0; j < shots.length; j++) {
-      if (shots[j].status === 'ready' || shots[j].status === 'confirmed') readyCount++;
+      if (shots[j].video_asset_id) videoCount++;
     }
+    var projectStatusLabels = {
+      draft: '草稿', analyzing: '分析中', ready: '已就绪',
+      in_progress: '制作中', completed: '已完成', archived: '已归档'
+    };
+    var projectStatus = project.status || 'draft';
     var html = '';
     html += '<div class="metric-item"><span class="metric-label">分镜数</span><span class="metric-value">' + shots.length + '</span></div>';
     html += '<div class="metric-item"><span class="metric-label">总时长</span><span class="metric-value">' + Math.round(totalDuration) + 's</span></div>';
-    html += '<div class="metric-item"><span class="metric-label">可用镜头</span><span class="metric-value">' + readyCount + '</span></div>';
-    html += '<div class="metric-item"><span class="metric-label">状态</span><span class="metric-value status-badge status-' + escapeHtml(project.status || 'draft') + '">' + escapeHtml(project.status || '草稿') + '</span></div>';
+    html += '<div class="metric-item"><span class="metric-label">已出视频镜头</span><span class="metric-value">' + videoCount + '</span></div>';
+    html += '<div class="metric-item"><span class="metric-label">状态</span><span class="metric-value status-badge status-' + escapeHtml(projectStatus) + '">' + escapeHtml(projectStatusLabels[projectStatus] || projectStatus) + '</span></div>';
     els.projectMetrics.innerHTML = html;
   }
 
   function updatePreviewPanel(stepNum) {
-    var labels = ['', '需求与分镜', '概念图生成', '视频生成', '多模态增强', '人机精调', '输出适配'];
+    var labels = ['', '需求与分镜', '概念图生成', '视频生成', '配音与素材', '单镜头试调', '导出素材包'];
     var descriptions = [
       '',
-      '填写创作需求，AI自动分析并生成分镜脚本。可对每个分镜进行编辑、排序和确认。',
-      '为已确认的分镜生成概念参考图。支持多种模型，可设置关键帧。',
-      '基于关键帧生成视频。支持多种参数调整和模型选择。',
-      '添加配音、背景音乐、音效，并编辑时间线。',
-      '使用滤镜和AI批处理工具对画面进行精细化调整。',
-      '选择输出平台，配置导出参数，生成最终成果包。'
+      '填写创作需求，AI 分析并生成分镜。至少确认 1 个分镜后才能进入概念图。',
+      '为已确认分镜生成 1 张概念图并设为关键帧；历史图可在素材库查看。',
+      '基于关键帧生成真实视频，可取消、播放和下载。',
+      'Piper 配音是真实能力；音色选择、背景音乐、音效和时间线为本地演示，不参与导出。',
+      '基础亮度/对比度/饱和度精修可用；专业调色与部分 AI 批处理为演示，结果保存为独立素材。',
+      '导出包含分镜视频、图片、配音、字幕和 Manifest 的 ZIP 素材包，不合成成片。'
     ];
 
     if (els.previewStepLabel) {
@@ -1658,12 +1690,19 @@
     html += '  <div class="shot-cards-grid" id="shot-cards-grid">';
     html += renderShotCardsHTML();
     html += '  </div>';
+    if (state.stepsCompleted[0]) {
+      html += '  <div class="form-actions"><button class="btn btn-primary" id="btn-next-module2">下一步：概念图</button></div>';
+    } else if (getShotsForActiveProject().length) {
+      html += '  <p class="field-hint">请至少点击一个分镜的“确认分镜”，才能进入概念图步骤。</p>';
+    }
     html += '</div>';
 
     els.studioContentPanel.innerHTML = html;
 
     // Bind form listeners
     bindRequirementFormListeners();
+    var nextModule2 = $('btn-next-module2');
+    if (nextModule2) nextModule2.addEventListener('click', function () { switchStep(2); });
 
     // Bind analyze button
     var analyzeBtn = $('btn-analyze-requirements');
@@ -1789,7 +1828,7 @@
 
         hydrateConceptImages();
         hydrateVideoResults();
-        state.stepsCompleted[0] = state.shots.length > 0;
+        state.stepsCompleted[0] = state.shots.some(function (shot) { return shot.status === 'confirmed'; });
         state.analysisInProgress = false;
         state.analysisStage = '';
         updateFlowNav();
@@ -1839,6 +1878,35 @@
     throw timeoutError;
   }
 
+  function shotTypeLabel(value) {
+    var labels = {
+      'close-up': '特写',
+      'close_up': '特写',
+      'medium-shot': '中景',
+      'medium': '中景',
+      'wide-shot': '全景',
+      'wide': '全景',
+      'establishing': '建立镜头',
+      'detail': '细节',
+      'tracking': '跟拍',
+      'macro': '微距',
+      'aerial': '航拍',
+      'orbit': '环绕'
+    };
+    return labels[value] || labels[String(value || '').toLowerCase()] || value || '—';
+  }
+
+  function shotStatusMeta(status) {
+    var value = String(status || '').toLowerCase();
+    if (value === 'confirmed') return { className: 'status-confirmed', label: '已确认' };
+    if (value === 'ready') return { className: 'status-ready', label: '已生成（待确认）' };
+    if (value === 'failed') return { className: 'status-failed', label: '生成失败' };
+    if (value.indexOf('generating') === 0 || value === 'analyzing' || value === 'running') {
+      return { className: 'status-generating', label: '生成中' };
+    }
+    return { className: 'status-draft', label: '草稿' };
+  }
+
   function renderShotCardsHTML() {
     var shots = getNormalizedShots();
     if (!shots || shots.length === 0) {
@@ -1848,17 +1916,8 @@
     var html = '';
     for (var i = 0; i < shots.length; i++) {
       var shot = shots[i];
-      var statusClass = shot.status === 'confirmed' ? 'status-confirmed' : 'status-draft';
-      var statusLabel = shot.status === 'confirmed' ? '已确认' : '草稿';
-      var shotTypeLabels = {
-        'wide-shot': '全景',
-        'close-up': '特写',
-        'macro': '微距',
-        'medium-shot': '中景',
-        'aerial': '航拍',
-        'orbit': '环绕'
-      };
-      var shotTypeLabel = shotTypeLabels[shot.shotType] || shot.shotType;
+      var statusMeta = shotStatusMeta(shot.status);
+      var confirmLabel = shot.status === 'confirmed' ? '取消确认' : '确认分镜';
 
       html += '<div class="shot-card" data-shot-id="' + escapeHtml(shot.shotId) + '">';
       html += '  <div class="shot-number-badge">' + shot.number + '</div>';
@@ -1866,10 +1925,10 @@
       html += '    <div class="shot-card-title" data-editable="title">' + escapeHtml(shot.title) + '</div>';
       html += '    <div class="shot-card-meta">';
       html += '      <span class="meta-chip">' + shot.duration + 's</span>';
-      html += '      <span class="meta-chip">' + escapeHtml(shotTypeLabel) + '</span>';
+      html += '      <span class="meta-chip">' + escapeHtml(shotTypeLabel(shot.shotType)) + '</span>';
       html += '    </div>';
       html += '    <div class="shot-desc">' + escapeHtml(shot.sceneDesc || '') + '</div>';
-      html += '    <div class="shot-status-badge ' + statusClass + '">' + statusLabel + '</div>';
+      html += '    <div class="shot-status-badge ' + statusMeta.className + '">' + statusMeta.label + '</div>';
       html += '  </div>';
       html += '  <div class="shot-actions">';
       html += '    <button class="btn-icon btn-edit-shot" title="编辑" data-action="edit">&#9998;</button>';
@@ -1877,7 +1936,7 @@
       html += '    <button class="btn-icon btn-delete-shot" title="删除" data-action="delete">&#128465;</button>';
       html += '    <button class="btn-icon btn-move-up" title="上移" data-action="move-up">&#9650;</button>';
       html += '    <button class="btn-icon btn-move-down" title="下移" data-action="move-down">&#9660;</button>';
-      html += '    <button class="btn-icon btn-confirm-shot" title="确认" data-action="confirm">&#10003;</button>';
+      html += '    <button class="btn-outline btn-sm btn-confirm-shot" data-action="confirm">' + confirmLabel + '</button>';
       html += '  </div>';
       html += '</div>';
     }
@@ -2055,7 +2114,7 @@
       var shots = getShotsForActiveProject();
       var anyConfirmed = false;
       for (var i = 0; i < shots.length; i++) {
-        if (shots[i].status === 'confirmed' || shots[i].status === 'ready') {
+        if (shots[i].status === 'confirmed') {
           anyConfirmed = true;
           break;
         }
@@ -2221,11 +2280,16 @@
     html += '<div class="concept-images-section">';
     html += renderConceptImagesHTML(shotId);
     html += '</div>';
+    if (state.stepsCompleted[1]) {
+      html += '<div class="form-actions"><button class="btn btn-primary" id="btn-next-module3">下一步：生成视频</button></div>';
+    }
 
     els.studioContentPanel.innerHTML = html;
 
     // Bind shot selectors
     bindShotSelector();
+    var nextModule3 = $('btn-next-module3');
+    if (nextModule3) nextModule3.addEventListener('click', function () { switchStep(3); });
 
     // Bind prompt changes
     var kpEl = $('module2-keyframe-prompt');
@@ -2796,11 +2860,20 @@
       html += '  </div>';
     }
     html += '</div>';
+    if (state.stepsCompleted[2]) {
+      html += '<div class="form-actions">' +
+        '<button class="btn btn-primary" id="btn-next-module4">下一步：配音与素材</button>' +
+        '<button class="btn btn-secondary" id="btn-next-module6">直接导出素材包</button></div>';
+    }
 
     els.studioContentPanel.innerHTML = html;
 
     // Bind range sliders
     bindVideoRangeSliders();
+    var nextModule4 = $('btn-next-module4');
+    if (nextModule4) nextModule4.addEventListener('click', function () { switchStep(4); });
+    var nextModule6 = $('btn-next-module6');
+    if (nextModule6) nextModule6.addEventListener('click', function () { switchStep(6); });
 
     var videoModelSelect = $('vparam-model');
     if (videoModelSelect) {
@@ -2964,12 +3037,16 @@
   function renderModule4() {
     var html = '';
     html += '<div class="module-header">';
-    html += '  <h2 class="module-title">多模态增强</h2>';
+    html += '  <h2 class="module-title">配音与素材</h2>';
     html += '</div>';
+    html += '<div class="warning-stack"><div class="warning-item">' +
+      '真实能力：使用服务器配置的 Piper 为分镜台词生成配音。' +
+      '演示/本地：音色选择、背景音乐、音效和时间线不会保存到服务端，也不参与导出。' +
+      '</div></div>';
 
     // Narration Panel
     html += '<div class="enhance-section card">';
-    html += '  <h3 class="collapsible-header" data-collapse="narration">配音 &#9660;</h3>';
+    html += '  <h3 class="collapsible-header" data-collapse="narration">配音 <span class="demo-badge">音色选择为演示</span> &#9660;</h3>';
     html += '  <div class="collapsible-body" id="collapse-narration">';
     html += renderNarrationPanelHTML();
     html += '  </div>';
@@ -2977,7 +3054,7 @@
 
     // Music Panel
     html += '<div class="enhance-section card">';
-    html += '  <h3 class="collapsible-header" data-collapse="music">背景音乐 &#9660;</h3>';
+    html += '  <h3 class="collapsible-header" data-collapse="music">背景音乐 <span class="demo-badge">演示</span> &#9660;</h3>';
     html += '  <div class="collapsible-body" id="collapse-music">';
     html += renderMusicPanelHTML();
     html += '  </div>';
@@ -2985,7 +3062,7 @@
 
     // Effects Panel
     html += '<div class="enhance-section card">';
-    html += '  <h3 class="collapsible-header" data-collapse="effects">音效 &#9660;</h3>';
+    html += '  <h3 class="collapsible-header" data-collapse="effects">音效 <span class="demo-badge">演示</span> &#9660;</h3>';
     html += '  <div class="collapsible-body" id="collapse-effects">';
     html += renderEffectsPanelHTML();
     html += '  </div>';
@@ -2993,13 +3070,24 @@
 
     // Timeline
     html += '<div class="enhance-section card">';
-    html += '  <h3 class="collapsible-header" data-collapse="timeline">时间线 &#9660;</h3>';
+    html += '  <h3 class="collapsible-header" data-collapse="timeline">时间线 <span class="demo-badge">演示</span> &#9660;</h3>';
     html += '  <div class="collapsible-body" id="collapse-timeline">';
     html += renderSimplifiedTimelineHTML();
     html += '  </div>';
     html += '</div>';
 
+    if (state.stepsCompleted[3]) {
+      html += '<div class="form-actions">' +
+        '<button class="btn btn-primary" id="btn-next-module5">下一步：单镜头试调（可选）</button>' +
+        '<button class="btn btn-secondary" id="btn-next-module6-from4">直接导出素材包</button></div>';
+    }
+
     els.studioContentPanel.innerHTML = html;
+
+    var nextModule5 = $('btn-next-module5');
+    if (nextModule5) nextModule5.addEventListener('click', function () { switchStep(5); });
+    var nextModule6From4 = $('btn-next-module6-from4');
+    if (nextModule6From4) nextModule6From4.addEventListener('click', function () { switchStep(6); });
 
     // Bind collapsible headers
     var headers = els.studioContentPanel.querySelectorAll('.collapsible-header');
@@ -3060,10 +3148,19 @@
     html += '  <div class="form-group"><label>音量: ' + state.narrationForm.volume.toFixed(1) + '</label><input type="range" id="narration-volume" min="0" max="1.0" step="0.1" value="' + state.narrationForm.volume + '" /></div>';
     html += '</div>';
     html += '<div class="form-group"><label>配音文案</label><textarea id="narration-text" rows="3">' + escapeHtml(narrationText) + '</textarea></div>';
-    html += '<p class="hint">当前未接入真实语音克隆服务</p>';
+    html += '<p class="hint">使用服务器配置的 Piper 音色；暂不支持音色克隆。修改文案后会在失焦时保存到分镜。</p>';
     html += '<button class="btn btn-primary" id="btn-generate-narration">生成配音</button>';
 
     return html;
+  }
+
+  function persistNarration(shot) {
+    if (!shot || !shot.id) return Promise.resolve();
+    return api('/api/creative/shots/' + encodeURIComponent(shot.id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dialogue: shot.narration || '' })
+    });
   }
 
   function bindNarrationForm() {
@@ -3115,6 +3212,11 @@
           saveToLocalStorage();
         }
       });
+      narText.addEventListener('change', function() {
+        persistNarration(getActiveShot()).catch(function (error) {
+          showToast((error && error.message) || '旁白保存失败', 'error');
+        });
+      });
     }
 
     var genBtn = $('btn-generate-narration');
@@ -3126,6 +3228,8 @@
         }
         genBtn.disabled = true;
         try {
+          var activeShot = getActiveShot();
+          if (activeShot) await persistNarration(activeShot);
           var task = await api('/api/creative/projects/' + state.projectId + '/tts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3134,6 +3238,15 @@
           await pollTask(task.id, function(progress, stage) {
             showToast(stage || '配音任务运行中', 'info');
           });
+          await reloadShotsAndHydrate();
+          state.stepsCompleted[3] = state.shots.some(function (shot) {
+            return !!shot.audio_asset_id;
+          });
+          updateFlowNav();
+          updateProjectMetrics();
+          updatePreviewPanel(4);
+          saveToLocalStorage();
+          renderModule4();
           showToast('配音任务已完成', 'success');
         } catch (e) {
           if (e && e.code === 'provider_not_configured') {
@@ -3460,8 +3573,12 @@
 
     var html = '';
     html += '<div class="module-header">';
-    html += '  <h2 class="module-title">人机精调</h2>';
+    html += '  <h2 class="module-title">单镜头试调（可选）</h2>';
     html += '</div>';
+    html += '<div class="warning-stack"><div class="warning-item">' +
+      '基础滤镜只有亮度/对比度/饱和度会发送到 FFmpeg 精修；专业调色和部分 AI 批处理为演示参数。' +
+      '精修结果保存为素材库中的独立视频，不会替换分镜视频或进入导出包。' +
+      '</div></div>';
 
     // Comparison layout
     html += '<div class="comparison-layout">';
@@ -3679,12 +3796,16 @@
   function renderModule6() {
     var html = '';
     html += '<div class="module-header">';
-    html += '  <h2 class="module-title">输出适配</h2>';
+    html += '  <h2 class="module-title">导出素材包</h2>';
     html += '</div>';
+    html += '<div class="warning-stack"><div class="warning-item">' +
+      '导出的是 ZIP 素材包：包含每个分镜的视频/图片/配音、subtitles.srt、封面和 Manifest；' +
+      '当前不合成成片、不转码、不上传平台。平台卡片仅作发布参考。' +
+      '</div></div>';
 
     // Platform selector
     html += '<div class="platform-section card">';
-    html += '  <h4>选择输出平台</h4>';
+    html += '  <h4>发布平台参考 <span class="demo-badge">仅展示</span></h4>';
     html += '  <div class="platform-grid">';
 
     var platforms = [
@@ -3712,35 +3833,12 @@
     html += '  </div>';
     html += '</div>';
 
-    // Parameter form
-    html += '<div class="output-params card">';
-    html += '  <h4>导出参数</h4>';
-    html += '  <div class="form-grid">';
-    html += '    <div class="form-group"><label>封装格式</label><select id="out-format">';
-    html += '      <option value="MP4"' + (state.outputForm.format === 'MP4' ? ' selected' : '') + '>MP4</option>';
-    html += '      <option value="MOV"' + (state.outputForm.format === 'MOV' ? ' selected' : '') + '>MOV</option>';
-    html += '      <option value="AVI"' + (state.outputForm.format === 'AVI' ? ' selected' : '') + '>AVI</option>';
-    html += '      <option value="WEBM"' + (state.outputForm.format === 'WEBM' ? ' selected' : '') + '>WEBM</option>';
-    html += '    </select></div>';
-    html += '    <div class="form-group"><label>分辨率</label><select id="out-resolution">';
-    html += '      <option value="720p"' + (state.outputForm.resolution === '720p' ? ' selected' : '') + '>720p</option>';
-    html += '      <option value="1080p"' + (state.outputForm.resolution === '1080p' ? ' selected' : '') + '>1080p</option>';
-    html += '      <option value="4K"' + (state.outputForm.resolution === '4K' ? ' selected' : '') + '>4K</option>';
-    html += '    </select></div>';
-    html += '    <div class="form-group"><label>帧率</label><select id="out-fps">';
-    html += '      <option value="24"' + (state.outputForm.fps === 24 ? ' selected' : '') + '>24fps</option>';
-    html += '      <option value="30"' + (state.outputForm.fps === 30 ? ' selected' : '') + '>30fps</option>';
-    html += '      <option value="60"' + (state.outputForm.fps === 60 ? ' selected' : '') + '>60fps</option>';
-    html += '    </select></div>';
-    html += '    <div class="form-group"><label>比特率</label><select id="out-bitrate">';
-    html += '      <option value="10Mbps"' + (state.outputForm.bitrate === '10Mbps' ? ' selected' : '') + '>10Mbps</option>';
-    html += '      <option value="15Mbps"' + (state.outputForm.bitrate === '15Mbps' ? ' selected' : '') + '>15Mbps</option>';
-    html += '      <option value="25Mbps"' + (state.outputForm.bitrate === '25Mbps' ? ' selected' : '') + '>25Mbps</option>';
-    html += '      <option value="50Mbps"' + (state.outputForm.bitrate === '50Mbps' ? ' selected' : '') + '>50Mbps</option>';
-    html += '    </select></div>';
-    html += '    <div class="form-group"><label><input type="checkbox" id="out-subtitles"' + (state.outputForm.includeSubtitles ? ' checked' : '') + ' /> 包含字幕</label></div>';
-    html += '  </div>';
-    html += '  <p class="hint">当前为输出适配界面原型，未执行真实转码</p>';
+    // Export contents summary. Output format/resolution/fps are not
+    // transcoded by the backend, so do not present non-functional controls.
+    html += '<div class="content-note">';
+    html += '  <strong class="content-note-title">素材包内容</strong>';
+    html += '  <p class="content-note-desc">分镜视频、概念图、Piper 配音、subtitles.srt、封面和 manifest.json。' +
+      '如需成片合成或平台转码，请在后续版本中接入。</p>';
     html += '</div>';
 
     // Export button
@@ -3748,10 +3846,10 @@
     if (state.exportInProgress) {
       html += '  <div class="export-progress">';
       html += '    <div class="progress-bar"><div class="progress-fill progress-animate"></div></div>';
-      html += '    <p class="progress-label">正在准备导出包...</p>';
+      html += '    <p class="progress-label">正在准备素材包...</p>';
       html += '  </div>';
     } else {
-      html += '  <button class="btn btn-primary" id="btn-export-package">&#128230; 生成导出包</button>';
+      html += '  <button class="btn btn-primary" id="btn-export-package">&#128230; 生成素材包（ZIP）</button>';
     }
     html += '</div>';
 
@@ -3950,7 +4048,7 @@
         updateFlowNav();
         saveToLocalStorage();
         renderModule6();
-        showToast('导出包已生成', 'success');
+        showToast('素材包已生成', 'success');
 
       } catch (e) {
         state.exportInProgress = false;
@@ -4039,10 +4137,6 @@
     var manifest = {
       projectName: state.exportTree.name,
       generatedAt: new Date().toISOString(),
-      format: state.outputForm.format,
-      resolution: state.outputForm.resolution,
-      fps: state.outputForm.fps,
-      bitrate: state.outputForm.bitrate,
       structure: state.exportTree
     };
 

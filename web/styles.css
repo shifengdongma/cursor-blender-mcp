@@ -3573,6 +3573,61 @@ a:focus-visible,
   border: 1px solid rgba(116, 199, 152, 0.25);
 }
 
+.shot-status-badge.status-ready {
+  background: rgba(215, 168, 79, 0.12);
+  color: var(--gold, #d7a84f);
+  border: 1px solid rgba(215, 168, 79, 0.25);
+}
+
+.shot-status-badge.status-generating {
+  background: rgba(92, 148, 214, 0.12);
+  color: #8ab4f8;
+  border: 1px solid rgba(92, 148, 214, 0.25);
+}
+
+.shot-status-badge.status-failed {
+  background: rgba(224, 108, 117, 0.12);
+  color: #e06c75;
+  border: 1px solid rgba(224, 108, 117, 0.25);
+}
+
+.quick-header {
+  padding-bottom: var(--space-md);
+}
+
+.quick-header .page-title {
+  margin-bottom: var(--space-sm);
+}
+
+.quick-guide {
+  margin-bottom: var(--space-lg);
+}
+
+.quick-guide .feature-card {
+  min-height: 0;
+}
+
+.quick-guide .metric-number {
+  margin-bottom: var(--space-xs);
+}
+
+#readiness-banner {
+  margin-bottom: var(--space-md);
+}
+
+#task-meta .meta-list {
+  margin: 0;
+}
+
+#task-meta:empty {
+  display: none;
+}
+
+.result-block-video .action-buttons {
+  margin-top: var(--space-sm);
+}
+
+
 .shot-actions {
   display: flex;
   gap: var(--space-xs);

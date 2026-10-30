@@ -6,6 +6,7 @@ import base64
 import hashlib
 import logging
 import os
+import shutil
 import sqlite3
 import time
 
@@ -1029,6 +1030,47 @@ def finalize_task(cfg, task_service, task, lease_owner, files, kind):
         raise
 
     _audit(cfg, "generation_succeeded", _user_dict(task.created_by), task.id, result_payload)
+
+
+def cancel_provider_job(cfg, task):
+    """Best-effort cancellation of a failed task's provider job."""
+    if not task or not task.provider_job_id:
+        return {"attempted": False, "succeeded": False}
+    try:
+        provider = _provider_for_task(cfg, task)
+    except Exception:
+        logger.warning(
+            "Could not build provider for task %s while deleting; provider job left untouched",
+            task.id,
+        )
+        return {"attempted": False, "succeeded": False}
+    if not hasattr(provider, "cancel_generation"):
+        return {"attempted": False, "succeeded": False}
+    try:
+        succeeded = bool(provider.cancel_generation(task.provider_job_id))
+    except Exception:
+        logger.warning(
+            "Provider cancellation failed for task %s", task.id, exc_info=True
+        )
+        succeeded = False
+    return {"attempted": True, "succeeded": succeeded}
+
+
+def remove_task_directory(cfg, task):
+    """Remove a generation task's downloaded files without recreating paths."""
+    if not task:
+        return False
+    base = os.path.realpath(os.path.join(cfg.DATA_DIR, "assets", "generated"))
+    path = os.path.realpath(
+        os.path.join(base, str(task.created_by or "unknown"), str(task.id))
+    )
+    if path == base or not path.startswith(base + os.sep):
+        logger.warning("Refusing to remove out-of-tree task directory: %s", path)
+        return False
+    if not os.path.isdir(path):
+        return False
+    shutil.rmtree(path, ignore_errors=True)
+    return True
 
 
 def get_storyboard_service():

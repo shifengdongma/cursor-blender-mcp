@@ -130,8 +130,9 @@ class PromptOrchestrator(object):
             style_parts.append(model.get("style_hint"))
         if workflow_mode == "hybrid_image_to_video":
             style_parts.append("preserve structural proportions and keep architecture stable across frames")
-        style_parts.append("engine target {0}".format(engine_target))
-        style_parts.append("render mode {0}".format(render_mode))
+        if payload.get("include_engine_context", True):
+            style_parts.append("engine target {0}".format(engine_target))
+            style_parts.append("render mode {0}".format(render_mode))
 
         return {
             "camera": shot.get("prompt") or venue.get("default_camera_prompt") or "Cinematic camera move",

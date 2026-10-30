@@ -52,7 +52,7 @@ def require_shot(shot_id, write=False, demo_mode=False):
     return shot, project
 
 
-def require_task(task_id, write=False, demo_mode=False):
+def require_task(task_id, write=False, demo_mode=False, creator_only=False):
     user = _user_or_401()
     row = get_database().fetch_one(
         "SELECT * FROM generation_tasks WHERE id = ?", (task_id,)
@@ -64,13 +64,13 @@ def require_task(task_id, write=False, demo_mode=False):
         return task
     if task.created_by and task.created_by == user.get("id"):
         return task
-    if task.creative_project_id:
+    if not creator_only and task.creative_project_id:
         project_row = get_database().fetch_one(
             "SELECT * FROM creative_projects WHERE id = ?", (task.creative_project_id,)
         )
         if project_row and project_row.get("user_id") == user.get("id"):
             return task
-    if not task.created_by and demo_mode:
+    if not creator_only and not task.created_by and demo_mode:
         return task
     raise ApiError("forbidden", "无权访问该任务", status_code=403)
 

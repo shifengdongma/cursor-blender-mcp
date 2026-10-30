@@ -372,6 +372,67 @@ class TaskService(object):
 
         return False
 
+    def delete_terminal_task(self, task_id):
+        """Delete a failed/cancelled task and its child rows atomically.
+
+        Tasks with any output asset are intentionally rejected so deleting a
+        history record never destroys a usable asset.
+        """
+        with self.db.transaction() as cursor:
+            cursor.execute(
+                "SELECT * FROM generation_tasks WHERE id = ?", (task_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise ApiError("task_not_found", "任务不存在", status_code=404)
+            task = GenerationTask.from_row(dict(row))
+            if task.task_type not in (
+                GenerationTask.TYPE_IMAGE, GenerationTask.TYPE_VIDEO
+            ):
+                raise ApiError("invalid_task", "不是可删除的生成任务", status_code=400)
+            if task.status not in (
+                GenerationTask.STATUS_FAILED, GenerationTask.STATUS_CANCELLED
+            ):
+                raise ApiError(
+                    "task_not_deletable",
+                    "只有失败或已取消的任务可以删除记录",
+                    status_code=409,
+                )
+            result_payload = task.result_payload or {}
+            if task.output_asset_id or (result_payload.get("asset_ids") or []):
+                raise ApiError(
+                    "task_has_assets",
+                    "该任务已有生成作品，请先在素材库删除作品",
+                    status_code=409,
+                )
+            cursor.execute(
+                "SELECT id, asset_id FROM task_artifacts WHERE task_id = ?",
+                (task_id,),
+            )
+            artifacts = [dict(item) for item in cursor.fetchall()]
+            if any(item.get("asset_id") for item in artifacts):
+                raise ApiError(
+                    "task_has_assets",
+                    "该任务已有生成作品，请先在素材库删除作品",
+                    status_code=409,
+                )
+            # Delete children before the parent; SQLite foreign keys are on.
+            cursor.execute("DELETE FROM export_packages WHERE task_id = ?", (task_id,))
+            cursor.execute("DELETE FROM task_artifacts WHERE task_id = ?", (task_id,))
+            cursor.execute(
+                "DELETE FROM generation_tasks WHERE id = ? "
+                "AND status IN ('failed','cancelled') "
+                "AND output_asset_id IS NULL",
+                (task_id,),
+            )
+            if cursor.rowcount != 1:
+                raise ApiError(
+                    "task_not_deletable",
+                    "任务状态已变化，请刷新后重试",
+                    status_code=409,
+                )
+        return {"task": task, "artifacts": artifacts}
+
     def add_artifact(self, task_id, creative_project_id, name, artifact_type,
                      file_path=None, file_size=0, asset_id=None, metadata=None,
                      cursor=None):

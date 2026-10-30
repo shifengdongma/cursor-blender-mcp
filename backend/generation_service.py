@@ -216,21 +216,42 @@ def create_generation_task(cfg, task_service, user, task_type, model_key, payloa
         if not project_id:
             project_id = shot.creative_project_id
 
-    reference_asset_id = payload.get("reference_asset_id")
-    if payload.get("reference_asset_ids"):
+    reference_asset_ids = []
+    raw_reference_ids = payload.get("reference_asset_ids")
+    if raw_reference_ids is not None:
+        if not isinstance(raw_reference_ids, (list, tuple)):
+            raise ApiError("invalid_params", "reference_asset_ids 必须是数组", status_code=400)
+        for value in raw_reference_ids:
+            if isinstance(value, str) and value.strip() and value.strip() not in reference_asset_ids:
+                reference_asset_ids.append(value.strip())
+    single_reference_id = payload.get("reference_asset_id")
+    if isinstance(single_reference_id, str) and single_reference_id.strip():
+        single_reference_id = single_reference_id.strip()
+        if single_reference_id not in reference_asset_ids:
+            reference_asset_ids.insert(0, single_reference_id)
+
+    max_reference_images = int(caps.get("max_reference_images") or 0)
+    if reference_asset_ids and not caps.get("supports_reference_image"):
+        raise ApiError("invalid_params", "该模型不支持参考图片", status_code=400)
+    if len(reference_asset_ids) > max_reference_images:
         raise ApiError(
-            "invalid_params", "当前版本仅支持单张参考图片", status_code=400
+            "invalid_params",
+            "该模型最多支持 {0} 张参考图片，当前提交 {1} 张".format(
+                max_reference_images, len(reference_asset_ids)
+            ),
+            status_code=400,
         )
-    if reference_asset_id:
-        if not caps.get("supports_reference_image"):
-            raise ApiError("invalid_params", "该模型不支持参考图片", status_code=400)
-        asset = get_asset_service(cfg.DATA_DIR).get_asset(reference_asset_id)
-        if not asset:
-            raise ApiError("asset_not_found", "参考图片不存在", status_code=404)
-        if not can_read_asset(asset, user, demo_mode=cfg.DEMO_MODE):
-            raise ApiError("forbidden", "无权使用该参考图片", status_code=403)
-        if asset.asset_type != "image":
-            raise ApiError("invalid_params", "参考素材必须是图片", status_code=400)
+    if reference_asset_ids:
+        asset_service = get_asset_service(cfg.DATA_DIR)
+        for reference_asset_id in reference_asset_ids:
+            asset = asset_service.get_asset(reference_asset_id)
+            if not asset:
+                raise ApiError("asset_not_found", "参考图片不存在", status_code=404)
+            if not can_read_asset(asset, user, demo_mode=cfg.DEMO_MODE):
+                raise ApiError("forbidden", "无权使用该参考图片", status_code=403)
+            if asset.asset_type != "image":
+                raise ApiError("invalid_params", "参考素材必须是图片", status_code=400)
+    reference_asset_id = reference_asset_ids[0] if reference_asset_ids else None
 
     seed = payload.get("seed")
     if seed is not None:
@@ -257,6 +278,7 @@ def create_generation_task(cfg, task_service, user, task_type, model_key, payloa
         "negative_prompt": negative_prompt,
         "seed": seed,
         "reference_asset_id": reference_asset_id,
+        "reference_asset_ids": list(reference_asset_ids),
         "watermark": watermark,
         # Snapshot which credential source this task was created with so the
         # worker never silently switches accounts while queued/running.
@@ -288,7 +310,17 @@ def create_generation_task(cfg, task_service, user, task_type, model_key, payloa
         resolution = payload.get("resolution") or "720p"
         if ratio not in caps.get("ratios", []):
             raise ApiError("invalid_params", "不支持的比例", status_code=400)
-        if duration not in caps.get("durations", []):
+        duration_range = caps.get("duration_range")
+        if duration_range:
+            if duration < int(duration_range[0]) or duration > int(duration_range[1]):
+                raise ApiError(
+                    "invalid_params",
+                    "该模型支持的视频时长为 {0}-{1} 秒".format(
+                        duration_range[0], duration_range[1]
+                    ),
+                    status_code=400,
+                )
+        elif duration not in caps.get("durations", []):
             raise ApiError("invalid_params", "不支持的视频时长", status_code=400)
         if resolution not in caps.get("resolutions", []):
             raise ApiError("invalid_params", "不支持的分辨率", status_code=400)
@@ -420,70 +452,58 @@ def _provider_for_task(cfg, task):
         )
         model_id = (model or {}).get("model_id") or effective.get("model")
 
-    if provider_name == "openai_image":
-        from .providers.openai_image import OpenAIImageProvider
-        return OpenAIImageProvider(
-            api_key=api_key,
-            base_url=base_url,
-            model_id=model_id or getattr(cfg, "OPENAI_IMAGE_MODEL", "gpt-image-1"),
-        )
-    if provider_name == "ark_seedream":
-        from .providers.volcengine_image import VolcengineImageProvider
-        return VolcengineImageProvider(
-            api_key=api_key,
-            base_url=base_url,
-            model_id=model_id,
-            timeout_s=cfg.ARK_REQUEST_TIMEOUT_S,
-        )
-    if provider_name == "ark_seedance":
-        from .providers.volcengine_video import VolcengineVideoProvider
-        return VolcengineVideoProvider(
-            api_key=api_key,
-            base_url=base_url,
-            model_id=model_id,
-            timeout_s=cfg.ARK_REQUEST_TIMEOUT_S,
-        )
-    if provider_name == "atlas_seedance":
-        from .providers.seedance import SeedanceProvider
-        return SeedanceProvider(
-            api_key=api_key,
-            base_url=base_url,
-            model_name=model_id or effective.get("model") or cfg.SEEDANCE_MODEL_NAME,
-        )
-    if provider_name == "luma":
-        from .providers.luma import LumaProvider
-        return LumaProvider(
-            api_key=api_key,
-            base_url=base_url,
-            model_name=(
-                model_id
-                or effective.get("model")
-                or getattr(cfg, "LUMA_MODEL_NAME", "ray-2")
-            ),
-        )
-    raise ApiError("invalid_model", "无法创建 Provider 客户端", status_code=400)
+    from .provider_factory import create_provider
+    return create_provider(
+        cfg, provider_name, api_key, base_url,
+        model_id or effective.get("model"),
+    )
+
+
+def _reference_data_urls(cfg, asset_ids, user):
+    if not asset_ids:
+        return []
+    asset_service = get_asset_service(cfg.DATA_DIR)
+    total_limit_mb = int(getattr(cfg, "MAX_REFERENCE_IMAGES_TOTAL_MB", 40) or 0)
+    total_limit = total_limit_mb * 1024 * 1024
+    urls = []
+    total_size = 0
+    for asset_id in asset_ids:
+        asset = asset_service.get_asset(asset_id)
+        if not asset or not can_read_asset(asset, user, demo_mode=cfg.DEMO_MODE):
+            raise ApiError("forbidden", "无权使用参考图片", status_code=403)
+        path = asset_service.get_file_path_for_asset(asset)
+        if not path:
+            raise ApiError("file_not_found", "参考图片文件不存在", status_code=404)
+        size = os.path.getsize(path)
+        if size > cfg.MAX_REFERENCE_IMAGE_MB * 1024 * 1024:
+            raise ApiError("invalid_params", "参考图片超过大小限制", status_code=400)
+        total_size += size
+        if total_limit and total_size > total_limit:
+            raise ApiError(
+                "invalid_params",
+                "参考图片总大小超过限制（{0} MB）".format(total_limit_mb),
+                status_code=400,
+            )
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        ext = os.path.splitext(path)[1].lstrip(".").lower()
+        mime = {
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "webp": "image/webp",
+        }.get(ext)
+        if not mime:
+            raise ApiError("invalid_params", "参考图片格式不支持", status_code=400)
+        urls.append("data:{0};base64,{1}".format(
+            mime, base64.b64encode(raw).decode("ascii")
+        ))
+    return urls
 
 
 def _reference_data_url(cfg, asset_id, user):
-    if not asset_id:
-        return None
-    asset_service = get_asset_service(cfg.DATA_DIR)
-    asset = asset_service.get_asset(asset_id)
-    if not asset or not can_read_asset(asset, user, demo_mode=cfg.DEMO_MODE):
-        raise ApiError("forbidden", "无权使用参考图片", status_code=403)
-    path = asset_service.get_file_path_for_asset(asset)
-    if not path:
-        raise ApiError("file_not_found", "参考图片文件不存在", status_code=404)
-    size = os.path.getsize(path)
-    if size > cfg.MAX_REFERENCE_IMAGE_MB * 1024 * 1024:
-        raise ApiError("invalid_params", "参考图片超过大小限制", status_code=400)
-    with open(path, "rb") as handle:
-        raw = handle.read()
-    ext = os.path.splitext(path)[1].lstrip(".").lower()
-    mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}.get(ext)
-    if not mime:
-        raise ApiError("invalid_params", "参考图片格式不支持", status_code=400)
-    return "data:{0};base64,{1}".format(mime, base64.b64encode(raw).decode("ascii"))
+    urls = _reference_data_urls(cfg, [asset_id] if asset_id else [], user)
+    return urls[0] if urls else None
 
 
 def _user_dict(user_id):
@@ -603,10 +623,16 @@ def submit_task(cfg, task_service, task, lease_owner):
         return
 
     provider = _provider_for_task(cfg, task)
-    model = generation_models.get_model(cfg, (task.params or {}).get("model_key") or "", include_unavailable=True)
+    model = generation_models.get_model(
+        cfg, (task.params or {}).get("model_key") or "", include_unavailable=True,
+        user=user,
+    )
     caps = (model or {}).get("capabilities") or {}
     params = task.params or {}
-    reference = _reference_data_url(cfg, params.get("reference_asset_id"), user)
+    reference_ids = params.get("reference_asset_ids") or []
+    if not reference_ids and params.get("reference_asset_id"):
+        reference_ids = [params.get("reference_asset_id")]
+    references = _reference_data_urls(cfg, reference_ids, user)
 
     try:
         if task.task_type == GenerationTask.TYPE_IMAGE:
@@ -629,7 +655,6 @@ def submit_task(cfg, task_service, task, lease_owner):
                     last_polled_at=_now(), error_code=None, error_message=None,
                 )
                 return
-            refs = [reference] if reference else []
             size = "{0}x{1}".format(
                 int(params.get("width") or 1024), int(params.get("height") or 1024)
             )
@@ -638,7 +663,7 @@ def submit_task(cfg, task_service, task, lease_owner):
                 negative_prompt=params.get("negative_prompt"),
                 size=size,
                 seed=params.get("seed") if caps.get("supports_seed") else None,
-                reference_image_urls=refs,
+                reference_image_urls=references,
                 watermark=bool(params.get("watermark")),
             )
             files = _download_image_items(cfg, result.get("images"), _task_dir(cfg, task))
@@ -651,15 +676,26 @@ def submit_task(cfg, task_service, task, lease_owner):
         ratio = params.get("ratio") or "16:9"
         duration = int(params.get("duration_s") or 5)
         resolution = params.get("resolution") or "720p"
-        refs = [reference] if reference else []
         if task.provider == "ark_seedance":
+            roles = generation_models.reference_image_roles(caps, len(references))
+            if roles is None:
+                raise ApiError(
+                    "invalid_params",
+                    "该模型仅支持首帧/尾帧参考，最多 2 张图片",
+                    status_code=400,
+                )
+            generate_audio = (
+                bool(params.get("generate_audio"))
+                if caps.get("supports_audio") else None
+            )
             created = provider.create_generation(
                 prompt=params.get("prompt"),
-                reference_image_urls=refs,
+                reference_image_urls=references,
+                reference_image_roles=roles,
                 aspect_ratio=ratio,
                 duration_s=duration,
                 resolution=resolution,
-                generate_audio=bool(params.get("generate_audio")) and bool(caps.get("supports_audio")),
+                generate_audio=generate_audio,
                 watermark=bool(params.get("watermark")),
                 seed=params.get("seed") if caps.get("supports_seed") else None,
             )
@@ -673,7 +709,7 @@ def submit_task(cfg, task_service, task, lease_owner):
             )
             provider_job_id = (created.get("data") or {}).get("id")
         elif task.provider == "luma":
-            keyframes = refs if caps.get("supports_reference_image") else []
+            keyframes = references if caps.get("supports_reference_image") else []
             created = provider.create_generation(
                 prompt=params.get("prompt"),
                 aspect_ratio=ratio,
@@ -807,10 +843,15 @@ def poll_task(cfg, task_service, task, lease_owner):
                 error = {"code": "provider_failed", "message": "视频生成失败"}
                 if hasattr(provider, "extract_error"):
                     error = provider.extract_error(data)
+                error_message = str(error.get("message") or "视频生成失败")
+                if error.get("request_id"):
+                    error_message = "{0}（请求 ID: {1}）".format(
+                        error_message, error.get("request_id")
+                    )
                 task_service.release_generation_lease(
                     task.id, lease_owner, status="failed", stage="failed",
                     error_code=str(error.get("code") or "provider_failed")[:80],
-                    error_message=str(error.get("message") or "视频生成失败")[:500],
+                    error_message=error_message[:500],
                     completed_at=_now(),
                 )
             return

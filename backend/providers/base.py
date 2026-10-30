@@ -32,41 +32,52 @@ def is_redirect(status_code):
 
 
 class ProviderError(RuntimeError):
-    """Base error for all provider failures."""
-    def __init__(self, message, error_type="provider_error"):
+    """Base error for all provider failures.
+
+    ``request_id``/``provider_code``/``status_code`` are safe diagnostic fields
+    that may be persisted with a task.  They never contain credentials.
+    """
+    def __init__(self, message, error_type="provider_error", status_code=None,
+                 provider_code=None, request_id=None, model_id=None,
+                 retry_after_s=None):
         RuntimeError.__init__(self, message)
         self.error_type = error_type
+        self.status_code = status_code
+        self.provider_code = provider_code
+        self.request_id = request_id
+        self.model_id = model_id
+        self.retry_after_s = retry_after_s
 
 
 class ProviderAuthError(ProviderError):
-    def __init__(self, message, error_type="provider_auth_error"):
-        ProviderError.__init__(self, message, error_type=error_type)
+    def __init__(self, message, error_type="provider_auth_error", **kwargs):
+        ProviderError.__init__(self, message, error_type=error_type, **kwargs)
 
 
 class ProviderRateLimited(ProviderError):
-    def __init__(self, message, error_type="provider_rate_limited"):
-        ProviderError.__init__(self, message, error_type=error_type)
+    def __init__(self, message, error_type="provider_rate_limited", **kwargs):
+        ProviderError.__init__(self, message, error_type=error_type, **kwargs)
 
 
 class ProviderRejected(ProviderError):
-    def __init__(self, message, error_type="provider_rejected"):
-        ProviderError.__init__(self, message, error_type=error_type)
+    def __init__(self, message, error_type="provider_rejected", **kwargs):
+        ProviderError.__init__(self, message, error_type=error_type, **kwargs)
 
 
 class ProviderUncertain(ProviderError):
     """The request may have reached the provider; never auto-resubmit."""
-    def __init__(self, message, error_type="submission_uncertain"):
-        ProviderError.__init__(self, message, error_type=error_type)
+    def __init__(self, message, error_type="submission_uncertain", **kwargs):
+        ProviderError.__init__(self, message, error_type=error_type, **kwargs)
 
 
 class ProviderPollError(ProviderError):
-    def __init__(self, message, error_type="provider_poll_error"):
-        ProviderError.__init__(self, message, error_type=error_type)
+    def __init__(self, message, error_type="provider_poll_error", **kwargs):
+        ProviderError.__init__(self, message, error_type=error_type, **kwargs)
 
 
 class ProviderDownloadError(ProviderError):
-    def __init__(self, message, error_type="provider_download_error"):
-        ProviderError.__init__(self, message, error_type=error_type)
+    def __init__(self, message, error_type="provider_download_error", **kwargs):
+        ProviderError.__init__(self, message, error_type=error_type, **kwargs)
 
 
 class GenerationRequest(object):

@@ -10,11 +10,13 @@
   var cardsEl = document.getElementById('provider-cards');
   var statusEl = document.getElementById('api-settings-status');
   var loadingEl = document.getElementById('api-settings-loading');
+  var transportWarningEl = document.getElementById('api-settings-transport-warning');
   var toastContainer = document.getElementById('api-settings-toast-container');
 
   var state = {
     catalog: [],
-    items: {}
+    items: {},
+    generationModels: []
   };
 
   function esc(value) {
@@ -23,6 +25,46 @@
 
   function itemFor(provider) {
     return state.items[provider] || null;
+  }
+
+  function generationModelsFor(provider) {
+    return (state.generationModels || []).filter(function (model) {
+      return model && model.credential_provider === provider;
+    });
+  }
+
+  function generationModelByKey(key) {
+    var models = state.generationModels || [];
+    for (var i = 0; i < models.length; i += 1) {
+      if (models[i] && models[i].key === key) return models[i];
+    }
+    return null;
+  }
+
+  function modelSourceLabel(source) {
+    if (source === 'user_override') return '个人覆盖';
+    if (source === 'env_override') return '环境变量';
+    return '注册表默认';
+  }
+
+  function keyStatusLabel(status) {
+    if (status === 'verified') return '已验证';
+    if (status === 'rejected') return '无效';
+    if (status === 'unsupported') return '无法通过此方式验证';
+    return '未验证';
+  }
+
+  function modelStatusLabel(status) {
+    if (status === 'listed') return '已列出（不代表可调用）';
+    if (status === 'not_listed') return '不在可见列表';
+    if (status === 'succeeded') return '真实生图成功';
+    if (status === 'accepted') return '已创建任务（未验证生成完成）';
+    return '未测试';
+  }
+
+  function setTransportWarning() {
+    if (!transportWarningEl) return;
+    transportWarningEl.hidden = global.location.protocol === 'https:';
   }
 
   function showToast(message, type) {
@@ -118,6 +160,9 @@
       } else {
         parts.push('个人密钥：未保存');
       }
+      if (item.last_verified_at) {
+        parts.push('密钥验证于 ' + AIGV.formatTime(item.last_verified_at));
+      }
       if (item.updated_at) {
         parts.push('更新于 ' + AIGV.formatTime(item.updated_at));
       }
@@ -171,6 +216,17 @@
       html += '<input id="override-' + esc(entry.provider) + '-' + esc(fieldKey) + '"' +
         ' data-role="override" data-key="' + esc(fieldKey) + '" type="text" spellcheck="false"' +
         ' value="' + esc(saved) + '" placeholder="' + esc(field.default || '默认') + '" />';
+      var modelInfo = generationModelByKey(fieldKey);
+      var effectiveId = (modelInfo && modelInfo.model_id) || saved || field.default || '—';
+      var source = modelSourceLabel(modelInfo && modelInfo.model_id_source);
+      var verification = item && item.last_verification && item.last_verification[fieldKey];
+      var verificationText = verification
+        ? ' · 最近真实测试：' + (verification.status === 'succeeded' ? '生图成功' :
+            (verification.status === 'accepted' ? '任务已创建' : verification.status)) +
+          (verification.request_id ? '（请求 ID: ' + verification.request_id + '）' : '')
+        : '';
+      html += '<p class="field-hint">生效模型 ID：' + esc(effectiveId) +
+        ' · 来源：' + esc(source) + esc(verificationText) + '</p>';
       html += '</div>';
     }
     html += '</div>';
@@ -218,6 +274,27 @@
 
     html += modelFieldsHtml(entry, item);
 
+    var testModels = generationModelsFor(provider);
+    if (testModels.length) {
+      html += '<div class="provider-real-test">';
+      html += '<h3>真实调用测试（可能计费）</h3>';
+      html += '<p class="provider-warning">“测试连接”不产生费用；真实调用会直接请求第三方模型。图片测试生成 1 张最低规格图片；视频测试创建最短任务并立即尝试取消，取消失败仍可能计费。</p>';
+      html += '<div class="form-group"><label for="test-model-' + esc(provider) + '">测试模型</label>';
+      html += '<select id="test-model-' + esc(provider) + '" data-role="test-model">';
+      for (var tm = 0; tm < testModels.length; tm += 1) {
+        var testModel = testModels[tm];
+        var typeLabel = testModel.task_type === 'image' ? '图片' : '视频';
+        html += '<option value="' + esc(testModel.key) + '"' +
+          (testModel.available ? '' : ' disabled') + '>' +
+          esc((testModel.display_name || testModel.key) + ' · ' + (testModel.model_id || '—') +
+            ' · ' + typeLabel + (testModel.available ? '' : '（未配置）')) + '</option>';
+      }
+      html += '</select></div>';
+      html += '<button type="button" class="btn-outline btn-sm" data-action="test-generation">真实调用测试</button>';
+      html += '<p class="provider-message" data-role="real-message" role="status" aria-live="polite" hidden></p>';
+      html += '</div>';
+    }
+
     html += '<div class="provider-actions">';
     html += '<button type="submit" class="btn-primary btn-sm">保存</button>';
     html += '<button type="button" class="btn-outline btn-sm" data-action="test">测试连接</button>';
@@ -257,6 +334,7 @@
     if (!quiet) setStatus('');
     return AIGV.api('/api/user/provider-credentials').then(function (data) {
       state.catalog = (data && data.catalog) || [];
+      state.generationModels = (data && data.generation_models) || [];
       state.items = {};
       var items = (data && data.items) || [];
       for (var i = 0; i < items.length; i += 1) {
@@ -264,6 +342,7 @@
           state.items[items[i].provider] = items[i];
         }
       }
+      setTransportWarning();
       render();
       setLoading(false);
       return data;
@@ -337,6 +416,15 @@
     if (code === 'provider_not_configured') {
       return message;
     }
+    if (code === 'billing_confirmation_required') {
+      return '真实调用会产生费用，请先确认计费提示：' + message;
+    }
+    if (code === 'https_required') {
+      return 'API Key 只能通过 HTTPS 传输：' + message;
+    }
+    if (code === 'test_not_supported') {
+      return '该 Provider 暂不支持真实生成测试：' + message;
+    }
     return message;
   }
 
@@ -375,20 +463,93 @@
       method: 'POST'
     }).then(function (data) {
       setCardBusy(card, false);
-      var reachable = !!(data && data.reachable);
-      var verified = !!(data && data.verified);
-      var detail = (data && data.message) || '';
+      var network = (data && data.network) || {};
+      var key = (data && data.key) || {};
+      var model = (data && data.model) || {};
+      var reachable = data && data.reachable !== undefined
+        ? !!data.reachable : !!network.reachable;
+      var verified = data && data.verified !== undefined
+        ? !!data.verified : key.status === 'verified';
+      var networkText = '网络：' + (reachable ? '可达' : '不可达');
+      if (network.status_code) networkText += '（HTTP ' + network.status_code + '）';
       var parts = [
-        '可达：' + (reachable ? '是' : '否'),
-        '验证：' + (verified ? '是' : '否')
+        networkText,
+        '密钥：' + keyStatusLabel(key.status),
+        '模型：' + modelStatusLabel(model.status)
       ];
+      var detail = (data && data.message) || '';
       if (detail) parts.push(detail);
-      var type = verified ? 'success' : (reachable ? 'warning' : 'error');
+      if (key.provider_request_id) parts.push('请求 ID: ' + key.provider_request_id);
+      var type = verified ? 'success' :
+        ((!reachable || key.status === 'rejected') ? 'error' : 'warning');
       setCardMessage(card, parts.join(' · '), type);
     }).catch(function (error) {
       setCardBusy(card, false);
       var message = describeError(error);
       setCardMessage(card, message, 'error');
+    });
+  }
+
+  function setRealMessage(card, message, type) {
+    var el = card ? card.querySelector('[data-role="real-message"]') : null;
+    if (!el) return;
+    if (!message) {
+      el.hidden = true;
+      el.textContent = '';
+      el.className = 'provider-message';
+      return;
+    }
+    el.hidden = false;
+    el.className = 'provider-message is-' + (type || 'info');
+    el.textContent = message;
+  }
+
+  function handleRealTest(card, entry) {
+    var select = card.querySelector('[data-role="test-model"]');
+    if (!select || !select.value) {
+      setRealMessage(card, '请选择要真实测试的模型。', 'warning');
+      return;
+    }
+    var model = generationModelByKey(select.value) || {};
+    var warning = model.task_type === 'video'
+      ? '将真实创建一个最短规格视频任务，并立即尝试取消；若取消失败或服务商不支持取消，仍可能继续产生费用。'
+      : '将真实生成 1 张最低规格图片，可能产生少量费用。';
+    var confirmed = global.confirm(
+      '即将真实调用「' + (model.display_name || select.value) + '」\n' +
+      '模型 ID：' + (model.model_id || '—') + '\n\n' +
+      warning + '\n\n是否继续？'
+    );
+    if (!confirmed) return;
+
+    setCardBusy(card, true);
+    setRealMessage(card, '正在发起真实调用，请稍候...', 'info');
+    AIGV.api(
+      '/api/user/provider-credentials/' + encodeURIComponent(entry.provider) +
+      '/test-generation',
+      {
+        method: 'POST',
+        body: { model_key: select.value, confirm_billing: true }
+      }
+    ).then(function (data) {
+      setCardBusy(card, false);
+      var status = data && data.status;
+      var parts = [];
+      if (status === 'succeeded') parts.push('真实图片生成成功');
+      else if (status === 'accepted') parts.push('视频任务已创建');
+      else parts.push('真实调用失败');
+      if (data && data.model_id) parts.push('模型：' + data.model_id);
+      if (data && data.provider_request_id) parts.push('请求 ID：' + data.provider_request_id);
+      if (data && data.provider_job_id) parts.push('第三方任务 ID：' + data.provider_job_id);
+      if (status === 'accepted') {
+        parts.push(data.cancel_accepted ? '已请求取消' : '取消未确认，仍可能继续计费');
+      }
+      if (data && data.error_code) parts.push('错误码：' + data.error_code);
+      if (data && data.message) parts.push(data.message);
+      var type = status === 'failed' ? 'error' : (status === 'accepted' ? 'warning' : 'success');
+      setRealMessage(card, parts.join(' · '), type);
+    }).catch(function (error) {
+      setCardBusy(card, false);
+      setRealMessage(card, describeError(error), 'error');
     });
   }
 
@@ -441,6 +602,7 @@
       var entry = card ? findEntry(card.getAttribute('data-provider')) : null;
       if (!card || !entry || button.disabled) return;
       if (button.getAttribute('data-action') === 'test') handleTest(card, entry);
+      if (button.getAttribute('data-action') === 'test-generation') handleRealTest(card, entry);
       if (button.getAttribute('data-action') === 'delete') handleDelete(card, entry);
     });
 
@@ -453,6 +615,7 @@
     });
   }
 
+  setTransportWarning();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () {
       loadCredentials().catch(function () {});

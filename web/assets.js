@@ -1246,7 +1246,9 @@
     var model = task.model_id || params.model_key || '';
     var error = '';
     if (task.status === 'failed' || task.status === 'needs_review') {
-      error = '<p class="history-task-error">' + escapeText(task.error_message || task.error_code || '生成失败') + '</p>';
+      var failureText = task.error_message || '生成失败';
+      if (task.error_code) failureText = '[' + task.error_code + '] ' + failureText;
+      error = '<p class="history-task-error">' + escapeText(failureText) + '</p>';
     }
 
     var active = task.status === 'queued' || task.status === 'submitting' || task.status === 'running';

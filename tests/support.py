@@ -57,6 +57,13 @@ def make_app(tmp_path, **overrides):
         LOGIN_LOCKOUT_SECONDS = 60
         ARK_API_KEY = ""
         VOLCENGINE_API_KEY = ""
+        ARK_IMAGE_MODEL = ""
+        ARK_IMAGE_MODEL_FLASH = ""
+        ARK_IMAGE_MODEL_LITE = ""
+        ARK_VIDEO_MODEL = ""
+        ARK_VIDEO_MODEL_20 = ""
+        ARK_VIDEO_MODEL_10_PRO = ""
+        CREDENTIAL_REQUIRE_HTTPS = False
         SEEDANCE_API_KEY = ""
         LUMA_API_KEY = ""
         LLM_API_KEY = ""

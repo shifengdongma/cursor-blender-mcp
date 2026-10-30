@@ -215,10 +215,13 @@ def register_creative_routes(app, cfg, json_success, json_error):
             model_key,
             {
                 "prompt": prompt,
-                "size": data.get("size") or data.get("resolution") or "2K",
+                # Let create_generation_task apply the selected model's default.
+                "size": data.get("size") or data.get("resolution"),
+                "ratio": data.get("ratio") or data.get("aspect_ratio"),
                 "seed": data.get("seed"),
                 "negative_prompt": data.get("negative_prompt") or shot.negative_prompt,
                 "reference_asset_id": data.get("reference_asset_id"),
+                "reference_asset_ids": data.get("reference_asset_ids"),
                 "watermark": data.get("watermark", False),
                 "client_request_id": data.get("client_request_id"),
             },
@@ -262,10 +265,13 @@ def register_creative_routes(app, cfg, json_success, json_error):
                 "ratio": data.get("ratio") or data.get("aspect_ratio") or "16:9",
                 "duration_s": data.get("duration_s") or data.get("duration") or int(shot.duration_s or 5),
                 "resolution": data.get("resolution") or "720p",
-                "generate_audio": data.get("generate_audio", False),
+                # None lets create_generation_task use the model's default
+                # (Seedance 2.5 defaults to audio on).
+                "generate_audio": data.get("generate_audio"),
                 "watermark": data.get("watermark", False),
                 "seed": data.get("seed"),
                 "reference_asset_id": reference_asset_id,
+                "reference_asset_ids": data.get("reference_asset_ids"),
                 "client_request_id": data.get("client_request_id"),
             },
             project_id=shot.creative_project_id,

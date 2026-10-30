@@ -147,8 +147,16 @@ def test_other_user_cannot_see_credential(app):
 
 
 class _FakeResponse(object):
-    def __init__(self, status_code):
+    def __init__(self, status_code, payload=None, text="", headers=None):
         self.status_code = status_code
+        self._payload = payload
+        self.text = text
+        self.headers = headers or {}
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
 
     def close(self):
         pass
@@ -167,7 +175,10 @@ def test_llm_connection_test_uses_models_endpoint_without_leaking_key(client, mo
     def fake_get(url, **kwargs):
         calls["url"] = url
         calls["headers"] = kwargs.get("headers") or {}
-        return _FakeResponse(200)
+        return _FakeResponse(
+            200, {"data": [{"id": "gpt-4o-mini"}]},
+            headers={"x-request-id": "req-models-1"},
+        )
 
     monkeypatch.setattr(requests, "get", fake_get)
 
@@ -191,10 +202,10 @@ def test_connection_test_maps_network_error_without_leaking_key(client, monkeypa
     )
     assert created.status_code == 200, created.get_json()
 
-    def fake_head(url, **kwargs):
+    def fake_get(url, **kwargs):
         raise requests.ConnectionError("Authorization: Bearer luma-secret-6666")
 
-    monkeypatch.setattr(requests, "head", fake_head)
+    monkeypatch.setattr(requests, "get", fake_get)
 
     response = client.post(
         "/api/user/provider-credentials/luma/test", headers=_headers(token)

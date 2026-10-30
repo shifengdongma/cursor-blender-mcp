@@ -20,6 +20,7 @@ from .base import (
     is_redirect,
     scrub_secret,
 )
+from .errors import extract_request_id, provider_http_error
 
 
 class SeedanceError(ProviderError):
@@ -72,27 +73,12 @@ class SeedanceProvider(object):
                 error_type="submission_uncertain",
             )
 
-        if is_redirect(response.status_code):
-            raise ProviderRejected(
-                "Seedance 返回重定向（HTTP {0}），已拒绝跟随".format(response.status_code),
-                error_type="provider_redirect_rejected",
-            )
-        if response.status_code in (401, 403):
-            raise ProviderAuthError("Seedance 鉴权失败: HTTP {0}".format(response.status_code))
-        if response.status_code == 429:
-            raise ProviderRateLimited("Seedance 请求过于频繁")
-        if 400 <= response.status_code < 500:
-            raise ProviderRejected(
-                "Seedance 拒绝请求: {0}".format(
-                    scrub_secret(response.text[:500], self.api_key)
-                ),
-                error_type="provider_rejected",
-            )
-        if response.status_code >= 500:
-            raise ProviderUncertain(
-                "Seedance 服务异常: HTTP {0}".format(response.status_code),
-                error_type="submission_uncertain",
-            )
+        mapped = provider_http_error(
+            response, self.api_key, "Atlas Seedance", model_id=self.model_name,
+            uncertain_error_type="submission_uncertain",
+        )
+        if mapped is not None:
+            raise mapped
         try:
             data = response.json() or {}
         except ValueError:
@@ -100,6 +86,8 @@ class SeedanceProvider(object):
         prediction_id = (data.get("data") or {}).get("id")
         if not prediction_id:
             raise ProviderError("Seedance 返回缺少 data.id 字段", error_type="provider_invalid_response")
+        if isinstance(data, dict):
+            data["_request_id"] = extract_request_id(response, data)
         return data
 
     def get_generation(self, prediction_id):
@@ -157,11 +145,13 @@ class SeedanceProvider(object):
         data = (pred_json or {}).get("data") or {}
         error = data.get("error") or (pred_json or {}).get("error") or {}
         if isinstance(error, dict):
+            request_id = error.get("request_id") or (pred_json or {}).get("request_id")
             return {
-                "code": error.get("code") or "provider_failed",
-                "message": (error.get("message") or "视频生成失败")[:500],
+                "code": str(error.get("code") or "provider_failed")[:80],
+                "message": str(error.get("message") or "视频生成失败")[:500],
+                "request_id": str(request_id)[:128] if request_id else None,
             }
-        return {"code": "provider_failed", "message": "视频生成失败"}
+        return {"code": "provider_failed", "message": "视频生成失败", "request_id": None}
 
     def wait_until_done(self, prediction_id, timeout_s=900, poll_interval_s=5):
         start = time.time()

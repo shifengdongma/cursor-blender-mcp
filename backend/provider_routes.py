@@ -9,13 +9,14 @@ from __future__ import absolute_import
 
 from urllib.parse import urlparse
 
-import requests
 from flask import g, request, send_from_directory
 
+from . import generation_models, model_ids
 from .credential_service import CredentialError, CredentialService
-from .http_utils import parse_json_body
-
-_TEST_TIMEOUT = (3, 8)
+from .http_utils import ApiError, parse_json_body
+from .provider_connectivity import probe_credential
+from .provider_test_generation import run_generation_test
+from .rate_limiter import rate_limit
 _ACTIVE_TASK_MESSAGE = "该 Provider 还有排队或运行中的任务，请等待任务结束或取消后再修改"
 
 _UPDATE_FIELDS = (
@@ -66,6 +67,18 @@ def register_provider_routes(app, cfg, web_root, json_success, json_error):
     def _current_user():
         return getattr(g, "current_user", None) or {}
 
+    def _https_required_response():
+        if not getattr(cfg, "CREDENTIAL_REQUIRE_HTTPS", False):
+            return None
+        if request.is_secure:
+            return None
+        return json_error(
+            "https_required",
+            "API Key 只能通过 HTTPS 传输；请使用 HTTPS 访问，或在反向代理中设置 "
+            "X-Forwarded-Proto 并启用 TRUST_PROXY",
+            status_code=403,
+        )
+
     @app.route("/api-settings", methods=["GET"])
     def api_settings_page():
         return send_from_directory(web_root, "api-settings.html")
@@ -82,10 +95,22 @@ def register_provider_routes(app, cfg, web_root, json_success, json_error):
             item = dict(record)
             item["platform_available"] = platform_available.get(item.get("provider"), False)
             items.append(item)
-        return json_success({"items": items, "catalog": catalog})
+        generation_models_catalog = generation_models.list_models(
+            cfg, include_unavailable=True, user=_current_user()
+        )
+        return json_success(
+            {
+                "items": items,
+                "catalog": catalog,
+                "generation_models": generation_models_catalog,
+            }
+        )
 
     @app.route("/api/user/provider-credentials/<provider>", methods=["PUT"])
     def update_provider_credential(provider):
+        blocked = _https_required_response()
+        if blocked:
+            return blocked
         user = _current_user()
         body = parse_json_body(request)
         payload = {key: body.get(key) for key in _UPDATE_FIELDS if key in body}
@@ -114,6 +139,9 @@ def register_provider_routes(app, cfg, web_root, json_success, json_error):
 
     @app.route("/api/user/provider-credentials/<provider>", methods=["DELETE"])
     def delete_provider_credential(provider):
+        blocked = _https_required_response()
+        if blocked:
+            return blocked
         user = _current_user()
         try:
             if service.has_active_tasks(user.get("id"), provider):
@@ -136,54 +164,29 @@ def register_provider_routes(app, cfg, web_root, json_success, json_error):
             message="个人 API 配置已删除，将回退平台默认" if deleted else "没有可删除的个人配置",
         )
 
-    def _run_reachability_check(provider, base_url, api_key):
-        headers = {
-            "Authorization": "Bearer {0}".format(api_key),
-            "Accept": "application/json",
-        }
-        try:
-            if provider == "llm":
-                response = requests.get(
-                    base_url + "/models",
-                    headers=headers,
-                    timeout=_TEST_TIMEOUT,
-                    allow_redirects=False,
-                    stream=True,
-                )
-                status = response.status_code
-                response.close()
-                if status == 200:
-                    return True, True, "连接成功，密钥验证通过"
-                if status in (401, 403):
-                    return True, False, "API 端点可达，但密钥未通过鉴权（HTTP {0}）".format(status)
-                return (
-                    True,
-                    False,
-                    "API 端点可达（HTTP {0}），该服务可能不支持 /models 接口；已完成可达性检查，未发起计费调用".format(status),
-                )
-            response = requests.head(
-                base_url,
-                headers=headers,
-                timeout=_TEST_TIMEOUT,
-                allow_redirects=False,
+    def _probe_model_id(provider, effective, user):
+        if provider == "ark":
+            item = generation_models.get_model(
+                cfg, model_ids.ARK_IMAGE_DEFAULT_KEY, user=user
             )
-            status = response.status_code
-            response.close()
-            if status in (401, 403):
-                return True, False, "API 端点可达，但密钥未通过鉴权（HTTP {0}）".format(status)
-            return True, False, "API 端点可达（HTTP {0}），未发起生成请求".format(status)
-        except requests.RequestException:
-            return False, False, "无法连接到该 API 端点，请检查 Base URL 或网络。"
+            return (item or {}).get("model_id")
+        return effective.get("model")
 
-    def _audit_test(user, provider, result, base_url=None):
+    def _audit_test(user, provider, result, base_url=None, metadata=None):
+        audit_metadata = _credential_metadata(provider, base_url)
+        if metadata:
+            audit_metadata.update(metadata)
         _audit(
             cfg, "provider_credential_test", user,
             target_type="provider_credential", target_id=provider,
-            result=result, metadata=_credential_metadata(provider, base_url),
+            result=result, metadata=audit_metadata,
         )
 
     @app.route("/api/user/provider-credentials/<provider>/test", methods=["POST"])
     def test_provider_credential(provider):
+        blocked = _https_required_response()
+        if blocked:
+            return blocked
         user = _current_user()
         try:
             effective = service.effective(user.get("id"), provider, cfg)
@@ -209,13 +212,100 @@ def register_provider_routes(app, cfg, web_root, json_success, json_error):
             _audit_test(user, provider, "failed", effective.get("base_url"))
             return json_error(exc.code, exc.message, status_code=exc.status_code, details=exc.details)
 
-        reachable, verified, message = _run_reachability_check(provider, base_url, api_key)
-        _audit_test(user, provider, "success" if reachable else "failed", base_url)
-        return json_success(
-            {
-                "provider": provider,
-                "reachable": reachable,
-                "verified": verified,
-                "message": message,
-            }
+        model_id = _probe_model_id(provider, effective, user)
+        result = probe_credential(provider, base_url, api_key, model_id=model_id)
+        if result.get("verified"):
+            last_verified_at = service.mark_verified(user.get("id"), provider)
+        else:
+            row = service.get_record(user.get("id"), provider)
+            last_verified_at = row.get("last_verified_at") if row else None
+        result["last_verified_at"] = last_verified_at
+
+        key_status = (result.get("key") or {}).get("status")
+        if result.get("verified"):
+            audit_result = "success"
+        elif not result.get("reachable") or key_status == "rejected":
+            audit_result = "failed"
+        else:
+            audit_result = "inconclusive"
+        _audit_test(
+            user, provider, audit_result, base_url,
+            metadata={
+                "network_status": (result.get("network") or {}).get("status_code"),
+                "key_status": key_status,
+                "model_status": (result.get("model") or {}).get("status"),
+                "model_id": (result.get("model") or {}).get("model_id"),
+                "provider_code": (result.get("key") or {}).get("provider_code"),
+                "provider_request_id": (result.get("key") or {}).get("provider_request_id"),
+            },
         )
+        return json_success(result)
+
+    @app.route(
+        "/api/user/provider-credentials/<provider>/test-generation",
+        methods=["POST"],
+    )
+    @rate_limit(max_requests=5, window_s=60)
+    def test_provider_generation(provider):
+        blocked = _https_required_response()
+        if blocked:
+            return blocked
+        user = _current_user()
+        body = parse_json_body(request)
+        if body.get("confirm_billing") is not True:
+            return json_error(
+                "billing_confirmation_required",
+                "真实调用会向第三方服务商发起付费请求，可能产生费用；"
+                "请确认后携带 confirm_billing=true 再试",
+                status_code=400,
+            )
+        model_key = body.get("model_key")
+        if not isinstance(model_key, str) or not model_key.strip():
+            return json_error("invalid_model", "缺少 model_key", status_code=400)
+        try:
+            result = run_generation_test(
+                cfg, user, provider, model_key.strip(), service
+            )
+        except ApiError as exc:
+            _audit(
+                cfg, "provider_credential_test_generation", user,
+                target_type="provider_credential", target_id=provider,
+                result="failed",
+                metadata={
+                    "model_key": model_key,
+                    "error_code": exc.code,
+                    "cost_acknowledged": True,
+                },
+            )
+            return json_error(exc.code, exc.message, status_code=exc.status_code,
+                              details=exc.details)
+        except CredentialError as exc:
+            _audit(
+                cfg, "provider_credential_test_generation", user,
+                target_type="provider_credential", target_id=provider,
+                result="failed",
+                metadata={
+                    "model_key": model_key,
+                    "error_code": exc.code,
+                    "cost_acknowledged": True,
+                },
+            )
+            return json_error(exc.code, exc.message, status_code=exc.status_code,
+                              details=exc.details)
+
+        success = result.get("status") in ("succeeded", "accepted")
+        _audit(
+            cfg, "provider_credential_test_generation", user,
+            target_type="provider_credential", target_id=provider,
+            result="success" if success else "failed",
+            metadata={
+                "model_key": result.get("model_key"),
+                "model_id": result.get("model_id"),
+                "status": result.get("status"),
+                "error_code": result.get("error_code"),
+                "provider_code": result.get("provider_code"),
+                "provider_request_id": result.get("provider_request_id"),
+                "cost_acknowledged": True,
+            },
+        )
+        return json_success(result)

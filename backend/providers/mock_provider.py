@@ -34,7 +34,8 @@ class MockVideoProvider(object):
         self.poll_calls = 0
 
     def create_generation(self, prompt, negative_prompt=None, reference_image_urls=None,
-                          aspect_ratio="16:9", duration_s=5, resolution="720p",
+                          reference_image_roles=None, aspect_ratio="16:9",
+                          duration_s=5, resolution="720p",
                           generate_audio=False, watermark=False, seed=None,
                           camera_fixed=False):
         self.create_calls += 1

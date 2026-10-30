@@ -578,8 +578,8 @@
       if (prefs.currentImageTaskId) state.currentImageTaskId = prefs.currentImageTaskId;
       if (prefs.currentVideoTaskId) state.currentVideoTaskId = prefs.currentVideoTaskId;
       if (prefs.analysisTaskId) state.analysisTaskId = prefs.analysisTaskId;
-      if (prefs.selectedImageModel) state.selectedImageModel = prefs.selectedImageModel;
-      if (prefs.selectedVideoModel) state.selectedVideoModel = prefs.selectedVideoModel;
+      if (prefs.selectedImageModel) state.selectedImageModel = normalizeModelKey(prefs.selectedImageModel);
+      if (prefs.selectedVideoModel) state.selectedVideoModel = normalizeModelKey(prefs.selectedVideoModel);
       return true;
     } catch (e) {
       try { localStorage.removeItem(STORAGE_KEY); } catch (ex) {}
@@ -809,8 +809,20 @@
     return models.filter(function (model) { return !!model.available; });
   }
 
+  function normalizeModelKey(key) {
+    // The old Lite slot was replaced by Seedream Flash.
+    return key === 'ark_seedream_lite' ? 'ark_seedream_flash' : key;
+  }
+
+  function modelOptionLabel(model) {
+    var label = model.display_name || model.key;
+    if (model.model_id) label += ' · ' + model.model_id;
+    return label;
+  }
+
   function findModel(kind, key) {
     var models = state.generationModels[kind] || [];
+    key = normalizeModelKey(key);
     for (var i = 0; i < models.length; i += 1) {
       if (models[i].key === key) return models[i];
     }
@@ -821,7 +833,10 @@
     var models = availableModels('image');
     if (!models.length) return null;
     var selected = findModel('image', state.selectedImageModel);
-    if (selected && selected.available) return selected;
+    if (selected && selected.available) {
+      state.selectedImageModel = selected.key;
+      return selected;
+    }
     for (var i = 0; i < models.length; i += 1) {
       if (models[i].default) {
         state.selectedImageModel = models[i].key;
@@ -836,7 +851,10 @@
     var models = availableModels('video');
     if (!models.length) return null;
     var selected = findModel('video', state.selectedVideoModel);
-    if (selected && selected.available) return selected;
+    if (selected && selected.available) {
+      state.selectedVideoModel = selected.key;
+      return selected;
+    }
     for (var i = 0; i < models.length; i += 1) {
       if (models[i].default) {
         state.selectedVideoModel = models[i].key;
@@ -2131,8 +2149,8 @@
         var disabled = modelItem.available ? '' : ' disabled';
         var suffix = modelItem.available ? '' : '（未配置）';
         html += '    <option value="' + escapeHtml(modelItem.key) + '"' + disabled +
-          (state.selectedImageModel === modelItem.key ? ' selected' : '') + '>' +
-          escapeHtml(modelItem.display_name + suffix) + '</option>';
+          (normalizeModelKey(state.selectedImageModel) === modelItem.key ? ' selected' : '') + '>' +
+          escapeHtml(modelOptionLabel(modelItem) + suffix) + '</option>';
       }
     }
     html += '  </select>';
@@ -2229,7 +2247,7 @@
     var modelSel = $('module2-model');
     if (modelSel) {
       modelSel.addEventListener('change', function() {
-        state.selectedImageModel = modelSel.value;
+        state.selectedImageModel = normalizeModelKey(modelSel.value);
         state.selectedReferenceAssetId = '';
         saveToLocalStorage();
         renderModule2();
@@ -2701,8 +2719,8 @@
         var videoModel = videoModels[vmi];
         html += '      <option value="' + escapeHtml(videoModel.key) + '"' +
           (videoModel.available ? '' : ' disabled') +
-          (state.selectedVideoModel === videoModel.key ? ' selected' : '') + '>' +
-          escapeHtml(videoModel.display_name + (videoModel.available ? '' : '（未配置）')) + '</option>';
+          (normalizeModelKey(state.selectedVideoModel) === videoModel.key ? ' selected' : '') + '>' +
+          escapeHtml(modelOptionLabel(videoModel) + (videoModel.available ? '' : '（未配置）')) + '</option>';
       }
     }
     html += '    </select></div>';
@@ -2787,7 +2805,7 @@
     var videoModelSelect = $('vparam-model');
     if (videoModelSelect) {
       videoModelSelect.addEventListener('change', function() {
-        state.selectedVideoModel = videoModelSelect.value;
+        state.selectedVideoModel = normalizeModelKey(videoModelSelect.value);
         saveToLocalStorage();
         renderModule3();
       });

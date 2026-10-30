@@ -10,6 +10,7 @@ import traceback
 
 from flask import Flask, Response, g, jsonify, redirect, request, send_from_directory, send_file, session
 
+from backend import generation_models, model_ids
 from backend.asset_service import AssetServiceError, get_asset_service
 from backend.access import can_read_asset, can_write_asset
 from backend.auth_service import AuthError, AuthService
@@ -193,6 +194,37 @@ def _normalize_preview_payload(prompt_orchestrator, payload):
     return normalized_payload, preview
 
 
+_LEGACY_MODEL_ALIASES = {
+    "seedance_pro": "atlas_seedance_default",
+    "luma_optional": "luma_default",
+}
+_LEGACY_PROVIDER_DEFAULT_MODEL = {
+    "ark_seedance": model_ids.ARK_VIDEO_DEFAULT_KEY,
+    "seedance": "atlas_seedance_default",
+    "luma": "luma_default",
+}
+
+
+def _snapshot_legacy_job_model(cfg, user, payload, preview):
+    """Freeze the selected model and credential source into the job payload."""
+    requested = (payload.get("ai_model") or "").strip()
+    model_key = _LEGACY_MODEL_ALIASES.get(requested, requested)
+    if not model_key:
+        provider = (preview.get("execution_provider") or "").strip().lower()
+        model_key = _LEGACY_PROVIDER_DEFAULT_MODEL.get(provider)
+    if not model_key:
+        return
+    model = generation_models.get_model(
+        cfg, model_key, include_unavailable=True, user=user
+    )
+    if not model:
+        return
+    payload["model_key"] = model["key"]
+    payload["model_id"] = model["model_id"]
+    payload["provider"] = model["provider"]
+    payload["credential_source"] = model.get("credential_source")
+
+
 def _register_main_routes(app, web_root, catalog_service, prompt_orchestrator, job_store, cfg):
     @app.route("/web/runtime-config.js", methods=["GET"])
     def runtime_config_js():
@@ -246,6 +278,7 @@ def _register_main_routes(app, web_root, catalog_service, prompt_orchestrator, j
         normalized_payload["user_id"] = user.get("id")
         normalized_payload["tenant_id"] = user.get("tenant_id")
         normalized_payload["project_id"] = _workspace_project_id(user)
+        _snapshot_legacy_job_model(cfg, user, normalized_payload, preview)
         job = job_store.create(
             normalized_payload,
             build_initial_result(preview),

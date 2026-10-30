@@ -30,31 +30,45 @@ GET /api/generation/tasks/<id>   ← 前端轮询（只显示真实阶段，不�
 
 ## 2. Provider 与模型
 
-模型注册表：`backend/generation_models.py`。`available` 只表示**凭据已配置/ComfyUI 可达**；`verified` 始终为 `false`，除非真实调用成功（当前未做付费验证）。
+模型注册表：`backend/generation_models.py`，官方 ID 单一来源：`backend/model_ids.py`。`available` 只表示**凭据已配置/ComfyUI 可达**；连接测试的 `verified` 仅代表 `/models` 鉴权通过，真实模型可调用性必须通过“真实调用测试”或实际任务确认。
 
-| UI key | Provider | 默认模型 ID | 类型 | 说明 |
+| UI key | Provider | 官方模型 ID | 类型 | 说明 |
 |---|---|---|---|---|
-| `ark_seedream_pro` | `ark_seedream` | `doubao-seedream-5-0-pro-260628` | 图片 | 同步接口；1K/1.5K/2K；最多 10 参考图 |
-| `ark_seedream_lite` | `ark_seedream` | `doubao-seedream-5-0-lite-260128` | 图片 | 2K/3K/4K；最多 14 参考图 |
+| `ark_seedream_pro` | `ark_seedream` | `doubao-seedream-5-0-pro-260628` | 图片 | 1K/1.5K/2K；最多 10 参考图 |
+| `ark_seedream_flash` | `ark_seedream` | `doubao-seedream-5-0-flash-260915` | 图片 | 1K/1.5K/2K；最多 10 参考图；**默认图片模型** |
 | `comfyui_default` | `comfyui` | `default` | 图片 | 本地工作流；异步 prompt_id |
-| `ark_seedance_25` | `ark_seedance` | `doubao-seedance-2-5-260628` | 视频 | 4–30s；480/720/1080p；音频默认开 |
-| `ark_seedance_20` | `ark_seedance` | `doubao-seedance-2-0-260128` | 视频 | 能力保守标注，未验证 |
-| `ark_seedance_10_pro` | `ark_seedance` | `doubao-seedance-1-0-pro-250528` | 视频 | 5/10s，无音频 |
+| `ark_seedance_25` | `ark_seedance` | `doubao-seedance-2-5-260628` | 视频 | 4–30s；480/720/1080p；最多 30 参考图；音频默认开 |
+| `ark_seedance_20` | `ark_seedance` | `doubao-seedance-2-0-260128` | 视频 | 4–15s；480/720/1080p；最多 9 参考图；支持音频 |
+| `ark_seedance_10_pro` | `ark_seedance` | `doubao-seedance-1-0-pro-250528` | 视频 | 2–12s；480/720/1080p；仅首/尾帧（最多 2 图）；无音频 |
 | `atlas_seedance_default` | `atlas_seedance` | `SEEDANCE_MODEL_NAME` | 视频 | 旧 Atlas Cloud 适配，非方舟直连 |
 | `luma_default` | `luma` | `LUMA_MODEL_NAME`（默认 ray-2） | 视频 | 旧适配，未验证 |
 
-模型 ID 可被环境变量覆盖：
+旧 `ark_seedream_lite` 仅作为前端选择别名映射到 Flash；旧 Lite override 不会应用到 Flash。模型 ID 默认由注册表提供，只有显式设置环境变量才覆盖：
 
 ```env
-ARK_IMAGE_MODEL=doubao-seedream-5-0-pro-260628
-ARK_IMAGE_MODEL_LITE=doubao-seedream-5-0-lite-260128
-ARK_VIDEO_MODEL=doubao-seedance-2-5-260628
-ARK_VIDEO_MODEL_20=doubao-seedance-2-0-260128
-ARK_VIDEO_MODEL_10_PRO=doubao-seedance-1-0-pro-250528
+ARK_IMAGE_MODEL=
+ARK_IMAGE_MODEL_FLASH=
+ARK_VIDEO_MODEL=
+ARK_VIDEO_MODEL_20=
+ARK_VIDEO_MODEL_10_PRO=
 LUMA_MODEL_NAME=ray-2
 ```
 
 前端通过 `GET /api/generation/models` 获取模型与 `capabilities`；未配置的模型也会返回（`available=false` + `unavailable_reason`），由页面置灰并提示。`?available_only=1` 只返回已配置模型。
+
+### 连接测试与真实调用测试
+
+- `POST /api/user/provider-credentials/<provider>/test` 只做非计费探测：
+  - LLM / Ark / OpenAI 图片走 `GET {base_url}/models`，仅当返回 200 且响应是可识别的模型列表时才标记 `key.status=verified`；
+  - 401/403 → `rejected`；404/405 → `unsupported`（明确“无法通过此方式验证”）；429/5xx/重定向 → `unknown`；
+  - Atlas/Luma 只做**不带 Authorization** 的网络可达探测，`key.status=unsupported`；
+  - 响应同时返回 `network/key/model` 三段状态，禁止把任意 HTTP 响应当成密钥验证成功；
+  - 仅真正的 200 模型列表写入 `last_verified_at`。
+- `POST /api/user/provider-credentials/<provider>/test-generation` 是独立的**计费**测试：
+  - 必须携带 `{"confirm_billing": true}`，否则 400 `billing_confirmation_required`；
+  - 图片：使用模型最小尺寸真实生成 1 张图；
+  - 视频：创建最短规格任务并立即尝试取消；返回 `status=accepted`（不代表生成完成），取消失败仍可能计费；
+  - 结果写入 `last_verification`（按模型），失败时保留安全 `error_code`、`provider_code`、`provider_request_id`，不返回 Key。
 
 ## 3. 环境变量
 
@@ -134,9 +148,15 @@ DAILY_VIDEO_LIMIT=5
 | 现象/错误码 | 原因 | 处理 |
 |---|---|---|
 | `provider_not_configured` | 模型凭据缺失或 ComfyUI 不可达 | 配置对应环境变量；前端会列出具体原因 |
-| `provider_auth_error` | 401/403 | 检查 API Key、账号开通与区域 |
-| `provider_rate_limited` | 429 | 自动延迟重试（提交阶段）或降低频率 |
-| `provider_rejected` | 4xx | 检查模型 ID、尺寸/时长/比例/参考图是否符合文档 |
+| `provider_auth_error` | 401 | API Key 无效或过期；检查 Key 与区域 |
+| `provider_permission_denied` | 403 | Key 无权限/账户受限；检查方舟控制台权限与项目空间 |
+| `provider_endpoint_not_found` | 404 | Base URL 路径错误；方舟应为 `https://ark.cn-beijing.volces.com/api/v3` |
+| `model_not_activated` | 400 `ModelNotOpen` / “not activated” | 账户未开通该模型；到方舟控制台开通或改选已开通模型 |
+| `model_not_found` | 400 `InvalidEndpointOrModel.NotFound` | 模型 ID 不存在/区域不匹配；核对控制台模型 ID |
+| `provider_rate_limited` | 429 | 自动延迟重试（提交阶段）或降低频率；保留 Retry-After |
+| `provider_rejected` | 其他 4xx | 检查尺寸/时长/比例/参考图是否符合模型能力 |
+| `billing_confirmation_required` | 真实测试未确认计费 | 前端确认费用后携带 `confirm_billing=true` |
+| `https_required` | 启用 `CREDENTIAL_REQUIRE_HTTPS=true` 后经 HTTP 写入 | 改用 HTTPS 或可信代理的 `X-Forwarded-Proto` |
 | `submission_uncertain` → `needs_review` | 提交超时/5xx | 不要自动重试；在管理后台确认第三方是否已创建任务 |
 | `task_timeout` | 超过整体截止时间 | 第三方 ID 保留，管理员可恢复轮询 |
 | `provider_poll_timeout` | 查询超时 | 指数退避，达到上限后失败 |
@@ -162,19 +182,29 @@ python3 -m pytest tests/test_comfyui_provider.py -q
 # 然后在素材库「生成历史」观察状态；失败时查看 error_code/error_message。
 ```
 
-## 7. 真实验证状态（重要）
+## 7. 真实验证状态（2026-10-30）
 
-截至本次交付：
+本次交付进行了两项真实调用（不包含任何 Mock 成功响应）：
 
-- **未进行任何付费真实调用**（用户明确选择）。
-- Ark Seedream / Seedance 的请求/响应映射、错误分类与异步轮询已用 Mock/单元测试覆盖，但**未对真实账号验证**。
-- ComfyUI 仅用 fake HTTP 测试了异步提交/轮询/下载；未连接真实 ComfyUI。
-- Atlas Cloud 与 Luma 为旧适配，均有单元测试覆盖超时/状态映射，但未真实验证；Luma 不支持参考图。
-- 因此所有模型的 `verified` 均为 `false`。在正式对外提供生成能力前，必须配置密钥并做一次最小额度真实验证，再在界面/文档中更新状态。
+1. **非计费鉴权验证**：`GET https://ark.cn-beijing.volces.com/api/v3/models`
+   - 结果：HTTP 200，`key.status=verified`，`Seedream 5.0 Flash` 出现在模型列表中；
+   - 请求 ID：`021793360706066bc68ba76535d4d8d120d8e883d298b95f3f881`；
+   - 结论：Key 有效；**模型出现在列表中不等于已开通**。
+2. **一次授权的真实图片调用**（Seedream Flash，1K，最小规格）：
+   - 结果：HTTP **404**，`error.code=ModelNotOpen`；
+   - 请求 ID：`0217933607196221cb6d3ad1bdd7a7436196dd041d7fa42e7e12b`；
+   - 结论：方舟账户尚未开通该模型，未产生图片。此前账号对 Pro 也报过未开通。
+   - 已修正分类：Ark 的 404 + `ModelNotOpen` 现在映射为 `model_not_activated`，而不是误导性的“接口路径不存在”；该场景有 Mock 回归测试覆盖。
+   - 未在未授权的情况下重复付费调用或改试 Pro。
+
+因此，真实生图成功仍需用户在方舟控制台开通至少一个 Seedream 模型后，通过 `/api-settings` 的“真实调用测试（可能计费）”验证。Seedance 视频真实测试尚未执行；创建后立即取消的测试入口已实现并通过 Mock 测试。ComfyUI/Atlas/Luma 未做真实调用验证。
 
 ## 8. 已知限制
 
 - Seedream 的 `seed`/负面提示词能力按官方文档保守标注；不支持的参数会被拒绝或丢弃（负面提示词来自分镜默认值时丢弃，不发送）。
-- 多参考图、组图、视频编辑/延长、首尾帧等高级能力尚未开放。
+- 后端已接受 `reference_asset_ids` 列表并按模型真实上限校验；创意工作台前端仍为单选参考图，完整多选 UI 尚未实现。
+- Seedance 4K 档位未在注册表开放（仅 480/720/1080p），待真实账户验证后再放开。
+- 组图、视频编辑/延长等高级能力尚未开放。
 - 第三方状态若出现未知值，按轮询错误退避处理，不会猜测成功。
+- 当前部署仍为 HTTP，未强制 HTTPS；API Key 传输存在明文风险，页面与启动日志会有提示。
 - 单机 SQLite + 本地文件存储；扩展到多机时需将任务队列与素材迁移到 PostgreSQL/对象存储。

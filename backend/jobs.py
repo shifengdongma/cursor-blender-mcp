@@ -492,7 +492,14 @@ def start_job_worker(job_store, job_id, cfg, prompt_orchestrator):
             frame_count = int(scene_spec.get("frame_count") or (fps * 4))
             duration_s = max(1, int(frame_count / float(max(1, fps))))
             _set_job_state(job_store, job_id, result, "provider_submitted", "running")
-            router = ProviderRouter(cfg)
+            router = ProviderRouter(
+                cfg,
+                user_id=job.get("owner_user_id"),
+                model_key=payload.get("model_key"),
+                model_id=payload.get("model_id"),
+                credential_source=payload.get("credential_source"),
+                request_payload=payload,
+            )
             execution_provider = preview.get("execution_provider")
             provider, created, provider_job_id = router.submit_generation(execution_provider=execution_provider, prompt_bundle=prompt_bundle, duration_s=duration_s, schedule_result=schedule_result, engine_session=engine_session)
             _finalize_provider_result(result, preview, execution_provider, created, provider_job_id)
@@ -520,6 +527,20 @@ def start_job_worker(job_store, job_id, cfg, prompt_orchestrator):
             if result is None:
                 result = _empty_result()
 
+            error_type = getattr(e, "error_type", None)
+            provider_code = getattr(e, "provider_code", None)
+            request_id = getattr(e, "request_id", None)
+            model_id = getattr(e, "model_id", None)
+            provider_result = result.get("provider_result")
+            if isinstance(provider_result, dict):
+                provider_result.update({
+                    "status": "error",
+                    "error_type": error_type or "submission_failed",
+                    "provider_code": provider_code,
+                    "provider_request_id": request_id,
+                    "model_id": model_id,
+                })
+
             # Record task attempt
             schedule_node = None
             if schedule_result:
@@ -530,11 +551,26 @@ def start_job_worker(job_store, job_id, cfg, prompt_orchestrator):
                 status="failed",
                 node_id=schedule_node,
                 error_message=str(e),
-                metadata={"stage": result.get("stage"), "exception": str(e)},
+                metadata={
+                    "stage": result.get("stage"),
+                    "exception": str(e),
+                    "error_code": error_type,
+                    "provider_code": provider_code,
+                    "provider_request_id": request_id,
+                },
             )
 
-            # Attempt re-scheduling if appropriate
-            if _should_retry(job_id):
+            # Configuration/auth/model errors will not succeed on retry.
+            retryable = error_type not in (
+                "provider_credential_missing",
+                "missing_api_key",
+                "provider_auth_error",
+                "provider_permission_denied",
+                "model_not_activated",
+                "model_not_found",
+                "model_not_configured",
+            )
+            if retryable and _should_retry(job_id):
                 try:
                     re_schedule_result = scheduler_service.re_schedule(job_id)
                     if re_schedule_result and re_schedule_result.get("status") == "rescheduled":

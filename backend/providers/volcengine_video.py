@@ -16,6 +16,7 @@ from .base import (
     is_redirect,
     scrub_secret,
 )
+from .errors import extract_request_id, provider_http_error
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,9 @@ class VolcengineVideoProvider(object):
         return scrub_secret(str(message)[:500], self.api_key)
 
     def create_generation(self, prompt, negative_prompt=None, reference_image_urls=None,
-                          aspect_ratio="16:9", duration_s=5, resolution="720p",
-                          generate_audio=False, watermark=False, seed=None,
+                          reference_image_roles=None, aspect_ratio="16:9",
+                          duration_s=5, resolution="720p",
+                          generate_audio=None, watermark=False, seed=None,
                           camera_fixed=False):
         if not self.api_key:
             raise ProviderAuthError("ARK_API_KEY 未配置", error_type="missing_api_key")
@@ -55,13 +57,18 @@ class VolcengineVideoProvider(object):
             raise ProviderRejected("视频提示词不能为空", error_type="invalid_prompt")
 
         content = [{"type": "text", "text": prompt}]
+        roles = list(reference_image_roles or [])
         for index, image in enumerate(reference_image_urls or []):
             if not image:
                 continue
+            if index < len(roles):
+                role = roles[index]
+            else:
+                role = "first_frame" if index == 0 else "reference_image"
             item = {
                 "type": "image_url",
                 "image_url": {"url": image},
-                "role": "first_frame" if index == 0 else "reference_image",
+                "role": role,
             }
             content.append(item)
 
@@ -71,9 +78,11 @@ class VolcengineVideoProvider(object):
             "ratio": aspect_ratio or "16:9",
             "duration": int(duration_s or 5),
             "resolution": resolution or "720p",
-            "generate_audio": bool(generate_audio),
             "watermark": bool(watermark),
         }
+        # Omit the field entirely for models that do not accept it.
+        if generate_audio is not None:
+            payload["generate_audio"] = bool(generate_audio)
         if seed is not None:
             payload["seed"] = int(seed)
         if camera_fixed:
@@ -93,25 +102,12 @@ class VolcengineVideoProvider(object):
                 error_type="submission_uncertain",
             )
 
-        if is_redirect(response.status_code):
-            raise ProviderRejected(
-                "Seedance 返回重定向（HTTP {0}），已拒绝跟随".format(response.status_code),
-                error_type="provider_redirect_rejected",
-            )
-        if response.status_code in (401, 403):
-            raise ProviderAuthError("Seedance 鉴权失败: HTTP {0}".format(response.status_code))
-        if response.status_code == 429:
-            raise ProviderRateLimited("Seedance 请求过于频繁")
-        if 400 <= response.status_code < 500:
-            raise ProviderRejected(
-                "Seedance 拒绝请求: {0}".format(self._error_text(response)),
-                error_type="provider_rejected",
-            )
-        if response.status_code >= 500:
-            raise ProviderUncertain(
-                "Seedance 服务异常: HTTP {0}".format(response.status_code),
-                error_type="submission_uncertain",
-            )
+        mapped = provider_http_error(
+            response, self.api_key, "Seedance", model_id=self.model_id,
+            uncertain_error_type="submission_uncertain",
+        )
+        if mapped is not None:
+            raise mapped
 
         try:
             data = response.json() or {}
@@ -120,6 +116,8 @@ class VolcengineVideoProvider(object):
         task_id = data.get("id") or (data.get("data") or {}).get("id")
         if not task_id:
             raise ProviderError("Seedance 响应缺少任务 ID", error_type="provider_invalid_response")
+        if isinstance(data, dict):
+            data["_request_id"] = extract_request_id(response, data)
         return data
 
     def get_generation(self, task_id):
@@ -209,10 +207,16 @@ class VolcengineVideoProvider(object):
 
     @staticmethod
     def extract_error(data):
-        error = (data or {}).get("error") or {}
+        data = data or {}
+        error = data.get("error")
+        if not isinstance(error, dict):
+            nested = data.get("data")
+            error = nested.get("error") if isinstance(nested, dict) else None
         if isinstance(error, dict):
+            request_id = error.get("request_id") or data.get("request_id")
             return {
-                "code": error.get("code") or "provider_failed",
-                "message": (error.get("message") or "视频生成失败")[:500],
+                "code": str(error.get("code") or "provider_failed")[:80],
+                "message": str(error.get("message") or "视频生成失败")[:500],
+                "request_id": str(request_id)[:128] if request_id else None,
             }
-        return {"code": "provider_failed", "message": "视频生成失败"}
+        return {"code": "provider_failed", "message": "视频生成失败", "request_id": None}

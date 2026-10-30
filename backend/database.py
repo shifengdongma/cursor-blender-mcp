@@ -837,6 +837,7 @@ class Database(object):
         self._ensure_column(cursor, 'auth_users', 'status', "TEXT NOT NULL DEFAULT 'active'")
         self._ensure_column(cursor, 'auth_users', 'session_version', 'INTEGER NOT NULL DEFAULT 0')
         self._ensure_column(cursor, 'auth_users', 'terms_accepted_at', 'INTEGER')
+        self._ensure_column(cursor, 'provider_credentials', 'last_verification', 'TEXT')
         self._ensure_column(cursor, 'assets', 'owner_user_id', 'TEXT')
         self._ensure_column(cursor, 'assets', 'tenant_id', 'TEXT')
         self._ensure_column(cursor, 'assets', 'visibility', "TEXT DEFAULT 'private'")

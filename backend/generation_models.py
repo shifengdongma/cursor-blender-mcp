@@ -11,6 +11,7 @@ from __future__ import absolute_import
 import logging
 import time
 
+from . import model_ids
 from .credential_service import CredentialError, CredentialService
 
 logger = logging.getLogger(__name__)
@@ -63,35 +64,41 @@ def _image_caps(sizes, max_reference_images, pixel_range, default_size):
 
 
 def _video_caps(durations, resolutions, max_reference_images, supports_audio,
-                supports_seed, supports_cancel, default_audio=False):
+                supports_seed, supports_cancel, default_audio=False,
+                duration_range=None, reference_mode="frames_and_content"):
+    durations = list(durations)
+    if duration_range is None:
+        duration_range = [min(durations), max(durations)]
     return {
         "ratios": list(_VIDEO_RATIOS),
-        "durations": list(durations),
+        "durations": durations,
+        "duration_range": list(duration_range),
         "resolutions": list(resolutions),
         "supports_reference_image": max_reference_images > 0,
         "max_reference_images": int(max_reference_images),
+        "reference_mode": reference_mode,
         "supports_negative_prompt": False,
         "supports_audio": bool(supports_audio),
         "default_audio": bool(default_audio),
         "supports_seed": bool(supports_seed),
         "supports_watermark": True,
         "supports_cancel": bool(supports_cancel),
-        "cancel_note": "仅排队中任务可取消；运行中任务可能仍产生费用" if supports_cancel else "该服务商不支持取消",
+        "cancel_note": "仅排队中任务可取消；运行中任务仍可能产生费用" if supports_cancel else "该服务商不支持取消",
     }
 
 
 MODELS = [
     _model(
-        "ark_seedream_pro", "ark_seedream", "doubao-seedream-5-0-pro-260628",
+        "ark_seedream_pro", "ark_seedream", model_ids.ARK_SEEDREAM_PRO,
         "Seedream 5.0 Pro（火山方舟）", "image",
         _image_caps(["1K", "1.5K", "2K"], 10, (921600, 4624220), "2K"),
-        env_key="ARK_API_KEY", default=True,
+        env_key="ARK_API_KEY",
     ),
     _model(
-        "ark_seedream_lite", "ark_seedream", "doubao-seedream-5-0-lite-260128",
-        "Seedream 5.0 Lite（火山方舟）", "image",
-        _image_caps(["2K", "3K", "4K"], 14, (3686400, 16777216), "2K"),
-        env_key="ARK_API_KEY",
+        "ark_seedream_flash", "ark_seedream", model_ids.ARK_SEEDREAM_FLASH,
+        "Seedream 5.0 Flash（火山方舟）", "image",
+        _image_caps(["1K", "1.5K", "2K"], 10, (921600, 4624220), "2K"),
+        env_key="ARK_API_KEY", default=True,
     ),
     _model(
         "comfyui_default", "comfyui", "default",
@@ -129,25 +136,29 @@ MODELS = [
         verification_note=_OPENAI_VERIFICATION_NOTE,
     ),
     _model(
-        "ark_seedance_25", "ark_seedance", "doubao-seedance-2-5-260628",
+        "ark_seedance_25", "ark_seedance", model_ids.ARK_SEEDANCE_25,
         "Seedance 2.5（火山方舟）", "video",
         _video_caps(_MAX30_DURATIONS, ["480p", "720p", "1080p"], 30,
                     supports_audio=True, supports_seed=True,
-                    supports_cancel=True, default_audio=True),
+                    supports_cancel=True, default_audio=True,
+                    duration_range=[4, 30]),
         env_key="ARK_API_KEY", default=True,
     ),
     _model(
-        "ark_seedance_20", "ark_seedance", "doubao-seedance-2-0-260128",
+        "ark_seedance_20", "ark_seedance", model_ids.ARK_SEEDANCE_20,
         "Seedance 2.0（火山方舟）", "video",
-        _video_caps([4, 5, 8, 10, 12], ["480p", "720p", "1080p"], 1,
-                    supports_audio=False, supports_seed=True, supports_cancel=True),
+        _video_caps([4, 5, 6, 8, 10, 12, 15], ["480p", "720p", "1080p"], 9,
+                    supports_audio=True, supports_seed=True,
+                    supports_cancel=True, duration_range=[4, 15]),
         env_key="ARK_API_KEY",
     ),
     _model(
-        "ark_seedance_10_pro", "ark_seedance", "doubao-seedance-1-0-pro-250528",
+        "ark_seedance_10_pro", "ark_seedance", model_ids.ARK_SEEDANCE_10_PRO,
         "Seedance 1.0 Pro（火山方舟）", "video",
-        _video_caps([5, 10], ["480p", "720p", "1080p"], 1,
-                    supports_audio=False, supports_seed=True, supports_cancel=True),
+        _video_caps([2, 5, 10, 12], ["480p", "720p", "1080p"], 2,
+                    supports_audio=False, supports_seed=True,
+                    supports_cancel=True, duration_range=[2, 12],
+                    reference_mode="first_last_only"),
         env_key="ARK_API_KEY",
     ),
     _model(
@@ -172,7 +183,7 @@ MODELS = [
 # UI model key -> Config attribute holding the real Ark model ID.
 _CONFIG_MODEL_OVERRIDES = {
     "ark_seedream_pro": "ARK_IMAGE_MODEL",
-    "ark_seedream_lite": "ARK_IMAGE_MODEL_LITE",
+    "ark_seedream_flash": "ARK_IMAGE_MODEL_FLASH",
     "ark_seedance_25": "ARK_VIDEO_MODEL",
     "ark_seedance_20": "ARK_VIDEO_MODEL_20",
     "ark_seedance_10_pro": "ARK_VIDEO_MODEL_10_PRO",
@@ -180,6 +191,60 @@ _CONFIG_MODEL_OVERRIDES = {
     "luma_default": "LUMA_MODEL_NAME",
     "openai_gpt_image_1": "OPENAI_IMAGE_MODEL",
 }
+
+_MODEL_LABELS = {
+    "ark_seedream_pro": "Seedream Pro 模型 ID",
+    "ark_seedream_flash": "Seedream Flash 模型 ID",
+    "ark_seedance_25": "Seedance 2.5 模型 ID",
+    "ark_seedance_20": "Seedance 2.0 模型 ID",
+    "ark_seedance_10_pro": "Seedance 1.0 Pro 模型 ID",
+}
+
+
+def ark_model_fields():
+    """Model-override fields shown in /api-settings, sourced from the registry."""
+    return [
+        {
+            "key": model["key"],
+            "label": _MODEL_LABELS.get(model["key"], model["key"]),
+            "default": model["model_id"],
+        }
+        for model in MODELS
+        if model["key"] in model_ids.ARK_MODEL_IDS
+    ]
+
+
+def allowed_override_keys(provider):
+    """Known model-override keys for a credential provider."""
+    if provider != "ark":
+        return None
+    return set(model_ids.ARK_MODEL_IDS.keys())
+
+
+def resolve_model_key(key):
+    """Resolve legacy UI keys (for example Lite) to the canonical registry key."""
+    return model_ids.ARK_MODEL_ALIASES.get(key, key)
+
+
+def reference_image_roles(caps, count):
+    """Role list for Ark Seedance image inputs.
+
+    One image is a first frame, two are first/last frames, and three or more
+    are content references.  Models limited to first/last frames never receive
+    content-reference roles.
+    """
+    if count <= 0:
+        return []
+    mode = (caps or {}).get("reference_mode") or "frames_and_content"
+    if mode == "first_last_only":
+        if count > 2:
+            return None
+        return ["first_frame"] if count == 1 else ["first_frame", "last_frame"]
+    if count == 1:
+        return ["first_frame"]
+    if count == 2:
+        return ["first_frame", "last_frame"]
+    return ["reference_image"] * count
 
 # Registry provider -> per-user credential provider.
 _CREDENTIAL_PROVIDER_BY_MODEL_PROVIDER = {
@@ -220,18 +285,22 @@ def _effective_credentials(cfg, model, user):
 def _with_config(cfg, model, user=None):
     item = dict(model)
     item["capabilities"] = dict(model.get("capabilities") or {})
+    item["model_id_source"] = "registry"
     attr = _CONFIG_MODEL_OVERRIDES.get(model["key"])
     configured = getattr(cfg, attr, None) if attr else None
     if configured:
         item["model_id"] = configured
+        item["model_id_source"] = "env_override"
     effective = _effective_credentials(cfg, model, user)
-    if effective:
+    if effective and effective.get("source"):
         if model["provider"] in ("ark_seedream", "ark_seedance"):
+            # Legacy Lite overrides are deliberately not applied to Flash.
             override = (effective.get("model_overrides") or {}).get(model["key"])
         else:
             override = effective.get("model")
         if override:
             item["model_id"] = override
+            item["model_id_source"] = "user_override"
     return item
 
 
@@ -288,13 +357,15 @@ def _credential_source(cfg, model, user):
 
 
 def get_model(cfg, key, include_unavailable=True, user=None):
+    canonical_key = resolve_model_key(key)
     for model in MODELS:
-        if model["key"] == key:
+        if model["key"] == canonical_key:
             item = _with_config(cfg, model, user=user)
             available, reason = _availability(cfg, model, user=user)
             item["available"] = available
             item["unavailable_reason"] = reason
             item["credential_source"] = _credential_source(cfg, model, user)
+            item["credential_provider"] = _credential_provider(model)
             item["verified"] = False
             if not available:
                 item["configure_url"] = "/api-settings"
@@ -315,10 +386,14 @@ def list_models(cfg, task_type=None, include_unavailable=True, user=None):
         if not item["available"] and not include_unavailable:
             continue
         items.append(item)
-    # Pick a default per type from the available models.
+    # Prefer the registry default (Flash for image, Seedance 2.5 for video);
+    # fall back to the first available model of that type.
     for wanted_type in ("image", "video"):
         available = [m for m in items if m["task_type"] == wanted_type and m["available"]]
+        preferred = next((m for m in available if m.get("default")), None)
+        if preferred is None and available:
+            preferred = available[0]
         for model in items:
             if model["task_type"] == wanted_type:
-                model["default"] = bool(available and model["key"] == available[0]["key"])
+                model["default"] = bool(preferred and model["key"] == preferred["key"])
     return items

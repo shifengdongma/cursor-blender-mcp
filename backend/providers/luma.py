@@ -21,6 +21,7 @@ from .base import (
     is_redirect,
     scrub_secret,
 )
+from .errors import extract_request_id, provider_http_error
 
 
 class LumaError(ProviderError):
@@ -74,27 +75,12 @@ class LumaProvider(object):
                 error_type="submission_uncertain",
             )
 
-        if is_redirect(response.status_code):
-            raise ProviderRejected(
-                "Luma 返回重定向（HTTP {0}），已拒绝跟随".format(response.status_code),
-                error_type="provider_redirect_rejected",
-            )
-        if response.status_code in (401, 403):
-            raise ProviderAuthError("Luma 鉴权失败: HTTP {0}".format(response.status_code))
-        if response.status_code == 429:
-            raise ProviderRateLimited("Luma 请求过于频繁")
-        if 400 <= response.status_code < 500:
-            raise ProviderRejected(
-                "Luma 拒绝请求: {0}".format(
-                    scrub_secret(response.text[:500], self.api_key)
-                ),
-                error_type="provider_rejected",
-            )
-        if response.status_code >= 500:
-            raise ProviderUncertain(
-                "Luma 服务异常: HTTP {0}".format(response.status_code),
-                error_type="submission_uncertain",
-            )
+        mapped = provider_http_error(
+            response, self.api_key, "Luma", model_id=self.model_name,
+            uncertain_error_type="submission_uncertain",
+        )
+        if mapped is not None:
+            raise mapped
         try:
             data = response.json() or {}
         except ValueError:
@@ -102,6 +88,8 @@ class LumaProvider(object):
         generation_id = data.get("id") or data.get("generation_id")
         if not generation_id:
             raise ProviderError("Luma 返回缺少 id 字段", error_type="provider_invalid_response")
+        if isinstance(data, dict):
+            data["_request_id"] = extract_request_id(response, data)
         return data
 
     def get_generation(self, generation_id):
@@ -166,11 +154,13 @@ class LumaProvider(object):
     def extract_error(gen_json):
         error = (gen_json or {}).get("error") or {}
         if isinstance(error, dict):
+            request_id = error.get("request_id") or (gen_json or {}).get("request_id")
             return {
-                "code": error.get("code") or "provider_failed",
-                "message": (error.get("message") or "视频生成失败")[:500],
+                "code": str(error.get("code") or "provider_failed")[:80],
+                "message": str(error.get("message") or "视频生成失败")[:500],
+                "request_id": str(request_id)[:128] if request_id else None,
             }
-        return {"code": "provider_failed", "message": "视频生成失败"}
+        return {"code": "provider_failed", "message": "视频生成失败", "request_id": None}
 
     def wait_until_done(self, generation_id, timeout_s=900, poll_interval_s=5):
         """Legacy synchronous helper; the worker uses get_generation instead."""

@@ -175,11 +175,16 @@ class Config(object):
     # Volcengine Ark (Seedream / Seedance direct API)
     ARK_API_KEY = os.environ.get("ARK_API_KEY", os.environ.get("VOLCENGINE_API_KEY", ""))
     ARK_BASE_URL = os.environ.get("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
-    ARK_IMAGE_MODEL = os.environ.get("ARK_IMAGE_MODEL", "doubao-seedream-5-0-pro-260628")
-    ARK_IMAGE_MODEL_LITE = os.environ.get("ARK_IMAGE_MODEL_LITE", "doubao-seedream-5-0-lite-260128")
-    ARK_VIDEO_MODEL = os.environ.get("ARK_VIDEO_MODEL", "doubao-seedance-2-5-260628")
-    ARK_VIDEO_MODEL_20 = os.environ.get("ARK_VIDEO_MODEL_20", "doubao-seedance-2-0-260128")
-    ARK_VIDEO_MODEL_10_PRO = os.environ.get("ARK_VIDEO_MODEL_10_PRO", "doubao-seedance-1-0-pro-250528")
+    # Empty default means "use the registry ID in backend/model_ids.py".
+    # Only an explicitly configured env value overrides the registry.
+    ARK_IMAGE_MODEL = os.environ.get("ARK_IMAGE_MODEL", "")
+    ARK_IMAGE_MODEL_FLASH = os.environ.get("ARK_IMAGE_MODEL_FLASH", "")
+    # Deprecated Lite slot.  It is intentionally NOT mapped to Flash: an old
+    # Lite model ID must never be sent as if it were Seedream Flash.
+    ARK_IMAGE_MODEL_LITE = os.environ.get("ARK_IMAGE_MODEL_LITE", "")
+    ARK_VIDEO_MODEL = os.environ.get("ARK_VIDEO_MODEL", "")
+    ARK_VIDEO_MODEL_20 = os.environ.get("ARK_VIDEO_MODEL_20", "")
+    ARK_VIDEO_MODEL_10_PRO = os.environ.get("ARK_VIDEO_MODEL_10_PRO", "")
     ARK_REQUEST_TIMEOUT_S = _to_int(os.environ.get("ARK_REQUEST_TIMEOUT_S"), default=180)
     LUMA_MODEL_NAME = os.environ.get("LUMA_MODEL_NAME", "ray-2")
 
@@ -202,6 +207,11 @@ class Config(object):
     CREDENTIAL_ENCRYPTION_KEY = os.environ.get("CREDENTIAL_ENCRYPTION_KEY", "")
     ALLOW_INSECURE_PROVIDER_URLS = _to_bool(
         os.environ.get("ALLOW_INSECURE_PROVIDER_URLS"), default=False
+    )
+    # Optional future guard.  Default false to preserve the current HTTP
+    # deployment; set true only after TLS termination is in place.
+    CREDENTIAL_REQUIRE_HTTPS = _to_bool(
+        os.environ.get("CREDENTIAL_REQUIRE_HTTPS"), default=False
     )
 
     # ComfyUI Image Generation
@@ -271,6 +281,9 @@ class Config(object):
     MAX_GENERATION_DOWNLOAD_MB = _to_int(os.environ.get("MAX_GENERATION_DOWNLOAD_MB"), default=500)
     MAX_PROMPT_LENGTH = _to_int(os.environ.get("MAX_PROMPT_LENGTH"), default=4000)
     MAX_REFERENCE_IMAGE_MB = _to_int(os.environ.get("MAX_REFERENCE_IMAGE_MB"), default=10)
+    MAX_REFERENCE_IMAGES_TOTAL_MB = _to_int(
+        os.environ.get("MAX_REFERENCE_IMAGES_TOTAL_MB"), default=40
+    )
     MAX_CONCURRENT_TASKS_PER_USER = _to_int(os.environ.get("MAX_CONCURRENT_TASKS_PER_USER"), default=2)
     # Legacy creative tasks (storyboard/TTS/compose/refine/export) share one
     # worker thread; cap them per user so one account cannot starve the queue.
@@ -315,6 +328,11 @@ class Config(object):
             warnings.append("警告：生产环境 SESSION_SECURE=false，Cookie 可能通过 HTTP 传输")
         if self.IS_PRODUCTION and not self.CSRF_ENABLED:
             warnings.append("警告：生产环境 CSRF_ENABLED=false 不安全")
+        if self.APP_ENV != "test" and not self.CREDENTIAL_REQUIRE_HTTPS:
+            warnings.append(
+                "提示：API Key 传输未强制 HTTPS；当前 HTTP 部署存在明文传输风险，"
+                "后续配置 TLS 后可设置 CREDENTIAL_REQUIRE_HTTPS=true"
+            )
 
         # 检查数据目录
         if not os.path.exists(self.DATA_DIR):

@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 
+from . import model_ids
 from .database import get_database
 
 logger = logging.getLogger(__name__)
@@ -90,11 +91,11 @@ PROVIDER_CATALOG = [
         "requires_key": True,
         "docs_url": "https://console.volcengine.com/ark",
         "model_fields": [
-            {"key": "ark_seedream_pro", "label": "Seedream Pro 模型 ID", "default": "doubao-seedream-5-0-pro-260628"},
-            {"key": "ark_seedream_lite", "label": "Seedream Lite 模型 ID", "default": "doubao-seedream-5-0-lite-260128"},
-            {"key": "ark_seedance_25", "label": "Seedance 2.5 模型 ID", "default": "doubao-seedance-2-5-260628"},
-            {"key": "ark_seedance_20", "label": "Seedance 2.0 模型 ID", "default": "doubao-seedance-2-0-260128"},
-            {"key": "ark_seedance_10_pro", "label": "Seedance 1.0 Pro 模型 ID", "default": "doubao-seedance-1-0-pro-250528"},
+            {"key": "ark_seedream_pro", "label": "Seedream Pro 模型 ID", "default": model_ids.ARK_SEEDREAM_PRO},
+            {"key": "ark_seedream_flash", "label": "Seedream Flash 模型 ID", "default": model_ids.ARK_SEEDREAM_FLASH},
+            {"key": "ark_seedance_25", "label": "Seedance 2.5 模型 ID", "default": model_ids.ARK_SEEDANCE_25},
+            {"key": "ark_seedance_20", "label": "Seedance 2.0 模型 ID", "default": model_ids.ARK_SEEDANCE_20},
+            {"key": "ark_seedance_10_pro", "label": "Seedance 1.0 Pro 模型 ID", "default": model_ids.ARK_SEEDANCE_10_PRO},
         ],
     },
     {
@@ -263,11 +264,17 @@ class CredentialService(object):
         if provider not in _CATALOG_BY_PROVIDER:
             raise CredentialError("invalid_provider", "不支持的 Provider: {0}".format(provider), 400)
 
-    def _validate_model_overrides(self, overrides):
+    def _validate_model_overrides(self, overrides, provider=None):
         if overrides is None:
             return None
         if not isinstance(overrides, dict):
             raise CredentialError("invalid_model_overrides", "model_overrides 必须是对象", 400)
+        allowed = None
+        if provider == "ark":
+            # Lazy import avoids a module cycle: generation_models imports this
+            # service for availability checks.
+            from .generation_models import allowed_override_keys
+            allowed = allowed_override_keys("ark")
         cleaned = {}
         for key, value in overrides.items():
             if not isinstance(key, str) or not isinstance(value, str):
@@ -276,6 +283,12 @@ class CredentialService(object):
             value = value.strip()
             if not key or len(key) > 80 or len(value) > _LENGTH_LIMITS["model"]:
                 raise CredentialError("invalid_model_overrides", "model_overrides 内容不合法", 400)
+            if allowed is not None and key not in allowed:
+                raise CredentialError(
+                    "invalid_model_overrides",
+                    "未知或已废弃的模型覆盖项：{0}".format(key),
+                    400,
+                )
             if value:
                 cleaned[key] = value
         return cleaned
@@ -319,7 +332,7 @@ class CredentialService(object):
         if model_overrides is None:
             final_overrides = existing.get("model_overrides") if existing else "{}"
         else:
-            cleaned = self._validate_model_overrides(model_overrides) or {}
+            cleaned = self._validate_model_overrides(model_overrides, provider) or {}
             final_overrides = json.dumps(cleaned, ensure_ascii=False, sort_keys=True)
 
         if is_active is None:
@@ -350,6 +363,17 @@ class CredentialService(object):
             "updated_at": now,
         }
         if existing:
+            key_input = api_key is not None and str(api_key).strip()
+            changed_key = clear_key or (key_input and _key_present(str(api_key).strip()))
+            changed_base = (
+                base_url is not None
+                and final_base_url != existing.get("base_url")
+            )
+            if changed_key or changed_base:
+                # A previous verification no longer describes this credential.
+                data["last_verified_at"] = None
+                data["last_verification"] = None
+        if existing:
             self.db.update(
                 "provider_credentials",
                 data,
@@ -369,6 +393,49 @@ class CredentialService(object):
             )
             self.db.insert("provider_credentials", data)
         return self._public_record(self.get_record(user_id, provider), cfg)
+
+    def mark_verified(self, user_id, provider, when=None):
+        """Record that a non-billing probe authenticated the key."""
+        if not user_id:
+            return None
+        timestamp = int(when if when is not None else _now())
+        self.db.update(
+            "provider_credentials",
+            {"last_verified_at": timestamp},
+            "user_id = ? AND provider = ?",
+            (user_id, provider),
+        )
+        return timestamp
+
+    def record_verification(self, user_id, provider, model_key, model_id,
+                            status, request_id=None, when=None):
+        """Persist the latest real-call result for one model (no secrets)."""
+        if not user_id or not model_key:
+            return None
+        timestamp = int(when if when is not None else _now())
+        row = self.get_record(user_id, provider)
+        if not row:
+            return None
+        verification = self._load_overrides(row.get("last_verification"))
+        verification[str(model_key)] = {
+            "model_id": model_id,
+            "status": status,
+            "request_id": request_id,
+            "verified_at": timestamp,
+        }
+        self.db.update(
+            "provider_credentials",
+            {
+                "last_verified_at": timestamp,
+                "last_verification": json.dumps(
+                    verification, ensure_ascii=False, sort_keys=True
+                ),
+                "updated_at": timestamp,
+            },
+            "user_id = ? AND provider = ?",
+            (user_id, provider),
+        )
+        return timestamp
 
     def delete(self, user_id, provider):
         self._validate_provider(provider)
@@ -514,6 +581,7 @@ class CredentialService(object):
             "source": source,
             "is_active": bool(row.get("is_active", 1)),
             "last_verified_at": row.get("last_verified_at"),
+            "last_verification": self._load_overrides(row.get("last_verification")),
             "updated_at": row.get("updated_at"),
         }
 

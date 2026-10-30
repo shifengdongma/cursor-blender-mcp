@@ -41,6 +41,16 @@ sudo nginx -t && sudo systemctl reload nginx
 
 生产必须使用 HTTPS；`SESSION_SECURE=true` 时 Cookie 不会通过 HTTP 发送。
 
+### 当前部署例外（2026-10-30）
+
+当前站点暂无域名/证书，继续使用 `http://<host>:8000`，未安装 Nginx，也未开启
+`CREDENTIAL_REQUIRE_HTTPS`。这意味着 API Key 在浏览器到服务器之间可能以明文传输；
+`/api-settings` 页面与启动日志会显示风险提示。后续取得域名后可按下述步骤启用 HTTPS：
+
+1. 安装 Nginx/certbot，配置证书与 80→443 跳转，设置 `X-Forwarded-Proto`。
+2. `.env` 设置 `SESSION_SECURE=true`、`TRUST_PROXY=true`、`CREDENTIAL_REQUIRE_HTTPS=true`。
+3. Gunicorn 改为绑定 `127.0.0.1:8000`，防火墙禁止公网访问 8000。
+
 ## 4. 备份与恢复
 
 ```bash

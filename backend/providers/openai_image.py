@@ -9,12 +9,11 @@ import requests
 from .base import (
     ProviderAuthError,
     ProviderError,
-    ProviderRateLimited,
     ProviderRejected,
     ProviderUncertain,
-    is_redirect,
     scrub_secret,
 )
+from .errors import extract_request_id, provider_http_error
 
 logger = logging.getLogger(__name__)
 
@@ -116,30 +115,12 @@ class OpenAIImageProvider(object):
                 error_type="image_submission_uncertain",
             )
 
-        if is_redirect(response.status_code):
-            raise ProviderRejected(
-                "OpenAI 图片返回重定向（HTTP {0}），已拒绝跟随".format(response.status_code),
-                error_type="provider_redirect_rejected",
-            )
-        if response.status_code in (401, 403):
-            raise ProviderAuthError(
-                "OpenAI 图片鉴权失败: HTTP {0}".format(response.status_code),
-                error_type="provider_auth_error",
-            )
-        if response.status_code == 429:
-            raise ProviderRateLimited(
-                "OpenAI 图片请求过于频繁", error_type="provider_rate_limited"
-            )
-        if 400 <= response.status_code < 500:
-            raise ProviderRejected(
-                "OpenAI 图片拒绝请求: {0}".format(self._safe_error(response)),
-                error_type="provider_rejected",
-            )
-        if response.status_code >= 500:
-            raise ProviderUncertain(
-                "OpenAI 图片服务异常: HTTP {0}".format(response.status_code),
-                error_type="image_submission_uncertain",
-            )
+        mapped = provider_http_error(
+            response, self.api_key, "OpenAI 图片", model_id=self.model_id,
+            uncertain_error_type="image_submission_uncertain",
+        )
+        if mapped is not None:
+            raise mapped
 
         try:
             data = response.json() or {}
@@ -160,4 +141,8 @@ class OpenAIImageProvider(object):
             raise ProviderError(
                 "OpenAI 图片响应没有图片", error_type="provider_invalid_response"
             )
-        return {"images": images, "created": data.get("created")}
+        return {
+            "images": images,
+            "created": data.get("created"),
+            "request_id": extract_request_id(response, data),
+        }

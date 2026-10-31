@@ -567,6 +567,13 @@ def _target_display(event, maps):
     if target_type == 'provider_credential':
         return PROVIDER_LABELS.get(target_id, _clean_text(target_id, 80))
 
+    if target_type == 'volcengine_sync':
+        return {
+            'ark_usage': '火山方舟官方用量同步',
+            'ark_billing': '火山引擎官方账单同步',
+            'ark_balance': '火山引擎官方余额同步',
+        }.get(target_id, '火山引擎数据同步')
+
     # Do not guess a target type from the UUID shape.
     return '—'
 

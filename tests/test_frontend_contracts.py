@@ -66,3 +66,31 @@ def test_creative_studio_does_not_attach_persistent_listeners_per_render():
     assert "function bindEffectsForm" not in js
     assert "function bindTimelineEvents" not in js
     assert "data-concept-actions-bound" in js
+
+
+def test_compute_platform_ai_model_tab_contract():
+    html = _read("web/compute-platform.html")
+    js = _read("web/ark-admin.js")
+    compute_js = _read("web/compute-platform.js")
+    assert "cp-ai-tab-btn" in html
+    assert 'id="tab-ai-models"' in html
+    assert "ark-usage-days" in html
+    assert "ark-local-metrics" in html
+    assert "ark-official-model-table" in html
+    assert "/api/admin/ark/usage/summary" in js
+    assert "/api/admin/ark/usage/sync" in js
+    assert "/api/admin/ark/status" in js
+    assert "official_api" in js
+    assert "AIGVArk.activate" in compute_js
+    assert "AIGVArk.isAdmin" in compute_js
+    assert "AIGV_DEMO_DATA" not in js
+
+
+def test_internal_billing_is_labelled_as_estimate():
+    html = _read("web/compute-platform.html")
+    js = _read("web/compute-platform.js")
+    assert "内部 GPU / 渲染核算" in html
+    assert "不代表火山引擎官方账单" in html
+    assert "内部核算累计" in js
+    assert "非火山官方账单" in js
+    assert "内部核算余额（非火山账户）" in js

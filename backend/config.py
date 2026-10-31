@@ -186,6 +186,54 @@ class Config(object):
     ARK_VIDEO_MODEL_20 = os.environ.get("ARK_VIDEO_MODEL_20", "")
     ARK_VIDEO_MODEL_10_PRO = os.environ.get("ARK_VIDEO_MODEL_10_PRO", "")
     ARK_REQUEST_TIMEOUT_S = _to_int(os.environ.get("ARK_REQUEST_TIMEOUT_S"), default=180)
+
+    # Volcengine management OpenAPI (read-only usage / billing).
+    # These are intentionally separate from ARK_API_KEY: the inference key can
+    # never be used to query account-level usage or bills.
+    VOLCENGINE_USAGE_ENABLED = _to_bool(
+        os.environ.get("VOLCENGINE_USAGE_ENABLED"), default=False
+    )
+    VOLCENGINE_BILLING_ENABLED = _to_bool(
+        os.environ.get("VOLCENGINE_BILLING_ENABLED"), default=False
+    )
+    VOLCENGINE_ACCESS_KEY_ID = os.environ.get("VOLCENGINE_ACCESS_KEY_ID", "")
+    VOLCENGINE_SECRET_ACCESS_KEY = os.environ.get("VOLCENGINE_SECRET_ACCESS_KEY", "")
+    VOLCENGINE_ARK_REGION = os.environ.get("VOLCENGINE_ARK_REGION", "cn-beijing")
+    VOLCENGINE_BILLING_REGION = os.environ.get("VOLCENGINE_BILLING_REGION", "cn-north-1")
+    VOLCENGINE_ARK_PROJECT = os.environ.get("VOLCENGINE_ARK_PROJECT", "default")
+    VOLCENGINE_USAGE_SYNC_ENABLED = _to_bool(
+        os.environ.get("VOLCENGINE_USAGE_SYNC_ENABLED"), default=False
+    )
+    VOLCENGINE_BILLING_SYNC_ENABLED = _to_bool(
+        os.environ.get("VOLCENGINE_BILLING_SYNC_ENABLED"), default=False
+    )
+    VOLCENGINE_USAGE_SYNC_INTERVAL_S = max(
+        60, _to_int(os.environ.get("VOLCENGINE_USAGE_SYNC_INTERVAL_S"), default=1800)
+    )
+    VOLCENGINE_BILLING_SYNC_INTERVAL_S = max(
+        300, _to_int(os.environ.get("VOLCENGINE_BILLING_SYNC_INTERVAL_S"), default=86400)
+    )
+    VOLCENGINE_USAGE_LOOKBACK_DAYS = max(
+        1, _to_int(os.environ.get("VOLCENGINE_USAGE_LOOKBACK_DAYS"), default=31)
+    )
+    VOLCENGINE_BILLING_LOOKBACK_MONTHS = max(
+        1, _to_int(os.environ.get("VOLCENGINE_BILLING_LOOKBACK_MONTHS"), default=3)
+    )
+    VOLCENGINE_SYNC_TIMEOUT_S = max(
+        5, _to_int(os.environ.get("VOLCENGINE_SYNC_TIMEOUT_S"), default=20)
+    )
+    VOLCENGINE_SYNC_MAX_RETRIES = max(
+        0, _to_int(os.environ.get("VOLCENGINE_SYNC_MAX_RETRIES"), default=2)
+    )
+    VOLCENGINE_ARK_BILL_PRODUCT_FILTER = os.environ.get(
+        "VOLCENGINE_ARK_BILL_PRODUCT_FILTER", ""
+    )
+    VOLCENGINE_ARK_BILL_SPLIT_DIMENSION = os.environ.get(
+        "VOLCENGINE_ARK_BILL_SPLIT_DIMENSION", ""
+    )
+    VOLCENGINE_ARK_API_KEY_RESOURCE_ID = os.environ.get(
+        "VOLCENGINE_ARK_API_KEY_RESOURCE_ID", ""
+    )
     LUMA_MODEL_NAME = os.environ.get("LUMA_MODEL_NAME", "ray-2")
 
     BLENDER_BIN = os.environ.get("BLENDER_BIN", "blender")
@@ -351,6 +399,10 @@ class Config(object):
             warnings.append("警告：生产环境 SESSION_SECURE=false，Cookie 可能通过 HTTP 传输")
         if self.IS_PRODUCTION and not self.CSRF_ENABLED:
             warnings.append("警告：生产环境 CSRF_ENABLED=false 不安全")
+        if self.VOLCENGINE_ACCESS_KEY_ID and not self.VOLCENGINE_SECRET_ACCESS_KEY:
+            warnings.append("警告：已配置 VOLCENGINE_ACCESS_KEY_ID 但缺少 SECRET_ACCESS_KEY，官方用量/账单联调不可用")
+        if self.VOLCENGINE_SECRET_ACCESS_KEY and not self.VOLCENGINE_ACCESS_KEY_ID:
+            warnings.append("警告：已配置 VOLCENGINE_SECRET_ACCESS_KEY 但缺少 ACCESS_KEY_ID，官方用量/账单联调不可用")
         if self.APP_ENV != "test" and not self.CREDENTIAL_REQUIRE_HTTPS:
             warnings.append(
                 "提示：API Key 传输未强制 HTTPS；当前 HTTP 部署存在明文传输风险，"
@@ -389,6 +441,13 @@ class Config(object):
 
     def has_ark_configured(self):
         return bool(self.ARK_API_KEY)
+
+    def has_volcengine_management_credentials(self):
+        """Return True only when both management AK and SK are configured.
+
+        Never falls back to ARK_API_KEY or VOLCENGINE_API_KEY.
+        """
+        return bool(self.VOLCENGINE_ACCESS_KEY_ID and self.VOLCENGINE_SECRET_ACCESS_KEY)
 
     def has_valid_llm_key(self):
         """检查是否配置了有效的 LLM API Key"""

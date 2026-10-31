@@ -246,7 +246,7 @@ class TaskService(object):
         for key, value in fields.items():
             if key in (
                 "status", "stage", "progress", "provider_status", "provider_job_id",
-                "next_retry_at", "poll_error_count", "last_polled_at",
+                "provider_request_id", "next_retry_at", "poll_error_count", "last_polled_at",
                 "submission_uncertain", "error_code", "error_message",
                 "completed_at", "completed_at_ms", "result_payload",
                 "output_asset_id", "cancel_requested",
@@ -327,7 +327,7 @@ class TaskService(object):
         updatable = [
             "status", "stage", "progress", "params", "result_payload",
             "error_code", "error_message", "completed_at", "provider",
-            "model_id", "provider_job_id", "provider_status", "attempt_count",
+            "model_id", "provider_job_id", "provider_request_id", "provider_status", "attempt_count",
             "max_attempts", "next_retry_at", "lease_expires_at", "lease_owner",
             "submission_uncertain", "submission_started_at", "poll_error_count",
             "last_polled_at", "output_asset_id", "client_request_id",

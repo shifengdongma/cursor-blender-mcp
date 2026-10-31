@@ -840,6 +840,197 @@ class Database(object):
             'ON provider_credentials(user_id)'
         )
 
+        # ── AI model usage + Volcengine official usage / bills (v6) ──
+        # Amount columns in volcengine_bill_snapshots are TEXT on purpose:
+        # official values are decimal strings and must never be summed as
+        # SQLite REAL/float.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ai_model_usage_records (
+                id TEXT PRIMARY KEY,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                task_id TEXT,
+                user_id TEXT,
+                project_id TEXT,
+                provider TEXT,
+                model_id TEXT,
+                provider_job_id TEXT,
+                provider_request_id TEXT,
+                api_key_resource_id TEXT,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                total_tokens INTEGER,
+                image_count INTEGER,
+                video_duration_s REAL,
+                usage_unit TEXT,
+                usage_source TEXT,
+                billing_status TEXT,
+                resolution TEXT,
+                usage_payload TEXT,
+                recorded_at INTEGER,
+                synced_at INTEGER,
+                created_at INTEGER,
+                updated_at INTEGER
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS volcengine_usage_snapshots (
+                id TEXT PRIMARY KEY,
+                snapshot_key TEXT NOT NULL UNIQUE,
+                query_interval TEXT,
+                query_start TEXT,
+                query_end TEXT,
+                period_label TEXT,
+                period_start_at INTEGER,
+                account_id TEXT,
+                api_key_id TEXT,
+                model_name TEXT,
+                model_version TEXT,
+                model_endpoint TEXT,
+                billing_status TEXT,
+                project_name TEXT,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                total_tokens INTEGER,
+                req_cnt INTEGER,
+                image_count INTEGER,
+                fields_json TEXT,
+                row_payload TEXT,
+                synced_at INTEGER,
+                updated_at INTEGER
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS volcengine_bill_snapshots (
+                id TEXT PRIMARY KEY,
+                record_level TEXT NOT NULL,
+                snapshot_key TEXT NOT NULL UNIQUE,
+                provider_account_ref TEXT,
+                bill_period TEXT,
+                expense_date TEXT,
+                group_period INTEGER,
+                product TEXT,
+                product_zh TEXT,
+                config_name TEXT,
+                charge_item_code TEXT,
+                official_bill_id TEXT,
+                bill_detail_id TEXT,
+                split_bill_detail_id TEXT,
+                pay_status TEXT,
+                bill_category TEXT,
+                billing_mode TEXT,
+                currency TEXT,
+                settlement_currency TEXT,
+                settlement_type TEXT,
+                usage_amount TEXT,
+                usage_unit TEXT,
+                original_amount TEXT,
+                preferential_amount TEXT,
+                discount_amount TEXT,
+                coupon_amount TEXT,
+                payable_amount TEXT,
+                paid_amount TEXT,
+                unpaid_amount TEXT,
+                settlement_amount TEXT,
+                resource_id TEXT,
+                instance_no TEXT,
+                raw_payload TEXT,
+                synced_at INTEGER,
+                updated_at INTEGER
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS volcengine_balance_snapshots (
+                id TEXT PRIMARY KEY,
+                provider_account_ref TEXT,
+                account_id TEXT,
+                balance TEXT,
+                available_balance TEXT,
+                cash_balance TEXT,
+                credit_limit TEXT,
+                freeze_amount TEXT,
+                arrears_balance TEXT,
+                currency TEXT,
+                raw_payload TEXT,
+                synced_at INTEGER,
+                updated_at INTEGER
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS volcengine_sync_status (
+                sync_key TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                error_category TEXT,
+                last_error_code TEXT,
+                last_error_message TEXT,
+                last_attempt_at INTEGER,
+                last_success_at INTEGER,
+                last_period TEXT,
+                records_processed INTEGER,
+                running_since INTEGER,
+                metadata TEXT,
+                updated_at INTEGER
+            )
+        ''')
+        for sync_key in ('ark_usage', 'ark_billing', 'ark_balance'):
+            cursor.execute(
+                "INSERT OR IGNORE INTO volcengine_sync_status "
+                "(sync_key, status, updated_at) VALUES (?, 'never_run', ?)",
+                (sync_key, _now()),
+            )
+
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_ai_usage_task '
+            'ON ai_model_usage_records(task_id)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_ai_usage_request '
+            'ON ai_model_usage_records(provider_request_id)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_ai_usage_job '
+            'ON ai_model_usage_records(provider_job_id)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_ai_usage_model_time '
+            'ON ai_model_usage_records(model_id, recorded_at)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_ai_usage_user_time '
+            'ON ai_model_usage_records(user_id, recorded_at)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_vu_period '
+            'ON volcengine_usage_snapshots(period_start_at)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_vu_model '
+            'ON volcengine_usage_snapshots(model_name)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_vu_key '
+            'ON volcengine_usage_snapshots(api_key_id)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_vb_period '
+            'ON volcengine_bill_snapshots(bill_period, record_level)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_vb_product '
+            'ON volcengine_bill_snapshots(product)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_vb_expense '
+            'ON volcengine_bill_snapshots(expense_date)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_vb_official_id '
+            'ON volcengine_bill_snapshots(official_bill_id)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_vbalance_synced '
+            'ON volcengine_balance_snapshots(synced_at)'
+        )
+
         # Incremental migrations for existing databases (never rebuild tables).
         self._ensure_column(cursor, 'auth_users', 'nickname', 'TEXT')
         self._ensure_column(cursor, 'auth_users', 'avatar_path', 'TEXT')
@@ -857,6 +1048,7 @@ class Database(object):
         self._ensure_column(cursor, 'generation_tasks', 'provider', 'TEXT')
         self._ensure_column(cursor, 'generation_tasks', 'model_id', 'TEXT')
         self._ensure_column(cursor, 'generation_tasks', 'provider_job_id', 'TEXT')
+        self._ensure_column(cursor, 'generation_tasks', 'provider_request_id', 'TEXT')
         self._ensure_column(cursor, 'generation_tasks', 'provider_status', 'TEXT')
         self._ensure_column(cursor, 'generation_tasks', 'attempt_count', 'INTEGER DEFAULT 0')
         self._ensure_column(cursor, 'generation_tasks', 'max_attempts', 'INTEGER DEFAULT 3')
@@ -974,6 +1166,7 @@ class Database(object):
             (3, 'timeline_compose_v2b'),
             (4, 'refine_versions_v2c'),
             (5, 'generation_timing_v2d'),
+            (6, 'ai_usage_volcengine_billing_v3a'),
         ):
             cursor.execute(
                 "INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) "
@@ -1063,6 +1256,7 @@ class Database(object):
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_tasks_created_by ON generation_tasks(created_by, created_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_tasks_due ON generation_tasks(status, next_retry_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_tasks_provider_job ON generation_tasks(provider_job_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_tasks_provider_request ON generation_tasks(provider_request_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_tasks_lease ON generation_tasks(lease_expires_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_ops_actor_time ON ops_events(actor_user_id, created_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_ops_event_type_time ON ops_events(event_type, created_at DESC)')

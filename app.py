@@ -38,6 +38,7 @@ from backend.auth_middleware import admin_required, has_permission, is_admin
 from backend.profile_routes import register_profile_routes
 from backend.provider_routes import register_provider_routes
 from backend.admin_routes import register_admin_routes
+from backend.ai_usage_routes import register_ai_usage_routes
 from backend.generation_routes import register_generation_routes
 from backend.web_security import install_security, safe_redirect_target
 from backend.rate_limiter import rate_limit
@@ -954,6 +955,7 @@ def create_app(config_class=Config, overrides=None):
     register_profile_routes(app, cfg, auth_service, web_root, _json_success, _json_error)
     register_provider_routes(app, cfg, web_root, _json_success, _json_error)
     register_admin_routes(app, cfg, auth_service, web_root, _json_success, _json_error)
+    register_ai_usage_routes(app, cfg, _json_success, _json_error)
     _register_asset_routes(app, web_root, cfg)
     _register_prompt_doc_routes(app, cfg)
     register_control_plane_routes(app, cfg, catalog_service, job_store, _json_success, _json_error)

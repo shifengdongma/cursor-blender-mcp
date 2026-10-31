@@ -52,6 +52,8 @@
           <button class="cp-tab-btn" data-tab="rendering" role="tab" aria-selected="false">云渲染</button>
           <button class="cp-tab-btn" data-tab="gpu" role="tab" aria-selected="false">GPU调度</button>
           <button class="cp-tab-btn" data-tab="scheduling" role="tab" aria-selected="false">调度任务编排</button>
+          <button class="cp-tab-btn" data-tab="ai-models" id="cp-ai-tab-btn"
+                  role="tab" aria-selected="false" style="display:none">AI 模型服务</button>
           <button class="cp-tab-btn" data-tab="network" role="tab" aria-selected="false">网络监控</button>
           <button class="cp-tab-btn" data-tab="permissions" role="tab" aria-selected="false">权限安全</button>
           <button class="cp-tab-btn" data-tab="billing" role="tab" aria-selected="false">费用告警</button>
@@ -229,11 +231,62 @@
             <div class="cp-security-cards" id="cp-security-cards"></div>
           </div>
 
+          <!-- AI model service tab (admin-only, revealed by ark-admin.js) -->
+          <div class="cp-panel" id="tab-ai-models" role="tabpanel">
+            <div class="cp-section-header">
+              <h2 class="cp-section-title">AI 模型服务</h2>
+              <div class="cp-section-actions">
+                <select id="ark-usage-days" class="ch-filter-select" aria-label="统计时间范围">
+                  <option value="7">最近 7 天</option>
+                  <option value="30">最近 30 天</option>
+                </select>
+                <button type="button" class="btn-outline btn-sm" id="ark-usage-refresh">刷新</button>
+                <button type="button" class="btn-primary btn-sm" id="ark-usage-sync">同步官方用量</button>
+              </div>
+            </div>
+            <p class="cp-source-note" id="ark-usage-notice">仅平台管理员可见。官方用量来自火山引擎只读快照。</p>
+
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">AIGV 本地真实任务</h3>
+            </div>
+            <div class="cp-metrics-grid" id="ark-local-metrics"></div>
+
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">火山引擎官方用量（账号级）</h3>
+            </div>
+            <div class="cp-cost-grid" id="ark-official-metrics"></div>
+
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">本地模型统计</h3>
+            </div>
+            <div class="cp-table-container" id="ark-local-model-table"></div>
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">官方模型统计</h3>
+            </div>
+            <div class="cp-table-container" id="ark-official-model-table"></div>
+
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">用量趋势</h3>
+            </div>
+            <div class="cp-chart-container" id="ark-trend-chart"></div>
+
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">任务性能</h3>
+            </div>
+            <div class="cp-table-container" id="ark-task-performance"></div>
+
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">最近任务</h3>
+            </div>
+            <div class="cp-table-container" id="ark-task-table"></div>
+          </div>
+
           <!-- Tab 7: Billing & Alerts (6th tab button, 7th panel) -->
           <div class="cp-panel" id="tab-billing" role="tabpanel">
             <div class="cp-section-header">
-              <h2 class="cp-section-title">费用概览</h2>
+              <h2 class="cp-section-title">内部 GPU / 渲染核算</h2>
             </div>
+            <p class="cp-source-note">以下为 AIGV 内部 GPU/渲染核算，不代表火山引擎官方账单。</p>
             <div class="cp-cost-grid" id="cp-cost-grid"></div>
             <div class="cp-section-header cp-section-divider">
               <h3 class="cp-section-subtitle">告警列表</h3>
@@ -269,7 +322,8 @@
     <script src="/web/runtime-config.js"></script>
     <script src="/web/api-client.js"></script>
     <script src="/web/aigv-demo-data.js"></script>
-    <script src="/web/compute-platform.js"></script>
+    <script src="/web/ark-admin.js?v=20261031"></script>
+    <script src="/web/compute-platform.js?v=20261031"></script>
     <script src="/web/session-nav.js"></script>
   </body>
 </html>

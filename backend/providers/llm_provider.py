@@ -41,6 +41,10 @@ class LLMProvider(BaseLLMProvider):
         self.api_key = api_key or ""
         self.base_url = (base_url or "").rstrip("/")
         self.model_name = model_name
+        # Populated after a successful HTTP response so callers can persist the
+        # provider-reported usage without changing generate_structured()'s
+        # structured JSON return contract.
+        self.last_response_metadata = None
 
     def _headers(self):
         return {
@@ -125,6 +129,12 @@ class LLMProvider(BaseLLMProvider):
         }
 
         result = self._call_with_retry(payload)
+        if isinstance(result, dict):
+            self.last_response_metadata = {
+                "id": result.get("id"),
+                "model": result.get("model") or self.model_name,
+                "usage": result.get("usage") if isinstance(result.get("usage"), dict) else {},
+            }
 
         try:
             content = result["choices"][0]["message"]["content"]

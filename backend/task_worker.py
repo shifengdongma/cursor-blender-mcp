@@ -278,7 +278,15 @@ def _execute_storyboard(task, cfg, db):
 
     system_prompt, user_prompt = _build_storyboard_prompt(project)
 
-    result = llm.generate_structured(system_prompt, user_prompt, STORYBOARD_SCHEMA)
+    try:
+        result = llm.generate_structured(system_prompt, user_prompt, STORYBOARD_SCHEMA)
+    finally:
+        # The provider may have consumed tokens even when JSON validation fails.
+        try:
+            from .usage_records import record_llm_usage
+            record_llm_usage(task, llm.model_name, llm.last_response_metadata)
+        except Exception:
+            pass
     shots_data = result.get("shots") or []
 
     task_service.update_task(task.id, progress=60)

@@ -204,7 +204,11 @@ class BillingService(object):
             'SELECT * FROM billing_usage_records ORDER BY created_at DESC LIMIT 20'
         )
         usage = [BillingUsageRecord.from_row(row).to_dict() for row in usage_rows]
-        total_amount = round(sum(float(item.get('amount') or 0.0) for item in usage), 2)
+        aggregate = self.db.fetch_one(
+            'SELECT COUNT(*) AS record_count, COALESCE(SUM(amount), 0) AS total_amount '
+            'FROM billing_usage_records'
+        ) or {}
+        total_amount = round(float(aggregate.get('total_amount') or 0.0), 2)
 
         # Render job stats
         render_count = self.db.count('render_jobs')
@@ -213,8 +217,15 @@ class BillingService(object):
         return {
             'accounts': accounts,
             'recent_usage': usage,
+            # This is the real all-time sum of internal render/GPU records, not
+            # a sum of the display-only "recent 20" list.
             'total_amount': total_amount,
+            'total_amount_scope': 'all_time',
+            'usage_record_count': int(aggregate.get('record_count') or 0),
             'currency': 'CNY',
+            'source': 'internal_estimate',
+            'source_label': '平台内部 GPU/渲染核算（非火山官方账单）',
+            'is_estimated': True,
             'render_stats': {
                 'total_render_jobs': render_count,
                 'active_render_jobs': render_running,

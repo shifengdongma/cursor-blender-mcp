@@ -584,6 +584,23 @@ def _audit(cfg, action, user, task_id, metadata=None, result="success"):
         pass
 
 
+def _record_video_provider_usage(cfg, task, data):
+    """Persist provider-reported video usage; never infer tokens from status."""
+    if getattr(task, "provider", None) != "ark_seedance":
+        return
+    try:
+        from .usage_records import record_video_usage
+        record_video_usage(
+            task, data, provider_job_id=getattr(task, "provider_job_id", None),
+            provider_request_id=getattr(task, "provider_request_id", None), cfg=cfg,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to record video usage for task %s", getattr(task, "id", None),
+            exc_info=True,
+        )
+
+
 def _audit_task_failure(cfg, task, error_code=None, error_message=None):
     """Record a final task failure without exposing prompts or provider bodies."""
     metadata = {
@@ -695,16 +712,37 @@ def submit_task(cfg, task_service, task, lease_owner):
                 reference_image_urls=references,
                 watermark=bool(params.get("watermark")),
             )
+            provider_request_id = result.get("request_id")
+            task.provider_request_id = provider_request_id
             task_service.update_task(
                 task.id,
+                provider_request_id=provider_request_id,
                 provider_request_finished_at=_now_ms(),
                 provider_job_created_at=_now_ms(),
                 download_started_at=_now_ms(),
             )
+            # Record provider-reported usage even if our download/persist step
+            # later fails: the provider already performed (and may bill) it.
+            try:
+                from .usage_records import record_image_usage
+                record_image_usage(
+                    task, [], result, cfg,
+                    provider_request_id=provider_request_id,
+                )
+            except Exception:
+                logger.warning("Failed to record image usage for task %s", task.id, exc_info=True)
             files = _download_image_items(cfg, result.get("images"), _task_dir(cfg, task))
             task_service.update_task(task.id, download_finished_at=_now_ms())
             if not files:
                 raise MediaFetchError("Provider 没有返回图片", "empty_output")
+            try:
+                from .usage_records import record_image_usage
+                record_image_usage(
+                    task, files, result, cfg,
+                    provider_request_id=provider_request_id,
+                )
+            except Exception:
+                logger.warning("Failed to finalize image usage for task %s", task.id, exc_info=True)
             finalize_task(cfg, task_service, task, lease_owner, files, "image")
             return
 
@@ -759,14 +797,28 @@ def submit_task(cfg, task_service, task, lease_owner):
 
         if not provider_job_id:
             raise MediaFetchError("Provider 未返回任务 ID", "provider_invalid_response")
+        provider_request_id = None
+        if isinstance(created, dict):
+            provider_request_id = created.get("_request_id") or created.get("request_id")
+        task.provider_request_id = provider_request_id
         task_service.release_generation_lease(
             task.id, lease_owner, status="running", stage="provider_running",
             provider_job_id=str(provider_job_id), provider_status="queued",
+            provider_request_id=provider_request_id,
             submission_uncertain=0, next_retry_at=_now() + cfg.GENERATION_POLL_INTERVAL_S,
             last_polled_at=_now(), error_code=None, error_message=None,
             provider_request_finished_at=_now_ms(),
             provider_job_created_at=_now_ms(),
         )
+        if task.provider == "ark_seedance":
+            try:
+                from .usage_records import record_video_submission
+                record_video_submission(
+                    task, created, provider_job_id=str(provider_job_id),
+                    provider_request_id=provider_request_id, cfg=cfg,
+                )
+            except Exception:
+                logger.warning("Failed to record video submission usage for task %s", task.id, exc_info=True)
     except ApiError:
         raise
     except Exception as exc:
@@ -877,6 +929,7 @@ def poll_task(cfg, task_service, task, lease_owner):
                 video_url = provider.extract_video_url(data)
             if not video_url:
                 raise MediaFetchError("Provider 成功响应缺少视频地址", "provider_invalid_response")
+            _record_video_provider_usage(cfg, task, data)
             task_service.update_task(
                 task.id,
                 provider_finished_at=_now_ms(),
@@ -888,6 +941,7 @@ def poll_task(cfg, task_service, task, lease_owner):
             return
 
         if status in ("failed", "error", "expired", "cancelled", "canceled"):
+            _record_video_provider_usage(cfg, task, data)
             if status in ("cancelled", "canceled"):
                 task_service.release_generation_lease(
                     task.id, lease_owner, status="cancelled", stage="cancelled",

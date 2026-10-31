@@ -255,6 +255,10 @@
 
   // ── Tab Switching ──
   function switchTab(tabId) {
+    if (tabId === 'ai-models' && window.AIGVArk && !window.AIGVArk.isAdmin()) {
+      showToast('仅平台管理员可查看 AI 模型服务', 'warning');
+      tabId = 'overview';
+    }
     state.activeTab = tabId;
 
     // Update tab buttons
@@ -316,6 +320,9 @@
       case 'rendering': renderRendering(); break;
       case 'gpu': renderGPU(); break;
       case 'scheduling': renderScheduling(); break;
+      case 'ai-models':
+        if (window.AIGVArk) window.AIGVArk.activate();
+        break;
       case 'network': renderNetwork(); break;
       case 'permissions': renderPermissions(); break;
       case 'billing': renderBilling(); break;
@@ -3278,11 +3285,11 @@
     }
 
     var html =
-      '<div class="cp-cost-card"><div class="cp-cost-label">累计费用</div><div class="cp-cost-value">' + ((typeof total === 'number') ? total.toFixed(2) : total) + '<span class="cp-cost-unit"> 元</span></div></div>' +
-      '<div class="cp-cost-card"><div class="cp-cost-label">活跃渲染任务</div><div class="cp-cost-value">' + (b.render_stats ? b.render_stats.active_render_jobs || 0 : 0) + '<span class="cp-cost-unit"> 个</span></div></div>' +
-      '<div class="cp-cost-card"><div class="cp-cost-label">总渲染任务</div><div class="cp-cost-value">' + (b.render_stats ? b.render_stats.total_render_jobs || 0 : 0) + '<span class="cp-cost-unit"> 个</span></div></div>' +
-      '<div class="cp-cost-card"><div class="cp-cost-label">账户余额</div>' +
-      '<div class="cp-cost-breakdown">' + accountBalances + '</div></div>';
+      '<div class="cp-cost-card"><div class="cp-cost-label">内部核算累计（全部历史）</div><div class="cp-cost-value">' + ((typeof total === 'number') ? total.toFixed(2) : total) + '<span class="cp-cost-unit"> 元</span></div><div class="cp-cost-hint">AIGV 内部 GPU/渲染估算，非火山官方账单</div></div>' +
+      '<div class="cp-cost-card"><div class="cp-cost-label">活跃渲染任务</div><div class="cp-cost-value">' + (b.render_stats ? b.render_stats.active_render_jobs || 0 : 0) + '<span class="cp-cost-unit"> 个</span></div><div class="cp-cost-hint">平台内部渲染队列</div></div>' +
+      '<div class="cp-cost-card"><div class="cp-cost-label">总渲染任务</div><div class="cp-cost-value">' + (b.render_stats ? b.render_stats.total_render_jobs || 0 : 0) + '<span class="cp-cost-unit"> 个</span></div><div class="cp-cost-hint">平台内部渲染记录</div></div>' +
+      '<div class="cp-cost-card"><div class="cp-cost-label">内部核算余额（非火山账户）</div>' +
+      '<div class="cp-cost-breakdown">' + accountBalances + '</div><div class="cp-cost-hint">不代表火山引擎资金账户余额</div></div>';
 
     grid.innerHTML = html;
   }
@@ -3506,6 +3513,7 @@
 
     // Fetch real data from APIs
     loadRealData();
+    if (window.AIGVArk) window.AIGVArk.init();
 
     // Update status bar
     updateStatusBar();

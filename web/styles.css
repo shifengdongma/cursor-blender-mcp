@@ -7127,6 +7127,105 @@ a:focus-visible,
   color: var(--accent-cyan);
 }
 
+.cp-cost-hint,
+.cp-metric-hint {
+  margin-top: 6px;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.cp-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cp-source-note {
+  margin: 0 0 var(--space-lg);
+  padding: 10px 14px;
+  border: 1px solid rgba(120, 191, 210, 0.16);
+  border-radius: var(--radius-xs);
+  background: rgba(120, 191, 210, 0.045);
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.cp-source-note.warning {
+  border-color: rgba(215, 168, 79, 0.28);
+  background: rgba(215, 168, 79, 0.06);
+  color: var(--text-secondary);
+}
+
+.cp-source-note.error {
+  border-color: rgba(214, 127, 133, 0.32);
+  background: rgba(214, 127, 133, 0.06);
+  color: var(--accent-red);
+}
+
+.cp-source-note.success {
+  border-color: rgba(116, 199, 152, 0.28);
+  background: rgba(116, 199, 152, 0.05);
+  color: var(--accent-green);
+}
+
+.cp-source-note.loading {
+  border-style: dashed;
+  color: var(--text-tertiary, var(--text-soft));
+}
+
+.ark-trend-svg {
+  width: 100%;
+  height: auto;
+  min-height: 220px;
+}
+
+.ark-grid-line {
+  stroke: rgba(255, 240, 214, 0.08);
+  stroke-width: 1;
+}
+
+.ark-axis-text {
+  fill: var(--text-soft);
+  font-size: 10px;
+}
+
+.ark-bar-local {
+  fill: rgba(215, 168, 79, 0.78);
+}
+
+.ark-bar-official {
+  fill: rgba(120, 191, 210, 0.78);
+}
+
+.ark-legend {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 8px 2px 0;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.ark-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ark-legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.ark-legend-swatch.local { background: rgba(215, 168, 79, 0.78); }
+.ark-legend-swatch.official { background: rgba(120, 191, 210, 0.78); }
+
 /* ========================================
    Compute Platform - Detail Drawer Content
    ======================================== */

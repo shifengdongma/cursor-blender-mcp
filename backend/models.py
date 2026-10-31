@@ -1657,7 +1657,7 @@ class GenerationTask(BaseModel):
         'error_message', 'target_shot_id', 'target_asset_id',
         'claimed_at', 'completed_at', 'created_at', 'updated_at',
         'created_by', 'provider', 'model_id', 'provider_job_id',
-        'provider_status', 'attempt_count', 'max_attempts',
+        'provider_request_id', 'provider_status', 'attempt_count', 'max_attempts',
         'next_retry_at', 'lease_expires_at', 'lease_owner',
         'submission_uncertain', 'submission_started_at',
         'poll_error_count', 'last_polled_at', 'output_asset_id',
@@ -1692,6 +1692,7 @@ class GenerationTask(BaseModel):
         self.provider = kwargs.get('provider')
         self.model_id = kwargs.get('model_id')
         self.provider_job_id = kwargs.get('provider_job_id')
+        self.provider_request_id = kwargs.get('provider_request_id')
         self.provider_status = kwargs.get('provider_status')
         self.attempt_count = kwargs.get('attempt_count', 0)
         self.max_attempts = kwargs.get('max_attempts', 3)
@@ -1747,6 +1748,7 @@ class GenerationTask(BaseModel):
             provider=row.get('provider'),
             model_id=row.get('model_id'),
             provider_job_id=row.get('provider_job_id'),
+            provider_request_id=row.get('provider_request_id'),
             provider_status=row.get('provider_status'),
             attempt_count=row.get('attempt_count'),
             max_attempts=row.get('max_attempts'),
@@ -1800,6 +1802,7 @@ class GenerationTask(BaseModel):
             'provider': self.provider,
             'model_id': self.model_id,
             'provider_job_id': self.provider_job_id,
+            'provider_request_id': self.provider_request_id,
             'provider_status': self.provider_status,
             'attempt_count': self.attempt_count,
             'max_attempts': self.max_attempts,
@@ -1852,6 +1855,7 @@ class GenerationTask(BaseModel):
             'provider': self.provider,
             'model_id': self.model_id,
             'provider_job_id': self.provider_job_id,
+            'provider_request_id': self.provider_request_id,
             'provider_status': self.provider_status,
             'attempt_count': self.attempt_count,
             'max_attempts': self.max_attempts,

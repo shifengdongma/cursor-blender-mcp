@@ -86,6 +86,12 @@ def test_ai_usage_validation_and_disabled_sync(app, tmp_path):
     assert admin_client.get(
         '/api/admin/ark/usage/summary?days=7&start_date=bad'
     ).status_code == 200  # start_date is only used by sync, not the summary
+    assert admin_client.get(
+        '/api/admin/ark/usage/trend?days=7&model=doubao-seedream'
+    ).status_code == 200
+    assert admin_client.get(
+        '/api/admin/ark/usage/trend?days=7&start_date=bad'
+    ).status_code == 400
 
     response = admin_client.post(
         '/api/admin/ark/usage/sync', json={'days': 7}, headers=headers

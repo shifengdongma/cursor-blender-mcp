@@ -11,6 +11,9 @@
     bound: false,
     loading: false,
     days: 7,
+    usageModel: '',
+    usageStart: '',
+    usageEnd: '',
     data: null,
     message: '',
     messageKind: '',
@@ -177,6 +180,31 @@
     if (days) {
       days.addEventListener('change', function () {
         state.days = parseInt(days.value, 10) || 7;
+        state.usageStart = '';
+        state.usageEnd = '';
+        if ($('ark-usage-start')) $('ark-usage-start').value = '';
+        if ($('ark-usage-end')) $('ark-usage-end').value = '';
+        load(true);
+      });
+    }
+    var modelFilter = $('ark-usage-model');
+    if (modelFilter) {
+      modelFilter.addEventListener('change', function () {
+        state.usageModel = modelFilter.value;
+        load(true);
+      });
+    }
+    var startInput = $('ark-usage-start');
+    if (startInput) {
+      startInput.addEventListener('change', function () {
+        state.usageStart = startInput.value;
+        load(true);
+      });
+    }
+    var endInput = $('ark-usage-end');
+    if (endInput) {
+      endInput.addEventListener('change', function () {
+        state.usageEnd = endInput.value;
         load(true);
       });
     }
@@ -218,17 +246,23 @@
     if (refresh) refresh.disabled = true;
     setNotice('正在读取本地任务与官方用量快照…', 'loading');
     var days = state.days;
+    var trendQuery = '?days=' + days;
+    if (state.usageModel) trendQuery += '&model=' + encodeURIComponent(state.usageModel);
+    if (state.usageStart) trendQuery += '&start_date=' + encodeURIComponent(state.usageStart);
+    if (state.usageEnd) trendQuery += '&end_date=' + encodeURIComponent(state.usageEnd);
     return Promise.all([
       global.AIGV.api('/api/admin/ark/usage/summary?days=' + days),
       global.AIGV.api('/api/admin/ark/usage/models?days=' + days),
-      global.AIGV.api('/api/admin/ark/usage/trend?days=' + days),
+      global.AIGV.api('/api/admin/ark/usage/trend' + trendQuery),
       global.AIGV.api('/api/admin/ark/usage/tasks?days=' + days + '&limit=20'),
-      global.AIGV.api('/api/admin/ark/status')
+      global.AIGV.api('/api/admin/ark/status'),
+      global.AIGV.api('/api/admin/ai-usage/users?days=' + days)
     ]).then(function (results) {
       state.data = {
         summary: results[0], models: results[1], trend: results[2],
-        tasks: results[3], status: results[4]
+        tasks: results[3], status: results[4], users: results[5]
       };
+      populateUsageModelOptions(state.data.models || {});
       render();
     }).catch(function (error) {
       setNotice('AI 模型服务数据加载失败：' + (error.message || '未知错误'), 'error');
@@ -266,16 +300,78 @@
 
     renderLocalMetrics(local, status);
     renderOfficialMetrics(official, sync, status);
+    renderUserUsage(data.users || {});
     renderModels(data.models || {});
     renderTrend(data.trend || {});
     renderPerformance(local);
     renderTasks((data.tasks && data.tasks.items) || []);
   }
 
+  function populateUsageModelOptions(models) {
+    var select = $('ark-usage-model');
+    if (!select) return;
+    var values = [];
+    ((models.local && models.local.items) || []).forEach(function (item) {
+      if (item.model_id && values.indexOf(item.model_id) < 0) values.push(item.model_id);
+    });
+    ((models.official && models.official.items) || []).forEach(function (item) {
+      if (item.model_name && values.indexOf(item.model_name) < 0) values.push(item.model_name);
+    });
+    values.sort();
+    var current = state.usageModel;
+    select.textContent = '';
+    var all = document.createElement('option');
+    all.value = '';
+    all.textContent = '全部模型';
+    select.appendChild(all);
+    values.forEach(function (value) {
+      var option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    });
+    if (current && values.indexOf(current) >= 0) {
+      select.value = current;
+    } else if (current) {
+      state.usageModel = '';
+      select.value = '';
+    }
+  }
+
+  function renderUserUsage(users) {
+    var container = $('ark-user-table');
+    if (!container) return;
+    var items = users.items || [];
+    if (!items.length) {
+      container.innerHTML = '<p class="empty-state">暂无本地用户模型用量记录。</p>';
+      return;
+    }
+    var html = '<table class="cp-table"><thead><tr>' +
+      '<th>用户</th><th>图片任务</th><th>视频任务</th><th>LLM 请求</th>' +
+      '<th>成功率</th><th>输入 Token</th><th>输出 Token</th><th>总 Token</th><th>图片数</th>' +
+      '</tr></thead><tbody>';
+    items.forEach(function (item) {
+      html += '<tr>' +
+        '<td>' + esc(item.display || '—') + '</td>' +
+        '<td>' + num(item.images) + '</td>' +
+        '<td>' + num(item.videos) + '</td>' +
+        '<td>' + num(item.llm_requests) + '</td>' +
+        '<td>' + (item.success_rate === null || item.success_rate === undefined ? '—' : item.success_rate + '%') + '</td>' +
+        '<td>' + num(item.input_tokens) + '</td>' +
+        '<td>' + num(item.output_tokens) + '</td>' +
+        '<td>' + num(item.total_tokens) + '</td>' +
+        '<td>' + num(item.image_count) + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
   function renderLocalMetrics(local, status) {
     var container = $('ark-local-metrics');
     if (!container) return;
     var html = '';
+    html += card('已配置模型数', num(local.configured_model_count), '平台模型注册表');
     html += card('模型调用次数', num(local.model_calls), '图片 + 视频 + 创意分析');
     html += card('图片生成任务', num(local.images), 'AIGV 本地任务');
     html += card('视频生成任务', num(local.videos), 'AIGV 本地任务');

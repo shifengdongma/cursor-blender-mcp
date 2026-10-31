@@ -75,8 +75,12 @@ def test_compute_platform_ai_model_tab_contract():
     assert "cp-ai-tab-btn" in html
     assert 'id="tab-ai-models"' in html
     assert "ark-usage-days" in html
+    assert "ark-usage-model" in html
+    assert "ark-usage-start" in html
+    assert "ark-usage-end" in html
     assert "ark-local-metrics" in html
     assert "ark-official-model-table" in html
+    assert "ark-user-table" in html
     assert "/api/admin/ark/usage/summary" in js
     assert "/api/admin/ark/usage/sync" in js
     assert "/api/admin/ark/status" in js

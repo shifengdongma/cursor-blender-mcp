@@ -49,6 +49,34 @@ def _date_range(days):
     return start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
 
 
+def _parse_date_arg(value, field):
+    try:
+        return datetime.strptime(str(value), '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        raise VolcengineAPIError(
+            'invalid_param', '{0} 格式应为 YYYY-MM-DD'.format(field)
+        )
+
+
+def _range_bounds(days, start_date=None, end_date=None):
+    """Return (since_epoch, until_epoch, start_label, end_label)."""
+    today = _beijing_today()
+    if start_date or end_date:
+        start = _parse_date_arg(start_date, 'start_date') if start_date else (
+            today - timedelta(days=max(1, int(days or 1)) - 1)
+        )
+        end = _parse_date_arg(end_date, 'end_date') if end_date else today
+        if start > end:
+            raise VolcengineAPIError('invalid_param', 'start_date 不能晚于 end_date')
+    else:
+        end = today
+        start = end - timedelta(days=max(1, int(days or 1)) - 1)
+    return (
+        _day_start(start), _day_start(end) + 86400,
+        start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'),
+    )
+
+
 def _as_int(value):
     if value is None or value == '':
         return None
@@ -474,8 +502,15 @@ class VolcengineUsageService(object):
             'items': [dict(row) for row in rows],
         }
 
-    def official_trend(self, days=30):
-        since, start_label = self._official_where(days)
+    def official_trend(self, days=30, start_date=None, end_date=None, model=None):
+        since, until, start_label, end_label = _range_bounds(
+            days, start_date=start_date, end_date=end_date
+        )
+        conditions = ['period_start_at >= ?', 'period_start_at < ?', 'period_label IS NOT NULL']
+        params = [since, until]
+        if model:
+            conditions.append('model_name = ?')
+            params.append(model)
         rows = self.db.fetch_all(
             "SELECT period_label, "
             "COALESCE(SUM(req_cnt),0) AS req_cnt, "
@@ -483,10 +518,11 @@ class VolcengineUsageService(object):
             "COALESCE(SUM(output_tokens),0) AS output_tokens, "
             "COALESCE(SUM(total_tokens),0) AS total_tokens, "
             "COALESCE(SUM(image_count),0) AS image_count "
-            "FROM volcengine_usage_snapshots WHERE period_start_at >= ? "
-            "AND period_label IS NOT NULL "
-            "GROUP BY period_label ORDER BY period_label ASC",
-            (since,),
+            "FROM volcengine_usage_snapshots WHERE {0} "
+            "GROUP BY period_label ORDER BY period_label ASC".format(
+                ' AND '.join(conditions)
+            ),
+            tuple(params),
         )
         last = get_sync_status(self.db, USAGE_SYNC_KEY) or {}
         return {
@@ -494,7 +530,7 @@ class VolcengineUsageService(object):
             'source_label': '火山引擎官方用量（账号级）',
             'is_estimated': False,
             'last_synced_at': last.get('last_success_at'),
-            'billing_period': start_label,
+            'billing_period': start_label + '..' + end_label,
             'currency': None,
             'has_data': bool(rows),
             'items': [dict(row) for row in rows],
@@ -554,6 +590,13 @@ class VolcengineUsageService(object):
         for row in usage_models:
             if row.get('model_id'):
                 models.add(row.get('model_id'))
+        try:
+            from .. import generation_models
+            configured_model_count = len(generation_models.list_models(
+                self.cfg, include_unavailable=True, user=None
+            ))
+        except Exception:
+            configured_model_count = None
         return {
             'source': LOCAL_SOURCE,
             'source_label': 'AIGV 本地真实任务记录',
@@ -572,6 +615,7 @@ class VolcengineUsageService(object):
             'failed': failed,
             'success_rate': round((succeeded / terminal) * 100, 1) if terminal else None,
             'model_count': len(models),
+            'configured_model_count': configured_model_count,
             'avg_duration_ms': performance.get('total_ms'),
             'avg_queue_ms': performance.get('queue_wait_ms'),
             'avg_provider_ms': performance.get('provider_elapsed_ms'),
@@ -709,24 +753,36 @@ class VolcengineUsageService(object):
             'items': items,
         }
 
-    def local_trend(self, days=30):
-        since, start_label = self._local_since(days)
-        rows = self.task_trend_rows(since)
+    def local_trend(self, days=30, start_date=None, end_date=None, model=None):
+        since, until, start_label, end_label = _range_bounds(
+            days, start_date=start_date, end_date=end_date
+        )
+        rows = self.task_trend_rows(since, until=until, model=model)
         return {
             'source': LOCAL_SOURCE,
             'source_label': 'AIGV 本地真实任务记录',
             'is_estimated': False,
             'last_synced_at': None,
-            'billing_period': start_label,
+            'billing_period': start_label + '..' + end_label,
             'currency': None,
             'has_data': bool(rows),
             'items': rows,
         }
 
-    def task_trend_rows(self, since):
+    def task_trend_rows(self, since, until=None, model=None):
+        conditions = ['created_at >= ?']
+        params = [since]
+        if until is not None:
+            conditions.append('created_at < ?')
+            params.append(until)
+        if model:
+            conditions.append('model_id = ?')
+            params.append(model)
         rows = self.db.fetch_all(
-            "SELECT created_at, task_type, status FROM generation_tasks WHERE created_at >= ?",
-            (since,),
+            "SELECT created_at, task_type, status FROM generation_tasks WHERE {0}".format(
+                ' AND '.join(conditions)
+            ),
+            tuple(params),
         )
         buckets = {}
         for row in rows:

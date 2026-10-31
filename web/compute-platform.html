@@ -240,6 +240,11 @@
                   <option value="7">最近 7 天</option>
                   <option value="30">最近 30 天</option>
                 </select>
+                <select id="ark-usage-model" class="ch-filter-select" aria-label="模型筛选">
+                  <option value="">全部模型</option>
+                </select>
+                <input id="ark-usage-start" class="ch-filter-select" type="date" aria-label="开始日期" />
+                <input id="ark-usage-end" class="ch-filter-select" type="date" aria-label="结束日期" />
                 <button type="button" class="btn-outline btn-sm" id="ark-usage-refresh">刷新</button>
                 <button type="button" class="btn-primary btn-sm" id="ark-usage-sync">同步官方用量</button>
               </div>
@@ -255,6 +260,11 @@
               <h3 class="cp-section-subtitle">火山引擎官方用量（账号级）</h3>
             </div>
             <div class="cp-cost-grid" id="ark-official-metrics"></div>
+
+            <div class="cp-section-header cp-section-divider">
+              <h3 class="cp-section-subtitle">用户用量（AIGV 本地）</h3>
+            </div>
+            <div class="cp-table-container" id="ark-user-table"></div>
 
             <div class="cp-section-header cp-section-divider">
               <h3 class="cp-section-subtitle">本地模型统计</h3>

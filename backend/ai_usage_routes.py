@@ -133,11 +133,21 @@ def register_ai_usage_routes(app, cfg, json_success, json_error):
     @rate_limit(120, 60, key_func=_admin_rate_key)
     def admin_ark_usage_trend():
         days = _days()
+        start_date = _date_arg('start_date')
+        end_date = _date_arg('end_date')
+        model = (request.args.get('model') or '').strip() or None
         service = get_usage_service(cfg)
         return json_success({
             'days': days,
-            'local': service.local_trend(days=days),
-            'official': service.official_trend(days=days),
+            'start_date': start_date,
+            'end_date': end_date,
+            'model': model,
+            'local': service.local_trend(
+                days=days, start_date=start_date, end_date=end_date, model=model
+            ),
+            'official': service.official_trend(
+                days=days, start_date=start_date, end_date=end_date, model=model
+            ),
         })
 
     @app.route('/api/admin/ark/usage/tasks', methods=['GET'])

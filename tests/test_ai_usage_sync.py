@@ -117,6 +117,10 @@ def test_sync_upserts_snapshots_and_is_idempotent(test_db):
     assert status['status'] == 'success'
     assert status['last_success_at']
     last_success = status['last_success_at']
+    trend = service.official_trend(days=1, start_date='2026-10-31', end_date='2026-10-31',
+                                   model='doubao-seedream')
+    assert trend['has_data'] is True
+    assert trend['items'][0]['total_tokens'] == 33
 
     client.rows = [_usage_row(input_tokens=100, output_tokens=200, total_tokens=300,
                               req_cnt=5, image_count=2)]
@@ -242,9 +246,11 @@ def test_local_summary_users_tasks_and_performance(test_db):
     assert summary['llm_tasks'] == 1
     assert summary['succeeded'] == 3
     assert summary['source'] == 'aigv_local'
+    assert 'configured_model_count' in summary
     users = service.local_users(days=1)
     assert users['items'][0]['display'] == '爱丽丝（alice）'
     assert users['items'][0]['total_tokens'] == 30
+    assert users['items'][0]['llm_requests'] == 1
     tasks = service.local_tasks(days=1, limit=10, offset=0)
     assert tasks['total'] == 4
     image_task = [item for item in tasks['items'] if item['id'] == 'task-local-0'][0]
@@ -252,6 +258,9 @@ def test_local_summary_users_tasks_and_performance(test_db):
     assert image_task['usage']['total_tokens'] == 30
     models = service.local_models(days=1)
     assert models['items'][0]['model_id'] == 'model-image'
+    filtered = service.local_trend(days=1, model='model-image')
+    assert filtered['has_data'] is True
+    assert filtered['items'][0]['tasks'] == 1
 
 
 def test_billing_summary_uses_all_records_not_only_recent_20(test_db):

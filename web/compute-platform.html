@@ -283,7 +283,41 @@
 
           <!-- Tab 7: Billing & Alerts (6th tab button, 7th panel) -->
           <div class="cp-panel" id="tab-billing" role="tabpanel">
-            <div class="cp-section-header">
+            <div id="ark-billing-section" style="display:none">
+              <div class="cp-section-header">
+                <h2 class="cp-section-title">火山引擎官方账单</h2>
+                <div class="cp-section-actions">
+                  <input id="ark-billing-period" class="ch-filter-select" type="month"
+                         aria-label="官方账单账期" />
+                  <button type="button" class="btn-outline btn-sm" id="ark-billing-refresh">刷新</button>
+                  <button type="button" class="btn-primary btn-sm" id="ark-billing-sync">同步官方账单</button>
+                </div>
+              </div>
+              <p class="cp-source-note" id="ark-billing-notice">官方账单仅管理员可见。</p>
+              <div class="cp-cost-grid" id="ark-billing-cards"></div>
+
+              <div class="cp-section-header cp-section-divider">
+                <h3 class="cp-section-subtitle">官方按模型/配置费用</h3>
+              </div>
+              <div class="cp-table-container" id="ark-billing-model-table"></div>
+
+              <div class="cp-section-header cp-section-divider">
+                <h3 class="cp-section-subtitle">官方按日费用（ExpenseDate）</h3>
+              </div>
+              <div class="cp-table-container" id="ark-billing-trend"></div>
+
+              <div class="cp-section-header cp-section-divider">
+                <h3 class="cp-section-subtitle">用户用量与官方分账</h3>
+              </div>
+              <div class="cp-table-container" id="ark-billing-attribution"></div>
+
+              <div class="cp-section-header cp-section-divider">
+                <h3 class="cp-section-subtitle">官方账单与本地记录对账</h3>
+              </div>
+              <div class="cp-table-container" id="ark-billing-reconciliation"></div>
+            </div>
+
+            <div class="cp-section-header cp-section-divider">
               <h2 class="cp-section-title">内部 GPU / 渲染核算</h2>
             </div>
             <p class="cp-source-note">以下为 AIGV 内部 GPU/渲染核算，不代表火山引擎官方账单。</p>

@@ -113,3 +113,84 @@ python3 scripts/backup_data.py --data-dir ./data --output ./backups --include-as
 3. 先重启 worker，再重启 web；观察 `needs_review` 与失败任务。
 
 不要在没有实际执行环境的情况下宣称已完成线上部署。
+
+## 7. 火山方舟官方用量/账单同步（2026-10-31）
+
+线上实际 service 名为 `aigv-studio.service`（工作目录 `/sdc/恒联项目/cursor-blender-mcp-master`，root 运行）。新增的官方用量/账单同步由独立 `aigv-ark-sync.service` 执行，不在 Web 请求中同步。
+
+### 7.1 配置
+
+在 `.env` 中配置独立的管理凭据（不要使用 `ARK_API_KEY`）：
+
+```env
+VOLCENGINE_USAGE_ENABLED=true
+VOLCENGINE_BILLING_ENABLED=true
+VOLCENGINE_ACCESS_KEY_ID=
+VOLCENGINE_SECRET_ACCESS_KEY=
+VOLCENGINE_ARK_REGION=cn-beijing
+VOLCENGINE_BILLING_REGION=cn-north-1
+VOLCENGINE_ARK_PROJECT=default
+VOLCENGINE_USAGE_SYNC_ENABLED=true
+VOLCENGINE_BILLING_SYNC_ENABLED=true
+VOLCENGINE_ARK_BILL_PRODUCT_FILTER=ark_bd,Doubao-Seedream
+# 当前账号未开通分账账单，保持为空
+VOLCENGINE_ARK_BILL_SPLIT_DIMENSION=
+```
+
+- 建议使用最小权限 IAM 子用户，只授予 Ark 用量与费用中心只读接口；不要授予资源变更/充值/退订权限。
+- `.env` 必须 `chmod 600`；`docs/用户信息.csv` 不得提交。
+- 只配置一半 AK/SK 时启动仅告警，不影响图片/视频/LLM 生成。
+
+### 7.2 备份、迁移与验证
+
+```bash
+# 先备份（SQLite backup API；不含 .env）
+.venv/bin/python scripts/backup_data.py --data-dir ./data --output ./backups
+
+# 单次只读验证/补数
+.venv/bin/python scripts/run_ark_sync.py --once --usage-only
+.venv/bin/python scripts/run_ark_sync.py --once --billing-only --bill-period 2026-10
+
+# 检查同步状态
+.venv/bin/python - <<'PY'
+from backend.database import get_database
+from backend.volcengine.store import get_all_sync_statuses
+for row in get_all_sync_statuses(get_database('./data/aigv.db')):
+    print(row['sync_key'], row['status'], row['last_success_at'], row['records_processed'])
+PY
+```
+
+### 7.3 定时 worker
+
+```bash
+sudo cp deploy/aigv-ark-sync.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now aigv-ark-sync.service
+sudo systemctl status aigv-ark-sync.service --no-pager
+```
+
+用量默认每 30 分钟、账单默认每日；由 `VOLCENGINE_USAGE_SYNC_ENABLED`/`VOLCENGINE_BILLING_SYNC_ENABLED` 控制。worker 与 Web 共用 SQLite，每次同步通过 `volcengine_sync_status` 跨进程锁避免并发。
+
+### 7.4 Web 部署
+
+先确认没有排队/运行中的生成任务，再优雅重载；不健康时完整重启：
+
+```bash
+.venv/bin/python - <<'PY'
+import sqlite3
+print(sqlite3.connect('data/aigv.db').execute(
+    "SELECT status, COUNT(*) FROM generation_tasks WHERE status IN ('queued','submitting','running') GROUP BY status"
+).fetchall())
+PY
+kill -HUP "$(systemctl show -p MainPID --value aigv-studio.service)"
+sleep 3
+systemctl is-active aigv-studio.service
+curl -fsS http://127.0.0.1:8000/api/health
+```
+
+### 7.5 回滚
+
+1. 停 `aigv-studio.service` 与 `aigv-ark-sync.service`。
+2. 恢复阶段前备份的 `data/aigv.db`（清理 `-wal`/`-shm`）。
+3. 回退代码，关闭 `VOLCENGINE_USAGE_ENABLED`/`VOLCENGINE_BILLING_ENABLED`/`*_SYNC_ENABLED`。
+4. 重启并健康检查。新增表/列增量兼容，旧代码可忽略。

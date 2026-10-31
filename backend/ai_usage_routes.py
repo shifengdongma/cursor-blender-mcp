@@ -46,7 +46,7 @@ def _date_arg(name):
     return value
 
 
-def _upstream_error(exc, json_error):
+def _upstream_error(exc, json_error, scope='usage'):
     category = getattr(exc, 'category', 'sync_error')
     details = {
         'category': category,
@@ -55,7 +55,7 @@ def _upstream_error(exc, json_error):
     }
     if category in ('unconfigured', 'disabled'):
         return json_error(
-            'official_usage_{0}'.format(category),
+            'official_{0}_{1}'.format(scope, category),
             str(exc),
             status_code=400,
             details=details,

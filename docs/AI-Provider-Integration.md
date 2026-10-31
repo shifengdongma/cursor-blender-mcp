@@ -231,3 +231,19 @@ python3 -m pytest tests/test_comfyui_provider.py -q
 - 第三方状态若出现未知值，按轮询错误退避处理，不会猜测成功。
 - 当前部署仍为 HTTP，未强制 HTTPS；API Key 传输存在明文风险，页面与启动日志会有提示。
 - 单机 SQLite + 本地文件存储；扩展到多机时需将任务队列与素材迁移到 PostgreSQL/对象存储。
+
+## 10. 火山方舟推理 API 与管理 API 的区分
+
+`ARK_API_KEY` / `ARK_BASE_URL`（`https://ark.cn-beijing.volces.com/api/v3`）只用于 Seedream/Seedance 推理。它们**不能**用于查询账号级用量或费用账单。
+
+官方用量/账单使用独立的管理凭据和 OpenAPI 域名：
+
+| 用途 | 域名 | 凭据 | 文档 |
+|---|---|---|---|
+| Ark 推理 | `ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` 或用户个人 Key | 本文 1-9 节 |
+| Ark 用量 | `ark.cn-beijing.volcengineapi.com` | `VOLCENGINE_ACCESS_KEY_ID/SECRET_ACCESS_KEY` | `docs/Volcengine-Usage-Billing-Integration.md` |
+| 费用中心账单/余额 | `billing.volcengineapi.com` | 同一管理 AK/SK（最小权限 IAM） | `docs/Volcengine-Billing-Reconciliation.md` |
+
+管理凭据只存在于服务器 `.env`，不会返回前端或写入数据库/审计/日志。未配置管理凭据时，图片、视频、LLM 生成不受影响；AI 模型服务/官方账单页面显示未配置状态。
+
+API Key 资源 ID（`ApiKeyID`）不是 API Key 密钥内容；官方用量响应中的 `APIKeyID` 可用于分账关联，但当前账号尚未开通分账账单能力。

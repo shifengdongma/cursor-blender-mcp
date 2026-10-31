@@ -933,6 +933,10 @@ class Database(object):
                 settlement_amount TEXT,
                 resource_id TEXT,
                 instance_no TEXT,
+                split_item_id TEXT,
+                split_item_name TEXT,
+                split_item_ratio TEXT,
+                api_key_resource_id TEXT,
                 raw_payload TEXT,
                 synced_at INTEGER,
                 updated_at INTEGER
@@ -1025,6 +1029,14 @@ class Database(object):
         cursor.execute(
             'CREATE INDEX IF NOT EXISTS idx_vb_official_id '
             'ON volcengine_bill_snapshots(official_bill_id)'
+        )
+        self._ensure_column(cursor, 'volcengine_bill_snapshots', 'split_item_id', 'TEXT')
+        self._ensure_column(cursor, 'volcengine_bill_snapshots', 'split_item_name', 'TEXT')
+        self._ensure_column(cursor, 'volcengine_bill_snapshots', 'split_item_ratio', 'TEXT')
+        self._ensure_column(cursor, 'volcengine_bill_snapshots', 'api_key_resource_id', 'TEXT')
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_vb_api_key '
+            'ON volcengine_bill_snapshots(api_key_resource_id)'
         )
         cursor.execute(
             'CREATE INDEX IF NOT EXISTS idx_vbalance_synced '

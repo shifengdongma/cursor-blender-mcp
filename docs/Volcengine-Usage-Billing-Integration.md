@@ -2,7 +2,7 @@
 
 本文说明 AIGV Studio 如何接入火山方舟（Ark）只读模型用量和火山引擎费用中心官方账单，以及如何严格区分官方数据、AIGV 本地任务记录和内部 GPU 估算。
 
-> 状态：用量接入已完成并通过真实只读接口验证；官方账单接入见 Phase C 与 `docs/Volcengine-Billing-Reconciliation.md`。真实 AK/SK 只写入服务器 `.env`，不会出现在数据库、审计、日志、接口响应或文档中。
+> 状态：官方用量与官方账单/余额均已接入，并通过真实只读接口验证（2026-10-31）。账单金额口径、对账和分账限制详见 `docs/Volcengine-Billing-Reconciliation.md`。真实 AK/SK 只写入服务器 `.env`，不会出现在数据库、审计、日志、接口响应或文档中。
 
 ## 1. 边界与数据来源
 
@@ -187,7 +187,7 @@ SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM billing_usage_records
 - 本阶段不提供“应用侧金额估算”，因为未配置经过验证的单价；绝不伪造估算费用。
 - Seedream 同步请求没有可用于 `GetInferenceRequestUsage` 的响应体 ID，因此不自动查询单请求官方用量；官方账号级用量仍覆盖这些调用。
 
-## 9. 真实验证记录与待完成项
+## 9. 真实验证记录
 
 已通过真实只读验证（2026-10-31）：
 
@@ -195,10 +195,30 @@ SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM billing_usage_records
 - `GetInferenceUsage` 成功返回最近 3 天账号级用量
 - 动态 `Fields/Data` 解析成功
 - 空 `Values` 维度过滤成功返回 `ApikeyID`/`ModelName`
-- 临时数据库完整同步写入 2 条官方快照
+- 临时数据库完整同步写入 2 条官方用量快照
+- `QueryBalanceAcct` 成功返回官方余额（CNY）
+- `ListBillOverviewByProd(2026-10)` 返回 2 个产品：`Doubao-Seedream`、`ark_bd`
+- `ListBillDetail(2026-10, GroupPeriod=2)` 返回 3 条明细
+- 2026-09 及更早账期当前账号无数据
+- `ListSplitBillDetail` 返回“当前账号未开通分账账单能力”；代码将其显示为未归属，不阻断主账单同步
+- 临时数据库完整同步写入 overview/bill/detail 快照和余额快照
 
-待完成（Phase C）：
+已配置：
 
-- 费用中心账单/余额真实联调
-- Ark 官方产品 code 与分账维度确认
-- 官方账单页面、对账、定时 worker
+```env
+VOLCENGINE_ARK_BILL_PRODUCT_FILTER=ark_bd,Doubao-Seedream
+VOLCENGINE_ARK_BILL_SPLIT_DIMENSION=
+```
+
+## 10. 官方账单接入（已完成）
+
+新增 `backend/volcengine/billing_client.py` 与 `billing_sync_service.py`：
+
+- `ListBillOverviewByProd`、`ListBill`、`ListBillDetail`、`ListSplitBillDetail`、`QueryBalanceAcct`
+- 金额全部 Decimal/TEXT，不跨口径或跨币种相加
+- 当月/上月账单、余额、按模型/配置、按日、用户分账、对账
+- `volcengine_bill_snapshots`、`volcengine_balance_snapshots`、`volcengine_sync_status`
+- 管理 API：`/api/admin/ark/billing/summary|details|balance|sync-status|models|trend|attribution|reconciliation` 与 `POST /sync`
+- 费用页官方账单区域；内部 GPU 估算保持独立
+- `scripts/run_ark_sync.py` + `deploy/aigv-ark-sync.service` 定时同步
+- 详细金额口径、真实结果和限制见 `docs/Volcengine-Billing-Reconciliation.md`

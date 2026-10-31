@@ -90,3 +90,12 @@ node --check web/creative-studio.js ...   # 前端语法检查
 ## 兼容性
 
 保留旧 `/api/jobs` 十阶段流水线、Prompt 编排、Blender 导出、资产管理、算力调度展示、监控告警与知识库/创意模板。旧 `/api/jobs` 仅用于兼容，不再由工作台 UI 调用，历史任务不会迁移到新生成历史。演示数据默认关闭（`DEMO_MODE=false`），演示模块仅在明确标注时使用。
+
+## 火山方舟官方用量与账单
+
+管理员可在“算力调度 → AI 模型服务”查看 AIGV 本地真实模型任务和火山方舟官方用量；在“费用告警”查看火山引擎官方账单/余额，并与内部 GPU/渲染核算分开展示。
+
+- 管理凭据与推理 `ARK_API_KEY` 完全分离：`VOLCENGINE_ACCESS_KEY_ID` / `VOLCENGINE_SECRET_ACCESS_KEY`，只读，只存在服务器 `.env`。
+- 首次部署先备份数据库，再按 `deploy/README.md` 第 7 节执行单次 `scripts/run_ark_sync.py --once` 验证，最后启用 `aigv-ark-sync.service`。
+- 当前线上验证：Ark 官方用量、余额和 2026-10 官方账单成功同步；当前账号未开通分账账单，官方金额保持未归属；2026-09 及更早无账单数据。
+- 详细说明：`docs/Volcengine-Usage-Billing-Integration.md`、`docs/Volcengine-Billing-Reconciliation.md`、`docs/Audit-Log-Presentation.md`。

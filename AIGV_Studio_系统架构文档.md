@@ -1298,3 +1298,47 @@ Browser → Nginx/HTTPS → Gunicorn (wsgi:app, 多 worker)
 - 本机真实 Piper 中文音色 + 真实 FFmpeg 的 E2E 已通过：TTS → 时间线 → 烧录字幕 MP4 → ZIP 下载。
 - 真实付费 LLM/图片/视频调用未新增；本地验证不触发计费。
 - 线上数据库迁移与进程重载只在隔离验收通过后执行；未执行前不得写成已上线。
+
+# 附录 H：管理员审计可读性与火山方舟用量/账单（2026-10-31）
+
+## H.1 审计展示层
+
+- 新增 `backend/audit_presenter.py`：只读转换 `ops_events`，输出中文事件/结果、操作人显示名、业务目标、摘要和详情；不修改原始审计记录。
+- 操作人/目标按类型批量查询：`auth_users`、`generation_tasks`、`creative_projects`、`assets`、`job_history`、`render_jobs`、`projects`；不按事件逐条查询。
+- 新审计事件写入时保存安全展示快照 `metadata.details.actor_display`；历史事件回退当前用户，用户已删除时显示“已删除用户”。
+- 目标只依据 `metadata.target_type/target_id`，旧版事件仅使用明确的顶层 `job_id`，不根据 UUID 猜测类型。
+- `GET /api/admin/audit-logs` 增加 `event_type/result/actor/start_date/end_date` 服务端筛选、`filter_options`；新增 `GET /api/admin/audit-logs/<event_id>` 详情。
+- 新增索引 `idx_ops_event_type_time`、`idx_ops_created_at`。
+- 生成任务最终失败路径新增 `generation_failed` 审计事件。
+
+## H.2 本地模型用量
+
+- `generation_tasks.provider_request_id` 保存 Provider 请求 ID。
+- 新增 `ai_model_usage_records`：图片/视频/LLM Provider 真实返回的 Token、图片数、视频时长、原始用量白名单、来源、API Key 资源 ID；缺失指标为 NULL，不做推算。
+- Seedream 从 `usage.generated_images` 等字段采集；Seedance 从轮询响应 `usage.completion_tokens/total_tokens` 采集；LLM 从响应 `usage` 采集。
+- 新增 `backend/usage_records.py` 统一 UPSERT，幂等键为任务 + 来源 + Provider 任务/请求 ID；写用量失败不影响生成任务。
+
+## H.3 火山方舟官方用量
+
+- 新增 `backend/volcengine/`：
+  - `auth.py`：官方 SignerV4（HMAC-SHA256，stdlib 实现）
+  - `client.py`：签名 POST、5 QPS 节流、超时/限流重试、错误分类
+  - `usage_client.py`：`GetInferenceUsage` / `GetInferenceTaskUsage` / `GetInferenceRequestUsage`
+  - `usage_service.py`：官方用量同步、快照、任务用量补充、本地统计
+  - `store.py`：快照/同步状态 UPSERT
+  - `billing_client.py`、`billing_sync_service.py`：费用中心账单/余额/分账/对账
+- 新表：`volcengine_usage_snapshots`、`volcengine_bill_snapshots`、`volcengine_balance_snapshots`、`volcengine_sync_status`。
+- 官方金额全部 Decimal/TEXT，不跨币种/口径相加；内部 GPU 计费仍使用原有 `billing_accounts/billing_usage_records`，并明确标记为内部估算。
+- 管理 API（全部 `@admin_required`）：
+  - `/api/admin/ark/status`
+  - `/api/admin/ark/usage/summary|models|trend|tasks`、`POST /usage/sync`
+  - `/api/admin/ark/billing/summary|details|balance|sync-status|models|trend|attribution|reconciliation`、`POST /billing/sync`
+  - `/api/admin/ai-usage/users|tasks|reconciliation`
+- 前端“算力调度”新增管理员可见“AI 模型服务”标签；费用页新增管理员可见官方账单区域。
+
+## H.4 部署
+
+- 新表/列通过 `_init_schema()` 增量创建，版本 6；重复启动幂等。
+- 定时同步使用独立 `scripts/run_ark_sync.py --loop` 和 `deploy/aigv-ark-sync.service`，不在 Web 请求中同步。
+- 管理 AK/SK 只存在于 `.env`（600），不复用 `ARK_API_KEY`；建议最小权限 IAM 子用户。
+- 真实只读验证（2026-10-31）：Ark 用量、余额、当前月账单概览/明细均成功；当前账号未开通分账账单能力；2026-09 及更早无账单数据。

@@ -94,3 +94,24 @@ def test_internal_billing_is_labelled_as_estimate():
     assert "内部核算累计" in js
     assert "非火山官方账单" in js
     assert "内部核算余额（非火山账户）" in js
+
+
+def test_official_billing_section_contract():
+    html = _read("web/compute-platform.html")
+    js = _read("web/ark-admin.js")
+    compute_js = _read("web/compute-platform.js")
+    assert "ark-billing-section" in html
+    assert "ark-billing-period" in html
+    assert "ark-billing-cards" in html
+    assert "ark-billing-model-table" in html
+    assert "ark-billing-trend" in html
+    assert "ark-billing-attribution" in html
+    assert "ark-billing-reconciliation" in html
+    assert "/api/admin/ark/billing/summary" in js
+    assert "/api/admin/ark/billing/models" in js
+    assert "/api/admin/ark/billing/attribution" in js
+    assert "/api/admin/ark/billing/reconciliation" in js
+    assert "/api/admin/ark/billing/sync" in js
+    assert "未归属" in js
+    assert "not_enabled" in js
+    assert "AIGVArk.renderBilling" in compute_js

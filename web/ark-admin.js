@@ -13,7 +13,11 @@
     days: 7,
     data: null,
     message: '',
-    messageKind: ''
+    messageKind: '',
+    billingLoaded: false,
+    billingLoading: false,
+    billingData: null,
+    billingPeriod: ''
   };
 
   function $(id) { return document.getElementById(id); }
@@ -114,16 +118,57 @@
     return !!state.isAdmin;
   }
 
+  function currentMonth() {
+    var now = new Date();
+    return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  }
+
+  function formatMoney(value, currency) {
+    if (value === null || value === undefined || value === '') return '—';
+    return (currency || 'CNY') + ' ' + String(value);
+  }
+
+  function amountList(totals, field) {
+    if (!totals || !totals.length) return '—';
+    return totals.map(function (item) {
+      return formatMoney(item[field], item.currency);
+    }).join(' / ');
+  }
+
+  function splitStatusLabel(status) {
+    return ({
+      success: '已启用分账',
+      not_configured: '未配置分账维度',
+      not_enabled: '火山账号未开通分账账单',
+      not_synced: '尚未同步分账数据'
+    })[status] || (status || '未知');
+  }
+
   function init() {
     if (state.bound) return;
     state.bound = true;
     if (!global.AIGV || !global.AIGV.getCurrentUser) return;
+    var periodInput = $('ark-billing-period');
+    if (periodInput && !periodInput.value) {
+      state.billingPeriod = currentMonth();
+      periodInput.value = state.billingPeriod;
+    }
     global.AIGV.getCurrentUser().then(function (user) {
       state.isAdmin = !!(user && user.capabilities && user.capabilities.is_admin);
       var button = $('cp-ai-tab-btn');
       if (button) button.style.display = state.isAdmin ? '' : 'none';
-      var panel = $('tab-ai-models');
-      if (panel && !state.isAdmin) panel.classList.remove('active');
+      var aiPanel = $('tab-ai-models');
+      if (aiPanel && !state.isAdmin) aiPanel.classList.remove('active');
+      var billingSection = $('ark-billing-section');
+      if (billingSection) billingSection.style.display = state.isAdmin ? '' : 'none';
+      if (state.isAdmin) {
+        var billingPanel = $('tab-billing');
+        if (billingPanel && billingPanel.classList.contains('active')) {
+          loadBilling(false);
+        }
+        var aiActive = $('tab-ai-models');
+        if (aiActive && aiActive.classList.contains('active')) load(false);
+      }
     }).catch(function () {
       state.isAdmin = false;
     });
@@ -139,6 +184,18 @@
     if (refresh) refresh.addEventListener('click', function () { load(true); });
     var sync = $('ark-usage-sync');
     if (sync) sync.addEventListener('click', syncOfficialUsage);
+
+    if (periodInput) {
+      periodInput.addEventListener('change', function () {
+        state.billingPeriod = periodInput.value || currentMonth();
+        state.billingLoaded = false;
+        loadBilling(true);
+      });
+    }
+    var billingRefresh = $('ark-billing-refresh');
+    if (billingRefresh) billingRefresh.addEventListener('click', function () { loadBilling(true); });
+    var billingSync = $('ark-billing-sync');
+    if (billingSync) billingSync.addEventListener('click', syncBilling);
   }
 
   function activate() {
@@ -445,12 +502,313 @@
     });
   }
 
+  // ══════════════════════════════════════════════════
+  // Official Volcengine billing (admin-only)
+  // ══════════════════════════════════════════════════
+  function setBillingNotice(text, kind) {
+    var container = $('ark-billing-notice');
+    if (!container) return;
+    container.textContent = text || '';
+    container.className = 'cp-source-note' + (kind ? ' ' + kind : '');
+  }
+
+  function appendNotes(container, notes) {
+    if (!notes || !notes.length) return;
+    var list = document.createElement('ul');
+    list.className = 'ark-billing-notes';
+    notes.forEach(function (note) {
+      var item = document.createElement('li');
+      item.textContent = note;
+      list.appendChild(item);
+    });
+    container.appendChild(list);
+  }
+
+  function renderBilling() {
+    var section = $('ark-billing-section');
+    if (!state.isAdmin) {
+      if (section) section.style.display = 'none';
+      return;
+    }
+    if (section) section.style.display = '';
+    if (!state.billingLoaded && !state.billingLoading) {
+      loadBilling(false);
+      return;
+    }
+    if (state.billingData) renderBillingData();
+  }
+
+  function loadBilling(force) {
+    if (!state.isAdmin) return Promise.resolve();
+    if (state.billingLoading) return Promise.resolve();
+    if (state.billingLoaded && !force && state.billingData) {
+      renderBillingData();
+      return Promise.resolve();
+    }
+    state.billingLoading = true;
+    var period = state.billingPeriod || currentMonth();
+    var query = '?bill_period=' + encodeURIComponent(period);
+    var refresh = $('ark-billing-refresh');
+    if (refresh) refresh.disabled = true;
+    setBillingNotice('正在读取官方账单快照…', 'loading');
+    return Promise.all([
+      global.AIGV.api('/api/admin/ark/billing/summary' + query),
+      global.AIGV.api('/api/admin/ark/billing/models' + query),
+      global.AIGV.api('/api/admin/ark/billing/trend' + query),
+      global.AIGV.api('/api/admin/ark/billing/attribution' + query),
+      global.AIGV.api('/api/admin/ark/billing/reconciliation' + query),
+      global.AIGV.api('/api/admin/ark/billing/sync-status')
+    ]).then(function (results) {
+      state.billingData = {
+        summary: results[0], models: results[1], trend: results[2],
+        attribution: results[3], reconciliation: results[4], status: results[5]
+      };
+      state.billingLoaded = true;
+      renderBillingData();
+    }).catch(function (error) {
+      setBillingNotice('官方账单加载失败：' + (error.message || '未知错误'), 'error');
+    }).then(function () {
+      state.billingLoading = false;
+      if (refresh) refresh.disabled = false;
+    });
+  }
+
+  function renderBillingData() {
+    if (!state.billingData) return;
+    var data = state.billingData;
+    var summary = data.summary || {};
+    var status = data.status || {};
+    var notes = [];
+    if (!status.billing_enabled) notes.push('火山引擎官方账单未启用（VOLCENGINE_BILLING_ENABLED=false）。');
+    if (!status.has_credentials) notes.push('未配置火山引擎管理 AK/SK：官方账单与余额不可用。');
+    if (summary.is_stale) notes.push('官方账单快照已过期，请点击“同步官方账单”更新。');
+    if (!summary.current_month || !summary.current_month.has_data) {
+      notes.push('所选账期暂无官方账单数据；本地任务数据仍正常显示。');
+    }
+    notes.push(summary.product_filter_applied
+      ? '官方产品过滤：' + (summary.product_filter || '—')
+      : '未配置官方产品过滤，当前统计全部云产品；方舟费用仅按官方配置匹配。');
+    notes.push('分账状态：' + splitStatusLabel(summary.split_status || (status.split_status)));
+    setBillingNotice(notes.join(' '), notes.some(function (n) {
+      return n.indexOf('未启用') >= 0 || n.indexOf('不可用') >= 0 || n.indexOf('过期') >= 0;
+    }) ? 'warning' : '');
+
+    renderBillingCards(summary);
+    renderBillingModels(data.models || {});
+    renderBillingTrend(data.trend || {});
+    renderBillingAttribution(data.attribution || {});
+    renderBillingReconciliation(data.reconciliation || {});
+
+    var syncButton = $('ark-billing-sync');
+    if (syncButton) {
+      syncButton.disabled = !status.billing_enabled || !status.has_credentials;
+      syncButton.textContent = status.billing_enabled && status.has_credentials
+        ? '同步官方账单' : '官方账单未启用';
+    }
+  }
+
+  function renderBillingCards(summary) {
+    var container = $('ark-billing-cards');
+    if (!container) return;
+    var current = summary.current_month || {};
+    var previous = summary.previous_month || {};
+    var balance = summary.balance || {};
+    var html = '';
+    html += costCard('本月累计应付（部分出账）',
+      amountList(current.totals_by_currency, 'payable_amount'),
+      '火山引擎官方账单 · ' + (current.period || '—'));
+    html += costCard('上月账单应付',
+      amountList(previous.totals_by_currency, 'payable_amount'),
+      previous.settled_label || '未出账/未结算');
+    html += costCard('官方可用余额',
+      formatMoney(balance.available_balance, balance.currency),
+      '火山引擎官方账户余额');
+    html += costCard('官方账单最近同步',
+      timeLabel(summary.last_synced_at),
+      summary.product_filter_applied ? '已应用产品过滤' : '全部云产品');
+    html += costCard('分账状态',
+      splitStatusLabel(summary.split_status),
+      summary.split_dimension_configured ? '已配置分账维度' : '未配置分账维度');
+    html += costCard('账单同步状态', (summary.billing_status || {}).status || '未同步',
+      summary.is_stale ? '快照可能过期' : '快照状态正常');
+    container.innerHTML = html;
+  }
+
+  function renderBillingModels(models) {
+    var container = $('ark-billing-model-table');
+    if (!container) return;
+    var items = models.items || [];
+    if (!items.length) {
+      container.innerHTML = '<p class="empty-state">暂无官方模型/配置费用数据。' +
+        '官方配置无法匹配已知模型时，会标记“未归属模型”。</p>';
+      return;
+    }
+    var html = '<table class="cp-table"><thead><tr>' +
+      '<th>模型/归属</th><th>使用类型</th><th>官方配置</th><th>用量</th>' +
+      '<th>原价</th><th>应付</th><th>结算金额</th><th>币种</th>' +
+      '</tr></thead><tbody>';
+    items.forEach(function (item) {
+      var usage = item.usage_amount === null || item.usage_amount === undefined
+        ? '—' : (item.usage_amount + (item.usage_unit ? ' ' + item.usage_unit : ''));
+      html += '<tr>' +
+        '<td>' + esc(item.model_label || '未归属模型') +
+        (item.unattributed ? ' <span class="cp-badge warning">未归属</span>' : '') + '</td>' +
+        '<td>' + esc(item.usage_type || '—') + '</td>' +
+        '<td>' + esc(item.config_name || '—') + '</td>' +
+        '<td>' + esc(usage) + '</td>' +
+        '<td>' + esc(formatMoney(item.original_amount, item.currency)) + '</td>' +
+        '<td>' + esc(formatMoney(item.payable_amount, item.currency)) + '</td>' +
+        '<td>' + esc(formatMoney(item.settlement_amount, item.currency)) + '</td>' +
+        '<td>' + esc(item.currency || '—') + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
+  function renderBillingTrend(trend) {
+    var container = $('ark-billing-trend');
+    if (!container) return;
+    var items = trend.items || [];
+    if (!items.length) {
+      container.innerHTML = '<p class="empty-state">暂无官方按日费用数据。</p>';
+      return;
+    }
+    var html = '<table class="cp-table"><thead><tr>' +
+      '<th>日期</th><th>币种</th><th>用量</th><th>原价</th>' +
+      '<th>应付</th><th>记录数</th></tr></thead><tbody>';
+    items.forEach(function (item) {
+      html += '<tr>' +
+        '<td>' + esc(item.expense_date || '—') + '</td>' +
+        '<td>' + esc(item.currency || '—') + '</td>' +
+        '<td>' + esc(item.usage_amount === null || item.usage_amount === undefined ? '—' : item.usage_amount) + '</td>' +
+        '<td>' + esc(formatMoney(item.original_amount, item.currency)) + '</td>' +
+        '<td>' + esc(formatMoney(item.payable_amount, item.currency)) + '</td>' +
+        '<td>' + num(item.row_count) + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
+  function attributionStatusLabel(status) {
+    return ({
+      attributed: '已归属',
+      shared: '共享 Key / 未分摊',
+      unallocated: '未归属'
+    })[status] || (status || '—');
+  }
+
+  function renderBillingAttribution(attribution) {
+    var container = $('ark-billing-attribution');
+    if (!container) return;
+    container.textContent = '';
+    var summary = document.createElement('p');
+    summary.className = 'cp-source-note';
+    summary.textContent = '可归属官方金额：' +
+      amountList(attribution.attributed_totals || [], 'payable_amount') +
+      '；未分摊官方金额：' +
+      amountList(attribution.unallocated_totals || [], 'payable_amount') +
+      '。分账状态：' + splitStatusLabel(attribution.split_status);
+    container.appendChild(summary);
+
+    var items = attribution.items || [];
+    if (!items.length) {
+      var empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = '暂无官方分账数据；官方费用保持未归属，不按任务次数平均分摊。';
+      container.appendChild(empty);
+    } else {
+      var html = '<table class="cp-table"><thead><tr>' +
+        '<th>API Key 资源 ID</th><th>状态</th><th>归属用户</th>' +
+        '<th>币种</th><th>官方应付</th><th>记录数</th></tr></thead><tbody>';
+      items.forEach(function (item) {
+        html += '<tr>' +
+          '<td>' + esc(maskKey(item.api_key_resource_id)) + '</td>' +
+          '<td>' + esc(attributionStatusLabel(item.status)) + '</td>' +
+          '<td>' + esc(item.user_display || '—') + '</td>' +
+          '<td>' + esc(item.currency || '—') + '</td>' +
+          '<td>' + esc(formatMoney(item.payable_amount, item.currency)) + '</td>' +
+          '<td>' + num(item.row_count) + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table>';
+      var table = document.createElement('div');
+      table.innerHTML = html;
+      container.appendChild(table);
+    }
+    appendNotes(container, attribution.notes || []);
+  }
+
+  function renderBillingReconciliation(reconciliation) {
+    var container = $('ark-billing-reconciliation');
+    if (!container) return;
+    container.textContent = '';
+    var official = reconciliation.official || {};
+    var attributed = reconciliation.attributed || {};
+    var local = reconciliation.local || {};
+    var rows = [
+      ['官方应付金额（按币种）', amountList(official.totals_by_currency || [], 'payable_amount')],
+      ['可归属官方金额', amountList(attributed.attributed_totals || [], 'payable_amount')],
+      ['未归属官方金额', amountList(
+        reconciliation.unallocated_by_currency || attributed.unallocated_totals || [],
+        'payable_amount'
+      )],
+      ['本地 Ark 任务数', num(local.ark_task_count)],
+      ['本地用量任务数', num(local.usage_task_count)],
+      ['本地输入 Token', num(local.input_tokens)],
+      ['本地输出 Token', num(local.output_tokens)],
+      ['本地总 Token', num(local.total_tokens)],
+      ['本地图片数', num(local.image_count)]
+    ];
+    var html = '<table class="cp-table"><thead><tr>' +
+      '<th>对账项</th><th>数值/金额</th><th>说明</th></tr></thead><tbody>';
+    rows.forEach(function (row) {
+      html += '<tr><td>' + esc(row[0]) + '</td><td>' + esc(row[1]) + '</td>' +
+        '<td>官方账单 / AIGV 本地记录分开展示，不做口径混合</td></tr>';
+    });
+    html += '</tbody></table>';
+    var table = document.createElement('div');
+    table.innerHTML = html;
+    container.appendChild(table);
+    appendNotes(container, reconciliation.notes || []);
+  }
+
+  function syncBilling() {
+    if (!state.isAdmin) return;
+    var period = state.billingPeriod || currentMonth();
+    if (!global.confirm('将调用火山引擎只读账单接口并写入本地快照，不会产生模型生成费用。确认同步账期 ' + period + '？')) {
+      return;
+    }
+    var button = $('ark-billing-sync');
+    if (button) { button.disabled = true; button.textContent = '同步中…'; }
+    global.AIGV.api('/api/admin/ark/billing/sync', {
+      method: 'POST', body: { bill_period: period }
+    }).then(function (result) {
+      setBillingNotice(
+        '官方账单同步完成：' + (result.periods || []).join('、') +
+        '；分账状态：' + splitStatusLabel(result.split_status), 'success');
+      state.billingLoaded = false;
+      return loadBilling(true);
+    }).catch(function (error) {
+      setBillingNotice('官方账单同步失败：' + (error.message || '未知错误'), 'error');
+    }).then(function () {
+      if (button) {
+        button.disabled = false;
+        if (button.textContent === '同步中…') button.textContent = '同步官方账单';
+      }
+    });
+  }
+
   global.AIGVArk = {
     init: init,
     activate: activate,
     isAdmin: isAdminNow,
     load: load,
-    syncOfficialUsage: syncOfficialUsage
+    syncOfficialUsage: syncOfficialUsage,
+    renderBilling: renderBilling,
+    loadBilling: loadBilling,
+    syncBilling: syncBilling
   };
 
   if (document.readyState === 'loading') {

@@ -22,7 +22,9 @@ def test_v6_tables_columns_and_version(test_db):
     assert 'provider_request_id' in _columns(test_db, 'generation_tasks')
     assert 'usage_source' in _columns(test_db, 'ai_model_usage_records')
     assert 'api_key_id' in _columns(test_db, 'volcengine_usage_snapshots')
-    assert 'payable_amount' in _columns(test_db, 'volcengine_bill_snapshots')
+    assert {
+        'payable_amount', 'split_item_id', 'api_key_resource_id',
+    } <= _columns(test_db, 'volcengine_bill_snapshots')
     assert 'available_balance' in _columns(test_db, 'volcengine_balance_snapshots')
     versions = {
         row['version'] for row in test_db.fetch_all('SELECT version FROM schema_migrations')

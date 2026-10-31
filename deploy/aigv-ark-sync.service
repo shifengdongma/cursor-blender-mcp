@@ -1,0 +1,17 @@
+[Unit]
+Description=AIGV Studio Volcengine Ark usage and official billing sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/sdc/恒联项目/cursor-blender-mcp-master
+EnvironmentFile=/sdc/恒联项目/cursor-blender-mcp-master/.env
+ExecStart=/sdc/恒联项目/cursor-blender-mcp-master/.venv/bin/python scripts/run_ark_sync.py --loop
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

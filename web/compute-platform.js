@@ -3256,6 +3256,7 @@
   // Tab 7: Billing & Alerts
   // ══════════════════════════════════════════════════
   function renderBilling() {
+    if (window.AIGVArk && window.AIGVArk.renderBilling) window.AIGVArk.renderBilling();
     renderCostSummary();
     renderAlertTable();
     renderOpsTable();

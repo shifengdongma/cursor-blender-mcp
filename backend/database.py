@@ -1065,6 +1065,8 @@ class Database(object):
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_tasks_provider_job ON generation_tasks(provider_job_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_tasks_lease ON generation_tasks(lease_expires_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_ops_actor_time ON ops_events(actor_user_id, created_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_ops_event_type_time ON ops_events(event_type, created_at DESC)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_ops_created_at ON ops_events(created_at DESC)')
 
         # Case-insensitive uniqueness.  These are best-effort here so an old
         # database with case-only duplicates can still start; the migration

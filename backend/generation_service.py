@@ -565,7 +565,7 @@ def _download_video(cfg, url, dest_dir):
     )
 
 
-def _audit(cfg, action, user, task_id, metadata=None):
+def _audit(cfg, action, user, task_id, metadata=None, result="success"):
     if not getattr(cfg, "AUDIT_ENABLED", True):
         return None
     try:
@@ -577,11 +577,28 @@ def _audit(cfg, action, user, task_id, metadata=None):
             action=action,
             target_type="generation_task",
             target_id=task_id,
-            result="success",
+            result=result,
             metadata=metadata,
         )
     except Exception:
         pass
+
+
+def _audit_task_failure(cfg, task, error_code=None, error_message=None):
+    """Record a final task failure without exposing prompts or provider bodies."""
+    metadata = {
+        "task_type": getattr(task, "task_type", None),
+        "provider": getattr(task, "provider", None),
+        "model_id": getattr(task, "model_id", None),
+    }
+    if error_code:
+        metadata["error_code"] = str(error_code)[:120]
+    if error_message:
+        metadata["error_message"] = str(error_message)[:500]
+    return _audit(
+        cfg, "generation_failed", _user_dict(task.created_by), task.id,
+        metadata=metadata, result="failed",
+    )
 
 
 def _deadline_seconds(cfg, task):
@@ -605,6 +622,10 @@ def _fail_if_expired(cfg, task_service, task, lease_owner, stage="running"):
         error_code="task_timeout",
         error_message="任务超过最长等待时间；第三方任务 ID 已保留，管理员可恢复轮询",
         completed_at=_now(), completed_at_ms=_now_ms(),
+    )
+    _audit_task_failure(
+        cfg, task, "task_timeout",
+        "任务超过最长等待时间；第三方任务 ID 已保留，管理员可恢复轮询",
     )
     return True
 
@@ -776,6 +797,7 @@ def _handle_submission_error(cfg, task_service, task, lease_owner, exc):
         error_code=error_type, error_message=message, completed_at=_now(),
         completed_at_ms=_now_ms(), provider_request_finished_at=_now_ms(),
     )
+    _audit_task_failure(cfg, task, error_type, message)
 
 
 def poll_task(cfg, task_service, task, lease_owner):
@@ -881,13 +903,15 @@ def poll_task(cfg, task_service, task, lease_owner):
                     error_message = "{0}（请求 ID: {1}）".format(
                         error_message, error.get("request_id")
                     )
+                error_code = str(error.get("code") or "provider_failed")[:80]
                 task_service.release_generation_lease(
                     task.id, lease_owner, status="failed", stage="failed",
-                    error_code=str(error.get("code") or "provider_failed")[:80],
+                    error_code=error_code,
                     error_message=error_message[:500],
                     completed_at=_now(), completed_at_ms=_now_ms(),
                     provider_finished_at=_now_ms(),
                 )
+                _audit_task_failure(cfg, task, error_code, error_message)
             return
 
         raise MediaFetchError("未知的 Provider 状态: {0}".format(status), "provider_unknown_status")
@@ -906,11 +930,13 @@ def _handle_poll_error(cfg, task_service, task, lease_owner, exc):
             error_message=message, last_polled_at=_now(),
         )
         return
+    error_code = getattr(exc, "code", None) or getattr(exc, "error_type", "poll_error")
     task_service.release_generation_lease(
         task.id, lease_owner, status="failed", stage="failed",
-        poll_error_count=attempt, error_code=getattr(exc, "code", None) or getattr(exc, "error_type", "poll_error"),
+        poll_error_count=attempt, error_code=error_code,
         error_message=message, completed_at=_now(), completed_at_ms=_now_ms(),
     )
+    _audit_task_failure(cfg, task, error_code, message)
 
 
 class _LeaseLost(Exception):

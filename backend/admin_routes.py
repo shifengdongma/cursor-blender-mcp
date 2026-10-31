@@ -3,14 +3,43 @@
 from __future__ import absolute_import
 
 import os
+from datetime import datetime, timedelta, timezone
 
 from flask import g, request, send_file, send_from_directory
 
+from .audit_presenter import (
+    actor_filter_clause,
+    fetch_event,
+    filter_options,
+    present_event_detail,
+    present_events,
+)
 from .auth_middleware import admin_required
 from .auth_service import AuthError
 from .database import get_database
 from .http_utils import ApiError, parse_json_body, parse_pagination
-from .models import GenerationTask, OpsEvent
+from .models import GenerationTask
+
+_BEIJING_TZ = timezone(timedelta(hours=8))
+_RESULT_ALIASES = {
+    'succeeded': 'success',
+    'failure': 'failed',
+    'canceled': 'cancelled',
+    'completed': 'success',
+}
+
+
+def _parse_audit_day(value, field):
+    try:
+        parsed = datetime.strptime(value, '%Y-%m-%d').replace(tzinfo=_BEIJING_TZ)
+    except (TypeError, ValueError):
+        raise ApiError(
+            'invalid_date',
+            '日期格式应为 YYYY-MM-DD',
+            status_code=400,
+            details={'field': field},
+        )
+    return int(parsed.timestamp())
 
 
 def _audit(cfg, action, actor, target_id=None, result="success", metadata=None):
@@ -199,33 +228,79 @@ def register_admin_routes(app, cfg, auth_service, web_root, json_success, json_e
     @admin_required
     def admin_audit_logs():
         pagination = parse_pagination(request, default_limit=50, max_limit=200)
-        action = request.args.get("action")
-        actor = request.args.get("actor_user_id")
+        # Keep the old ``action`` alias; ``event_type`` is the new preferred
+        # name.  ``actor_user_id`` is also kept for existing clients.
+        event_type = request.args.get("event_type") or request.args.get("action")
+        result = request.args.get("result")
+        actor = request.args.get("actor") or request.args.get("actor_user_id")
+        start_date = (request.args.get("start_date") or "").strip()
+        end_date = (request.args.get("end_date") or "").strip()
+
         conditions = []
         params = []
-        if action:
+        if event_type:
             conditions.append("event_type = ?")
-            params.append(action)
+            params.append(event_type)
+        if result:
+            normalized_result = _RESULT_ALIASES.get(result, result)
+            conditions.append("message = ?")
+            params.append(normalized_result)
         if actor:
-            conditions.append("actor_user_id = ?")
-            params.append(actor)
+            clause, _ = actor_filter_clause()
+            conditions.append(clause)
+            params.extend([actor, actor, actor])
+
+        start_ts = _parse_audit_day(start_date, "start_date") if start_date else None
+        if end_date:
+            end_ts = _parse_audit_day(end_date, "end_date") + 86400
+        else:
+            end_ts = None
+        if start_ts is not None and end_ts is not None and start_ts >= end_ts:
+            raise ApiError(
+                "invalid_date_range",
+                "开始日期不能晚于结束日期",
+                status_code=400,
+            )
+        if start_ts is not None:
+            conditions.append("created_at >= ?")
+            params.append(start_ts)
+        if end_ts is not None:
+            conditions.append("created_at < ?")
+            params.append(end_ts)
+
         where = " AND ".join(conditions) if conditions else "1=1"
         db = get_database()
         rows = db.fetch_all(
-            "SELECT * FROM ops_events WHERE {0} ORDER BY created_at DESC LIMIT ? OFFSET ?".format(where),
+            "SELECT * FROM ops_events WHERE {0} "
+            "ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?".format(where),
             tuple(params) + (pagination.limit, pagination.offset),
         )
         total = db.count("ops_events", where, tuple(params) if params else None)
-        items = []
-        for row in rows:
-            event = OpsEvent.from_row(row)
-            item = event.to_dict()
-            items.append(item)
+        items = present_events(db, rows)
         return json_success(
             {
                 "items": items,
                 "total": total,
                 "limit": pagination.limit,
                 "offset": pagination.offset,
+                "filters": {
+                    "event_type": event_type or None,
+                    "result": result or None,
+                    "actor": actor or None,
+                    "start_date": start_date or None,
+                    "end_date": end_date or None,
+                },
+                "filter_options": filter_options(),
+                "source": "ops_events",
+                "source_label": "平台审计日志（只读）",
             }
         )
+
+    @app.route("/api/admin/audit-logs/<event_id>", methods=["GET"])
+    @admin_required
+    def admin_audit_log_detail(event_id):
+        db = get_database()
+        event = fetch_event(db, event_id)
+        if not event:
+            raise ApiError("audit_event_not_found", "审计事件不存在", status_code=404)
+        return json_success(present_event_detail(db, event))

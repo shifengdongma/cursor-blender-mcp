@@ -1,5 +1,11 @@
 # Environment variables (contains API keys)
 .env
+.env.bak*
+.env.local
+.env.production
+
+# Volcengine console/account credential export (never commit)
+docs/用户信息.csv
 
 # Python
 __pycache__/

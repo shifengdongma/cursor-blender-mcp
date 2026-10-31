@@ -60,6 +60,15 @@ class AuditService(object):
         audit_metadata = self._sanitize_metadata(metadata) or {}
         if request_id:
             audit_metadata['request_id'] = request_id
+        # Keep a safe identity clue for future deleted/changed users.  The
+        # snapshot is display-only and never contains credentials or email.
+        try:
+            from .audit_presenter import build_actor_snapshot
+            actor_display = build_actor_snapshot(self.ops.db, user_id)
+            if actor_display:
+                audit_metadata['actor_display'] = actor_display
+        except Exception:
+            pass
 
         return self.ops.record_event(
             tenant_id=tenant_id,

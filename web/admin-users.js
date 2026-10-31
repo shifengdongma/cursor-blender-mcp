@@ -16,10 +16,24 @@
     taskPage: 1,
     taskPageSize: 20,
     taskType: '',
-    taskStatus: ''
+    taskStatus: '',
+    audit: {
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 20,
+      full: false,
+      eventType: '',
+      result: '',
+      actor: '',
+      startDate: '',
+      endDate: '',
+      optionsLoaded: false
+    }
   };
   var toastContainer = document.getElementById('admin-toast-container');
   var modal = document.getElementById('admin-modal');
+  var auditModal = document.getElementById('admin-audit-modal');
 
   function $(id) { return document.getElementById(id); }
 
@@ -437,44 +451,278 @@
     });
   }
 
+  function auditResultClass(result) {
+    var map = {
+      success: 'cp-badge online',
+      succeeded: 'cp-badge online',
+      failed: 'cp-badge error',
+      failure: 'cp-badge error',
+      error: 'cp-badge error',
+      pending: 'cp-badge warning',
+      accepted: 'cp-badge good',
+      inconclusive: 'cp-badge warning',
+      cancelled: 'cp-badge paused',
+      canceled: 'cp-badge paused',
+      warning: 'cp-badge warning'
+    };
+    return map[result] || 'cp-badge info';
+  }
+
+  function populateAuditFilterOptions(options) {
+    if (!options || state.audit.optionsLoaded) return;
+    var eventSelect = $('admin-audit-event-filter');
+    var resultSelect = $('admin-audit-result-filter');
+    (options.event_types || []).forEach(function (item) {
+      if (!eventSelect || !item || !item.value) return;
+      var option = document.createElement('option');
+      option.value = item.value;
+      option.textContent = item.label || item.value;
+      eventSelect.appendChild(option);
+    });
+    (options.results || []).forEach(function (item) {
+      if (!resultSelect || !item || !item.value) return;
+      var option = document.createElement('option');
+      option.value = item.value;
+      option.textContent = item.label || item.value;
+      resultSelect.appendChild(option);
+    });
+    state.audit.optionsLoaded = true;
+  }
+
+  function renderAudit() {
+    var container = $('admin-audit-table');
+    if (!container) return;
+    container.textContent = '';
+    var items = state.audit.items || [];
+    if (!items.length) {
+      var empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = '暂无符合条件的审计事件。';
+      container.appendChild(empty);
+      renderAuditPagination();
+      return;
+    }
+    var table = document.createElement('table');
+    table.className = 'cp-table';
+    var thead = document.createElement('thead');
+    var head = document.createElement('tr');
+    ['时间', '事件', '结果', '操作人', '操作目标', '详情'].forEach(function (title) {
+      var th = document.createElement('th');
+      th.textContent = title;
+      head.appendChild(th);
+    });
+    thead.appendChild(head);
+    table.appendChild(thead);
+    var tbody = document.createElement('tbody');
+    items.forEach(function (event) {
+      var row = document.createElement('tr');
+
+      var timeCell = document.createElement('td');
+      timeCell.textContent = AIGV.formatTime(event.created_at);
+      row.appendChild(timeCell);
+
+      var eventCell = document.createElement('td');
+      eventCell.textContent = event.event_label || '其他系统事件';
+      eventCell.title = event.event_type || '';
+      row.appendChild(eventCell);
+
+      var resultCell = document.createElement('td');
+      var resultBadge = document.createElement('span');
+      resultBadge.className = auditResultClass(event.result);
+      resultBadge.textContent = event.result_label || event.result || '已记录';
+      resultCell.appendChild(resultBadge);
+      row.appendChild(resultCell);
+
+      var actorCell = document.createElement('td');
+      actorCell.textContent = event.actor_display || '—';
+      actorCell.title = event.actor_user_id || '';
+      row.appendChild(actorCell);
+
+      var targetCell = document.createElement('td');
+      targetCell.textContent = event.target_display || '—';
+      targetCell.title = event.target_id || '';
+      row.appendChild(targetCell);
+
+      var detailCell = document.createElement('td');
+      var detailButton = document.createElement('button');
+      detailButton.type = 'button';
+      detailButton.className = 'cp-action-btn';
+      detailButton.textContent = '查看详情';
+      detailButton.addEventListener('click', function () { openAuditDetail(event.id); });
+      detailCell.appendChild(detailButton);
+      row.appendChild(detailCell);
+
+      tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    container.appendChild(table);
+    renderAuditPagination();
+  }
+
+  function renderAuditPagination() {
+    var container = $('admin-audit-pagination');
+    if (!container) return;
+    container.textContent = '';
+    if (!state.audit.full) return;
+    var totalPages = Math.max(1, Math.ceil(state.audit.total / state.audit.pageSize));
+    var info = document.createElement('span');
+    info.className = 'field-hint';
+    info.textContent = '共 ' + state.audit.total + ' 条，第 ' + state.audit.page + ' / ' + totalPages + ' 页';
+    container.appendChild(info);
+
+    var controls = document.createElement('div');
+    controls.className = 'ch-pagination-controls';
+    var prev = document.createElement('button');
+    prev.type = 'button';
+    prev.className = 'ch-page-btn';
+    prev.textContent = '上一页';
+    prev.disabled = state.audit.page <= 1;
+    prev.addEventListener('click', function () {
+      if (state.audit.page > 1) {
+        state.audit.page -= 1;
+        loadAudit();
+      }
+    });
+    controls.appendChild(prev);
+    var next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'ch-page-btn';
+    next.textContent = '下一页';
+    next.disabled = state.audit.page >= totalPages;
+    next.addEventListener('click', function () {
+      if (state.audit.page < totalPages) {
+        state.audit.page += 1;
+        loadAudit();
+      }
+    });
+    controls.appendChild(next);
+    container.appendChild(controls);
+  }
+
   function loadAudit() {
-    return AIGV.api('/api/admin/audit-logs?limit=10').then(function (data) {
+    var params = new URLSearchParams();
+    params.append('limit', state.audit.full ? state.audit.pageSize : 10);
+    params.append('offset', state.audit.full ? (state.audit.page - 1) * state.audit.pageSize : 0);
+    if (state.audit.eventType) params.append('event_type', state.audit.eventType);
+    if (state.audit.result) params.append('result', state.audit.result);
+    if (state.audit.actor) params.append('actor', state.audit.actor);
+    if (state.audit.startDate) params.append('start_date', state.audit.startDate);
+    if (state.audit.endDate) params.append('end_date', state.audit.endDate);
+    return AIGV.api('/api/admin/audit-logs?' + params.toString()).then(function (data) {
+      state.audit.items = data.items || [];
+      state.audit.total = data.total || 0;
+      populateAuditFilterOptions(data.filter_options);
+      renderAudit();
+    }).catch(function (error) {
+      state.audit.items = [];
+      state.audit.total = 0;
+      renderAudit();
       var container = $('admin-audit-table');
-      if (!container) return;
-      container.textContent = '';
-      var items = data.items || [];
-      if (!items.length) {
+      if (container) {
+        container.textContent = '';
         var empty = document.createElement('p');
         empty.className = 'empty-state';
-        empty.textContent = '暂无审计事件。';
+        empty.textContent = '审计日志加载失败：' + (error.message || '未知错误');
         container.appendChild(empty);
-        return;
       }
-      var table = document.createElement('table');
-      table.className = 'cp-table';
-      var thead = document.createElement('thead');
-      var head = document.createElement('tr');
-      ['时间', '事件', '结果', '操作人', '目标'].forEach(function (title) {
-        var th = document.createElement('th');
-        th.textContent = title;
-        head.appendChild(th);
-      });
-      thead.appendChild(head);
-      table.appendChild(thead);
-      var tbody = document.createElement('tbody');
-      items.forEach(function (event) {
-        var row = document.createElement('tr');
-        [AIGV.formatTime(event.created_at), event.event_type, event.message, event.actor_user_id || '—',
-          (event.metadata && event.metadata.target_id) || '—'].forEach(function (value) {
-          var td = document.createElement('td');
-          td.textContent = value === null || value === undefined ? '—' : String(value);
-          row.appendChild(td);
-        });
-        tbody.appendChild(row);
-      });
-      table.appendChild(tbody);
-      container.appendChild(table);
-    }).catch(function () {});
+      showToast(error.message || '审计日志加载失败', 'error');
+    });
+  }
+
+  function appendAuditDetailRow(container, label, value) {
+    var row = document.createElement('div');
+    row.className = 'admin-audit-detail-row';
+    var labelEl = document.createElement('span');
+    labelEl.className = 'admin-audit-detail-label';
+    labelEl.textContent = label;
+    var valueEl = document.createElement('span');
+    valueEl.className = 'admin-audit-detail-value';
+    valueEl.textContent = value === null || value === undefined || value === '' ? '—' : String(value);
+    row.appendChild(labelEl);
+    row.appendChild(valueEl);
+    container.appendChild(row);
+    return valueEl;
+  }
+
+  function renderAuditDetail(data) {
+    var container = $('admin-audit-detail');
+    if (!container) return;
+    container.textContent = '';
+    var detail = data.detail || {};
+    var rawIds = detail.raw_ids || {};
+    var model = detail.model || null;
+    var project = detail.project || null;
+    var error = detail.error || null;
+
+    var eventValue = appendAuditDetailRow(container, '事件类型',
+      (data.event_label || '其他系统事件') + '（' + (detail.event_raw_code || data.event_type || '—') + '）');
+    eventValue.classList.add('admin-audit-mono');
+    appendAuditDetailRow(container, '发生时间', AIGV.formatTime(data.created_at));
+    appendAuditDetailRow(container, '操作人', data.actor_display || '—');
+    if (data.actor_display_snapshot && data.actor_display_snapshot !== data.actor_display) {
+      appendAuditDetailRow(container, '操作人快照', data.actor_display_snapshot);
+    }
+    appendAuditDetailRow(container, '操作对象', data.target_display || '—');
+    appendAuditDetailRow(container, '操作结果', data.result_label || data.result || '—');
+    appendAuditDetailRow(container, '相关模型', model
+      ? [model.provider || '', model.model_id || ''].filter(Boolean).join(' · ')
+      : '—');
+    appendAuditDetailRow(container, '相关项目', project
+      ? (project.name || project.id) + (project.id ? '（' + project.id + '）' : '')
+      : '—');
+    appendAuditDetailRow(container, '错误原因', error
+      ? [error.code || '', error.message || ''].filter(Boolean).join(' · ')
+      : '—');
+    appendAuditDetailRow(container, '请求 ID', data.request_id || '—');
+    var eventIdEl = appendAuditDetailRow(container, '原始事件 ID', rawIds.event_id || data.id || '—');
+    eventIdEl.classList.add('admin-audit-mono');
+    var targetIdEl = appendAuditDetailRow(container, '原始目标 ID', rawIds.target_id || '—');
+    targetIdEl.classList.add('admin-audit-mono');
+    var actorIdEl = appendAuditDetailRow(container, '原始操作人 ID（脱敏）', rawIds.actor_user_id || '—');
+    actorIdEl.classList.add('admin-audit-mono');
+
+    var metadataTitle = document.createElement('div');
+    metadataTitle.className = 'admin-audit-detail-section';
+    metadataTitle.textContent = '已脱敏的详细 Metadata';
+    container.appendChild(metadataTitle);
+    var pre = document.createElement('pre');
+    pre.className = 'admin-audit-metadata';
+    pre.textContent = JSON.stringify(detail.sanitized_metadata || data.metadata || {}, null, 2);
+    container.appendChild(pre);
+  }
+
+  function openAuditDetail(eventId) {
+    AIGV.api('/api/admin/audit-logs/' + encodeURIComponent(eventId)).then(function (data) {
+      renderAuditDetail(data);
+      if (auditModal) {
+        auditModal.classList.add('is-open');
+        auditModal.setAttribute('aria-hidden', 'false');
+      }
+    }).catch(function (error) {
+      showToast(error.message || '审计详情加载失败', 'error');
+    });
+  }
+
+  function closeAuditDetail() {
+    if (auditModal) {
+      auditModal.classList.remove('is-open');
+      auditModal.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function resetAuditFilters() {
+    state.audit.eventType = '';
+    state.audit.result = '';
+    state.audit.actor = '';
+    state.audit.startDate = '';
+    state.audit.endDate = '';
+    state.audit.page = 1;
+    if ($('admin-audit-event-filter')) $('admin-audit-event-filter').value = '';
+    if ($('admin-audit-result-filter')) $('admin-audit-result-filter').value = '';
+    if ($('admin-audit-actor-filter')) $('admin-audit-actor-filter').value = '';
+    if ($('admin-audit-start-date')) $('admin-audit-start-date').value = '';
+    if ($('admin-audit-end-date')) $('admin-audit-end-date').value = '';
+    loadAudit();
   }
 
   function refreshAll() {
@@ -624,6 +872,69 @@
         loadTasks();
       });
     }
+
+    var auditEventFilter = $('admin-audit-event-filter');
+    if (auditEventFilter) {
+      auditEventFilter.addEventListener('change', function () {
+        state.audit.eventType = auditEventFilter.value;
+        state.audit.page = 1;
+        loadAudit();
+      });
+    }
+    var auditResultFilter = $('admin-audit-result-filter');
+    if (auditResultFilter) {
+      auditResultFilter.addEventListener('change', function () {
+        state.audit.result = auditResultFilter.value;
+        state.audit.page = 1;
+        loadAudit();
+      });
+    }
+    var auditActorFilter = $('admin-audit-actor-filter');
+    if (auditActorFilter) {
+      auditActorFilter.addEventListener('input', debounce(function () {
+        state.audit.actor = auditActorFilter.value.trim();
+        state.audit.page = 1;
+        loadAudit();
+      }, 350));
+    }
+    var auditStartDate = $('admin-audit-start-date');
+    if (auditStartDate) {
+      auditStartDate.addEventListener('change', function () {
+        state.audit.startDate = auditStartDate.value;
+        state.audit.page = 1;
+        loadAudit();
+      });
+    }
+    var auditEndDate = $('admin-audit-end-date');
+    if (auditEndDate) {
+      auditEndDate.addEventListener('change', function () {
+        state.audit.endDate = auditEndDate.value;
+        state.audit.page = 1;
+        loadAudit();
+      });
+    }
+    var auditReset = $('admin-audit-reset');
+    if (auditReset) auditReset.addEventListener('click', resetAuditFilters);
+
+    var auditToggle = $('admin-audit-toggle');
+    if (auditToggle) {
+      auditToggle.addEventListener('click', function () {
+        state.audit.full = !state.audit.full;
+        state.audit.page = 1;
+        auditToggle.textContent = state.audit.full ? '收起' : '查看全部记录';
+        loadAudit();
+      });
+    }
+    var auditModalClose = $('admin-audit-modal-close');
+    if (auditModalClose) auditModalClose.addEventListener('click', closeAuditDetail);
+    if (auditModal) {
+      auditModal.addEventListener('click', function (event) {
+        if (event.target === auditModal) closeAuditDetail();
+      });
+    }
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') closeAuditDetail();
+    });
 
     var editForm = $('admin-edit-form');
     if (editForm) editForm.addEventListener('submit', submitEdit);

@@ -91,11 +91,26 @@
 
       <section class="admin-section" aria-labelledby="admin-audit-title">
         <div class="cp-section-header admin-section-header">
-          <h2 class="cp-section-title" id="admin-audit-title">最近审计事件</h2>
+          <h2 class="cp-section-title" id="admin-audit-title">审计日志</h2>
+          <button type="button" class="btn-outline btn-sm" id="admin-audit-toggle">查看全部记录</button>
+        </div>
+        <div class="admin-filter-bar admin-audit-filters">
+          <select id="admin-audit-event-filter" class="ch-filter-select" aria-label="事件类型">
+            <option value="">全部事件</option>
+          </select>
+          <select id="admin-audit-result-filter" class="ch-filter-select" aria-label="结果">
+            <option value="">全部结果</option>
+          </select>
+          <input id="admin-audit-actor-filter" class="ch-search-input" type="search"
+                 placeholder="操作人用户名 / 昵称 / 用户ID" aria-label="操作人" />
+          <input id="admin-audit-start-date" class="ch-filter-select" type="date" aria-label="开始日期" />
+          <input id="admin-audit-end-date" class="ch-filter-select" type="date" aria-label="结束日期" />
+          <button type="button" class="btn-outline btn-sm" id="admin-audit-reset">重置筛选</button>
         </div>
         <div class="cp-table-container" id="admin-audit-table">
           <p class="empty-state">加载中...</p>
         </div>
+        <div class="ch-pagination" id="admin-audit-pagination"></div>
       </section>
     </main>
 
@@ -130,11 +145,23 @@
       </div>
     </div>
 
+    <div class="admin-modal-overlay" id="admin-audit-modal" aria-hidden="true">
+      <div class="admin-modal admin-modal-wide" role="dialog" aria-modal="true"
+           aria-labelledby="admin-audit-modal-title">
+        <div class="admin-modal-header">
+          <h2 id="admin-audit-modal-title">审计事件详情</h2>
+          <button type="button" class="admin-modal-close" id="admin-audit-modal-close"
+                  aria-label="关闭">&times;</button>
+        </div>
+        <div class="admin-audit-detail" id="admin-audit-detail"></div>
+      </div>
+    </div>
+
     <div class="toast-container" id="admin-toast-container"></div>
 
     <script src="/web/runtime-config.js"></script>
     <script src="/web/api-client.js"></script>
-    <script src="/web/admin-users.js"></script>
+    <script src="/web/admin-users.js?v=20261031"></script>
     <script src="/web/session-nav.js"></script>
   </body>
 </html>

@@ -196,6 +196,7 @@ SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM billing_usage_records
 - 动态 `Fields/Data` 解析成功
 - 空 `Values` 维度过滤成功返回 `ApikeyID`/`ModelName`
 - 临时数据库完整同步写入 2 条官方用量快照
+- 线上 `enrich_task_usage` 对一条真实 Seedance 终态任务调用 `GetInferenceTaskUsage` 成功：返回 `OutputTokens=108900`、`BillingStatus=normal`、`Resolution=720p`；接口未返回 `TotalTokens`，数据库保持 NULL，不推算
 - `QueryBalanceAcct` 成功返回官方余额（CNY）
 - `ListBillOverviewByProd(2026-10)` 返回 2 个产品：`Doubao-Seedream`、`ark_bd`
 - `ListBillDetail(2026-10, GroupPeriod=2)` 返回 3 条明细

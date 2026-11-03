@@ -160,6 +160,26 @@ class Config(object):
     DEMO_MODE = _to_bool(os.environ.get("DEMO_MODE"), default=False)
     ALLOW_REGISTRATION = _to_bool(os.environ.get("ALLOW_REGISTRATION"), default=True)
 
+    # ── Asset library capacity (decimal TB; 1 TB = 1,000,000,000,000 bytes) ──
+    # Showcase values are a display-only configuration and never replace the
+    # actual database usage returned as ``actual_used_bytes``.
+    ASSET_STORAGE_QUOTA_TB = max(
+        0.0, _to_float(os.environ.get("ASSET_STORAGE_QUOTA_TB"), default=2.0)
+    )
+    ASSET_STORAGE_SHOWCASE_MODE = _to_bool(
+        os.environ.get("ASSET_STORAGE_SHOWCASE_MODE"), default=False
+    )
+    ASSET_STORAGE_SHOWCASE_USED_TB = max(
+        0.0,
+        _to_float(os.environ.get("ASSET_STORAGE_SHOWCASE_USED_TB"), default=1.94),
+    )
+
+    # Compute platform reference scenario.  Opt-in and independent of DEMO_MODE
+    # so real billing/usage records are never sourced from this data.
+    COMPUTE_SHOWCASE_MODE = _to_bool(
+        os.environ.get("COMPUTE_SHOWCASE_MODE"), default=False
+    )
+
     # Luma（可选，保留以便后续切换）
     LUMA_API_KEY = os.environ.get("LUMA_API_KEY", "")
     LUMA_BASE_URL = os.environ.get("LUMA_BASE_URL", "https://api.lumalabs.ai/dream-machine/v1")

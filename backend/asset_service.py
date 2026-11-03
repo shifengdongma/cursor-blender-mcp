@@ -276,6 +276,44 @@ class AssetService(object):
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
         return self.db.count(Asset.TABLE_NAME, where_clause, tuple(params) if params else None)
 
+    def document_filter_conditions(self, owner_user_id=None, include_shared=False,
+                                   tenant_id=None, q=None, created_after=None,
+                                   created_before=None):
+        """Public wrapper for the document branch of the unified library."""
+        return self._filter_conditions(
+            asset_type=self.TYPE_DOCUMENT,
+            owner_user_id=owner_user_id,
+            include_shared=include_shared,
+            tenant_id=tenant_id,
+            q=q,
+            created_after=created_after,
+            created_before=created_before,
+        )
+
+    def sum_storage_bytes(self, owner_user_id=None, include_shared=False,
+                          tenant_id=None):
+        """Sum managed asset bytes, counting each stored file only once.
+
+        Metadata-only rows (no ``file_path``) are excluded.  Grouping by
+        ``file_path`` prevents the same physical file from being counted twice
+        when several records reference it.  This is a DB aggregation, not a
+        recursive filesystem scan.
+        """
+        conditions, params = self._filter_conditions(
+            owner_user_id=owner_user_id,
+            include_shared=include_shared,
+            tenant_id=tenant_id,
+        )
+        conditions.append("file_path IS NOT NULL AND file_path != ''")
+        where_clause = ' AND '.join(conditions)
+        row = self.db.fetch_one(
+            "SELECT COALESCE(SUM(file_size), 0) AS total FROM ("
+            "SELECT file_path, MAX(COALESCE(file_size, 0)) AS file_size "
+            "FROM assets WHERE {0} GROUP BY file_path)".format(where_clause),
+            tuple(params) if params else None,
+        )
+        return int(row['total'] or 0) if row else 0
+
     def get_asset(self, asset_id):
         row = self.db.fetch_one('SELECT * FROM assets WHERE id = ?', (asset_id,))
         return Asset.from_row(row)

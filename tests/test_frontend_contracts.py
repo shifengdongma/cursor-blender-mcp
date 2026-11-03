@@ -119,3 +119,26 @@ def test_official_billing_section_contract():
     assert "未归属" in js
     assert "not_enabled" in js
     assert "AIGVArk.renderBilling" in compute_js
+
+
+def test_asset_library_stats_and_unified_documents_contract():
+    html = _read("web/assets.html")
+    js = _read("web/assets.js")
+    css = _read("web/styles.css")
+    assert 'data-stat="models"' in html
+    assert 'data-stat="documents"' in html
+    assert 'data-stat="storage"' in html
+    assert "敏感内容库" in html
+    assert "多模态素材库容量" in html
+    assert "Venue Presets" not in html
+    assert 'data-tab="prompts"' not in html
+    assert 'data-tab="documents"' in html
+    assert "/assets?view=sensitive" in html
+    assert 'id="prompt-doc-modal"' in html
+    assert "/api/assets/documents" in js
+    assert "renderUnifiedDocuments" in js
+    assert "document_total" in js
+    assert "querySelectorAll('#stats-row .stat-number')" not in js
+    assert "data-storage-source" in js
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in css
+    assert "#stats-row.is-hidden" in css

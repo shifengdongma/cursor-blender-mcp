@@ -10368,3 +10368,154 @@ a:focus-visible,
   opacity: 0.82;
   z-index: 2;
 }
+
+/* ========================================
+   Asset Library — four-card stats, sensitive view, unified documents
+   ======================================== */
+
+#stats-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+#stats-row.is-hidden {
+  display: none !important;
+}
+
+#stats-row .stat-item {
+  min-width: 0;
+}
+
+.stat-item-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.stat-item-link:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 3px;
+}
+
+.stat-number-nav {
+  font-size: 1.35rem;
+  letter-spacing: 0.02em;
+  color: var(--primary);
+}
+
+.stat-number-storage {
+  font-size: clamp(1.05rem, 1.6vw, 1.45rem);
+  line-height: 1.15;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-meter {
+  width: 100%;
+  max-width: 220px;
+  height: 5px;
+  margin-top: 8px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.storage-meter-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary-dark), var(--primary));
+  transition: width var(--transition-base);
+}
+
+.library-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--space-xs);
+  color: var(--accent-cyan);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  align-self: flex-start;
+}
+
+.library-back-link:hover {
+  color: var(--accent-cyan-strong);
+}
+
+.library-back-link[hidden] {
+  display: none;
+}
+
+.asset-view-sensitive .page-header-library {
+  gap: var(--space-md);
+}
+
+.meta-tag-source {
+  color: var(--primary);
+  border-color: rgba(215, 168, 79, 0.28);
+  background: rgba(215, 168, 79, 0.08);
+}
+
+.asset-actions-prompt-doc {
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+  margin-top: var(--space-sm);
+}
+
+.prompt-doc-card .prompt-doc-delete {
+  color: var(--accent-red);
+  border-color: rgba(214, 127, 133, 0.3);
+}
+
+.prompt-doc-card .prompt-doc-delete:hover {
+  border-color: rgba(214, 127, 133, 0.55);
+  background: rgba(214, 127, 133, 0.08);
+}
+
+.prompt-doc-modal {
+  max-width: 760px;
+}
+
+.prompt-doc-view-title {
+  margin: var(--space-md) 0 var(--space-sm);
+  color: var(--text-primary);
+  font-size: var(--text-card-title);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.prompt-doc-view-content {
+  max-height: 46vh;
+  overflow: auto;
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: rgba(8, 14, 22, 0.55);
+  color: var(--text-secondary);
+  font-size: var(--text-body);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+#prompt-doc-view .doc-keywords {
+  margin: var(--space-sm) 0;
+}
+
+@media (max-width: 1024px) {
+  #stats-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  #stats-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stat-number-storage {
+    white-space: normal;
+  }
+}

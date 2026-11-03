@@ -4,8 +4,8 @@ from __future__ import absolute_import
 
 import os
 
-from backend import asset_service, creative_project_service, prompt_doc_service
-from backend import storyboard_service, task_service, timeline_service
+from backend import asset_service, creative_project_service, document_library_service
+from backend import prompt_doc_service, storyboard_service, task_service, timeline_service
 from backend.auth_service import AuthService
 from backend.config import Config
 from backend.database import reset_database
@@ -24,6 +24,10 @@ def reset_globals():
     timeline_service._timeline_service = None
     try:
         prompt_doc_service._prompt_doc_service = None
+    except Exception:
+        pass
+    try:
+        document_library_service._document_library_service = None
     except Exception:
         pass
     try:
@@ -47,6 +51,10 @@ def make_app(tmp_path, **overrides):
         SECRET_KEY = "test-secret-key-0123456789abcdef"
         DEMO_MODE = False
         ALLOW_REGISTRATION = True
+        ASSET_STORAGE_QUOTA_TB = 2.0
+        ASSET_STORAGE_SHOWCASE_MODE = False
+        ASSET_STORAGE_SHOWCASE_USED_TB = 1.94
+        COMPUTE_SHOWCASE_MODE = False
         CSRF_ENABLED = True
         SESSION_SECURE = False
         SESSION_LIFETIME_DAYS = 1

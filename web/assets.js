@@ -25,6 +25,9 @@
   var historySort = 'newest';
   var historyTaskMap = {};
   var currentAssetsById = {};
+  var currentPromptDocsById = {};
+  var currentView = 'library';
+  var promptDocCurrent = null;
 
   // Monotonic request sequence: only the latest request may render.
   var loadSeq = 0;
@@ -128,6 +131,30 @@
   var editAssetCloseBtn = document.getElementById('edit-asset-close');
   var editAssetCancelBtn = document.getElementById('edit-asset-cancel');
   var editAssetSaveBtn = document.getElementById('edit-asset-save');
+  var statsRow = document.getElementById('stats-row');
+  var pageTitleEl = document.getElementById('page-title');
+  var pageDescEl = document.getElementById('page-desc');
+  var heroBadgeEl = document.getElementById('hero-badge');
+  var backToLibraryLink = document.getElementById('back-to-library');
+  var storageMeterFill = document.getElementById('storage-meter-fill');
+  var promptDocModal = document.getElementById('prompt-doc-modal');
+  var promptDocCloseBtn = document.getElementById('prompt-doc-close');
+  var promptDocView = document.getElementById('prompt-doc-view');
+  var promptDocForm = document.getElementById('prompt-doc-form');
+  var promptDocIdInput = document.getElementById('prompt-doc-id');
+  var promptDocTitleInput = document.getElementById('prompt-doc-title');
+  var promptDocCategorySelect = document.getElementById('prompt-doc-category');
+  var promptDocKeywordsInput = document.getElementById('prompt-doc-keywords');
+  var promptDocContentInput = document.getElementById('prompt-doc-content');
+  var promptDocViewTitle = document.getElementById('prompt-doc-view-title');
+  var promptDocViewCategory = document.getElementById('prompt-doc-view-category');
+  var promptDocViewUpdated = document.getElementById('prompt-doc-view-updated');
+  var promptDocViewKeywords = document.getElementById('prompt-doc-view-keywords');
+  var promptDocViewContent = document.getElementById('prompt-doc-view-content');
+  var promptDocEditBtn = document.getElementById('prompt-doc-edit-btn');
+  var promptDocViewCloseBtn = document.getElementById('prompt-doc-view-close');
+  var promptDocCancelBtn = document.getElementById('prompt-doc-cancel');
+  var promptDocSaveBtn = document.getElementById('prompt-doc-save');
 
   // Tab buttons
   var tabBtns = document.querySelectorAll('.tab-btn');
@@ -136,6 +163,8 @@
   document.addEventListener('DOMContentLoaded', init);
 
   function init() {
+    applyViewMode();
+
     // Tab navigation
     tabBtns.forEach(function(btn) {
       btn.addEventListener('click', function() {
@@ -298,9 +327,37 @@
       editAssetForm.addEventListener('submit', handleEditAssetSave);
     }
 
+    // Prompt document modal
+    if (promptDocCloseBtn) {
+      promptDocCloseBtn.addEventListener('click', closePromptDocModal);
+    }
+    if (promptDocViewCloseBtn) {
+      promptDocViewCloseBtn.addEventListener('click', closePromptDocModal);
+    }
+    if (promptDocCancelBtn) {
+      promptDocCancelBtn.addEventListener('click', closePromptDocModal);
+    }
+    if (promptDocEditBtn) {
+      promptDocEditBtn.addEventListener('click', function() {
+        if (promptDocCurrent) showPromptDocEdit(promptDocCurrent);
+      });
+    }
+    if (promptDocModal) {
+      promptDocModal.addEventListener('click', function(e) {
+        if (e.target === promptDocModal) closePromptDocModal();
+      });
+    }
+    if (promptDocForm) {
+      promptDocForm.addEventListener('submit', handlePromptDocSave);
+    }
+
     // Keyboard navigation
     document.addEventListener('keydown', function(e) {
       if (e.key !== 'Escape') return;
+      if (promptDocModal && promptDocModal.classList.contains('active')) {
+        closePromptDocModal();
+        return;
+      }
       if (editAssetModal && editAssetModal.classList.contains('active')) {
         closeEditAssetModal();
         return;
@@ -350,12 +407,43 @@
 
     // Initial load (supports /assets?tab=history links from the profile page)
     var initialTab = new URLSearchParams(window.location.search).get('tab');
+    if (initialTab === 'prompts') initialTab = 'documents';
     if (initialTab && document.querySelector('.tab-btn[data-tab="' + initialTab + '"]')) {
       switchTab(initialTab);
     } else {
       requestAssets();
     }
-    loadSummary();
+    if (currentView !== 'sensitive') loadSummary();
+  }
+
+  function applyViewMode() {
+    var requested = new URLSearchParams(window.location.search).get('view');
+    currentView = requested === 'sensitive' ? 'sensitive' : 'library';
+    var sensitive = currentView === 'sensitive';
+    document.body.classList.toggle('asset-view-sensitive', sensitive);
+    if (pageTitleEl) {
+      pageTitleEl.textContent = sensitive ? '敏感内容库' : '空间资产与 Prompt 内容库';
+    }
+    if (pageDescEl) {
+      pageDescEl.textContent = sensitive
+        ? '浏览与管理敏感内容条目。当前视图复用素材库内容，不改变素材可见性与权限。'
+        : '统一浏览 3D 模型、图片、视频、音频、文档与压缩包，在高品质内容展示与管理操作之间保持清晰平衡。';
+    }
+    if (heroBadgeEl) {
+      heroBadgeEl.textContent = sensitive ? 'Sensitive Content Library' : 'Curated Asset Library';
+    }
+    if (backToLibraryLink) {
+      backToLibraryLink.hidden = !sensitive;
+    }
+    if (statsRow) {
+      statsRow.classList.toggle('is-hidden', sensitive);
+      if (sensitive) {
+        statsRow.setAttribute('aria-hidden', 'true');
+      } else {
+        statsRow.removeAttribute('aria-hidden');
+      }
+    }
+    document.title = sensitive ? '敏感内容库 - AIGV Studio' : '资产库 - AIGV Studio';
   }
 
   function initScrollToTop() {
@@ -377,6 +465,7 @@
   }
 
   function switchTab(tab) {
+    if (tab === 'prompts') tab = 'documents';
     currentTab = tab;
     currentPage = 1;
 
@@ -415,7 +504,7 @@
   }
 
   function isAssetTab(tab) {
-    return tab !== 'prompts' && tab !== 'history';
+    return tab !== 'history';
   }
 
   function updateAssetFilterVisibility() {
@@ -444,8 +533,6 @@
         return 'archive';
       case 'all':
         return '';
-      case 'prompts':
-        return 'prompt_doc';
       default:
         return '';
     }
@@ -589,6 +676,10 @@
       loadGenerationHistory();
       return;
     }
+    if (currentTab === 'documents') {
+      requestDocuments();
+      return;
+    }
     if (!assetGrid) return;
 
     // An inverted range must not block tab switches or filter changes; reset
@@ -605,42 +696,34 @@
     assetGrid.innerHTML = renderSkeletons();
     assetGrid.style.opacity = '1';
 
-    var endpoint = tab === 'prompts' ? '/api/prompts/documents' : '/api/assets';
     var params = new URLSearchParams();
     params.append('limit', pageSize);
     params.append('offset', (currentPage - 1) * pageSize);
 
-    if (tab !== 'prompts') {
-      var assetType = getAssetTypeForTab();
-      if (assetType) {
-        params.append('asset_type', assetType);
-      }
-      if (venueFilter) {
-        params.append('venue_type', venueFilter);
-      }
-      if (searchQuery) {
-        params.append('q', searchQuery);
-      }
-      if (assetDateFrom) {
-        params.append('created_after', assetDateFrom);
-      }
-      if (assetDateTo) {
-        params.append('created_before', assetDateTo);
-      }
-      params.append('sort', assetSort || 'newest');
+    var assetType = getAssetTypeForTab();
+    if (assetType) {
+      params.append('asset_type', assetType);
     }
+    if (venueFilter) {
+      params.append('venue_type', venueFilter);
+    }
+    if (searchQuery) {
+      params.append('q', searchQuery);
+    }
+    if (assetDateFrom) {
+      params.append('created_after', assetDateFrom);
+    }
+    if (assetDateTo) {
+      params.append('created_before', assetDateTo);
+    }
+    params.append('sort', assetSort || 'newest');
 
-    window.AIGV.api(endpoint + '?' + params.toString())
+    window.AIGV.api('/api/assets?' + params.toString())
       .then(function(responseData) {
         if (seq !== loadSeq) return;
         responseData = responseData || {};
         var items = responseData.items || [];
-        var filteredItems = tab === 'prompts' ? filterItems(items) : items;
-        if (tab === 'prompts') {
-          renderPromptDocuments(filteredItems);
-        } else {
-          renderAssets(filteredItems);
-        }
+        renderAssets(items);
         var totalItems = typeof responseData.total === 'number' ? responseData.total : items.length;
         totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
         if (currentPage > totalPages) {
@@ -653,6 +736,48 @@
         console.error('Error loading assets:', error);
         assetGrid.innerHTML = '<div class="empty-state-container"><p class="empty-desc">加载失败，请重试</p></div>';
         showToast(error && error.message ? error.message : '加载失败，请检查网络连接', 'error');
+      });
+  }
+
+  function requestDocuments() {
+    if (!assetGrid) return;
+    if (!isDateRangeValid(assetDateFrom, assetDateTo)) {
+      sanitizeAssetDateRange();
+    }
+
+    var seq = ++loadSeq;
+    resetPreviewState();
+    assetGrid.innerHTML = renderSkeletons();
+    assetGrid.style.opacity = '1';
+
+    var params = new URLSearchParams();
+    params.append('limit', pageSize);
+    params.append('offset', (currentPage - 1) * pageSize);
+    if (searchQuery) params.append('q', searchQuery);
+    if (assetDateFrom) params.append('created_after', assetDateFrom);
+    if (assetDateTo) params.append('created_before', assetDateTo);
+    params.append('sort', assetSort || 'newest');
+
+    window.AIGV.api('/api/assets/documents?' + params.toString())
+      .then(function(responseData) {
+        if (seq !== loadSeq) return;
+        responseData = responseData || {};
+        var items = responseData.items || [];
+        var totalItems = typeof responseData.total === 'number' ? responseData.total : items.length;
+        totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+        if (currentPage > totalPages) {
+          currentPage = totalPages;
+          requestDocuments();
+          return;
+        }
+        renderUnifiedDocuments(items);
+        renderPagination();
+      })
+      .catch(function(error) {
+        if (seq !== loadSeq) return;
+        console.error('Error loading documents:', error);
+        assetGrid.innerHTML = '<div class="empty-state-container"><p class="empty-desc">文档加载失败，请重试</p></div>';
+        showToast((error && error.message) || '文档加载失败，请检查网络连接', 'error');
       });
   }
 
@@ -702,37 +827,51 @@
       });
   }
 
+  function setStat(key, value) {
+    var node = document.querySelector('#stats-row [data-stat="' + key + '"]');
+    if (node) node.textContent = value;
+  }
+
+  function formatStorageValue(bytes) {
+    var value = Number(bytes) || 0;
+    if (value >= 1000000000000) return (value / 1000000000000).toFixed(2) + ' TB';
+    if (value >= 1000000000) return (value / 1000000000).toFixed(2) + ' GB';
+    if (value >= 1000000) return (value / 1000000).toFixed(1) + ' MB';
+    if (value >= 1000) return (value / 1000).toFixed(1) + ' KB';
+    return Math.round(value) + ' B';
+  }
+
+  function updateStorageMeter(usedBytes, quotaBytes) {
+    if (!storageMeterFill) return;
+    var pct = quotaBytes > 0 ? Math.max(0, Math.min(100, (usedBytes / quotaBytes) * 100)) : 0;
+    storageMeterFill.style.width = pct.toFixed(1) + '%';
+  }
+
   function loadSummary() {
     window.AIGV.api('/api/assets/summary').then(function(summary) {
-      var nodes = document.querySelectorAll('#stats-row .stat-number');
-      if (nodes.length >= 3) {
-        nodes[0].textContent = summary.models || 0;
-        nodes[1].textContent = summary.prompt_documents || 0;
-        nodes[2].textContent = summary.venue_presets || 0;
-      }
+      summary = summary || {};
+      setStat('models', summary.models || 0);
+      var documentTotal = typeof summary.document_total === 'number'
+        ? summary.document_total
+        : (Number(summary.documents) || 0) + (Number(summary.prompt_documents) || 0);
+      setStat('documents', documentTotal);
+
+      var storage = summary.storage || {};
+      var usedBytes = Number(storage.used_bytes) || 0;
+      var quotaBytes = Number(storage.quota_bytes) || 0;
+      setStat('storage', formatStorageValue(usedBytes) + ' / ' + formatStorageValue(quotaBytes));
+      var note = document.querySelector('#stats-row [data-stat="storage-note"]');
+      if (note) note.textContent = '已用 / 总容量';
+      updateStorageMeter(usedBytes, quotaBytes);
+      document.documentElement.setAttribute(
+        'data-storage-source', storage.source || 'actual'
+      );
     }).catch(function() {
-      var nodes = document.querySelectorAll('#stats-row .stat-number');
-      for (var i = 0; i < nodes.length; i += 1) nodes[i].textContent = '—';
-    });
-  }
-
-  function getSearchableText(item) {
-    return [
-      item && item.name,
-      item && item.title,
-      item && item.description,
-      item && item.content,
-      item && item.keywords,
-      item && getVenueLabel(item.venue_type),
-      item && getCategoryLabel(item.category)
-    ].join(' ').toLowerCase();
-  }
-
-  function filterItems(items) {
-    var keyword = (searchQuery || '').toLowerCase();
-    if (!keyword) return items;
-    return (items || []).filter(function(item) {
-      return getSearchableText(item).indexOf(keyword) !== -1;
+      setStat('models', '—');
+      setStat('documents', '—');
+      setStat('storage', '— / —');
+      updateStorageMeter(0, 0);
+      document.documentElement.setAttribute('data-storage-source', 'unknown');
     });
   }
 
@@ -759,6 +898,110 @@
       if (asset && asset.id) {
         currentAssetsById[asset.id] = asset;
       }
+    });
+  }
+
+  function renderUnifiedDocuments(items) {
+    resetPreviewState();
+    var assetItems = [];
+    currentPromptDocsById = {};
+    (items || []).forEach(function(item) {
+      if (!item) return;
+      if (item.source_type === 'prompt_document') {
+        currentPromptDocsById[item.id] = item;
+      } else {
+        assetItems.push(item);
+      }
+    });
+    cacheAssetsById(assetItems);
+
+    if (!items.length) {
+      if (hasActiveAssetFilters()) {
+        assetGrid.innerHTML = '\
+          <div class="empty-state-container">\
+            <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">\
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>\
+            </svg>\
+            <h3 class="empty-title">没有符合条件的文档</h3>\
+            <p class="empty-desc">尝试调整关键词、时间范围或排序。</p>\
+            <button type="button" class="btn-outline" id="empty-clear-filters">清除筛选</button>\
+          </div>';
+        var emptyClearBtn = assetGrid.querySelector('#empty-clear-filters');
+        if (emptyClearBtn) emptyClearBtn.addEventListener('click', resetAssetFilters);
+      } else {
+        assetGrid.innerHTML = '\
+          <div class="empty-state-container">\
+            <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">\
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>\
+              <polyline points="14 2 14 8 20 8"/>\
+              <line x1="16" y1="13" x2="8" y2="13"/>\
+              <line x1="16" y1="17" x2="8" y2="17"/>\
+            </svg>\
+            <h3 class="empty-title">暂无文档</h3>\
+            <p class="empty-desc">上传文档素材或创建 Prompt 文档后可在这里统一查看。</p>\
+          </div>';
+      }
+      return;
+    }
+
+    var html = '';
+    items.forEach(function(item, index) {
+      if (item.source_type === 'prompt_document') {
+        html += renderPromptDocCard(item, index);
+      } else {
+        html += '<div class="library-asset-card card-enter" style="animation-delay: ' + (index * 0.05) + 's;">';
+        html += renderAssetCard(item);
+        html += '</div>';
+      }
+    });
+    assetGrid.innerHTML = html;
+    attachAssetEventHandlers();
+    attachPromptDocHandlers();
+    setupAssetPreviews();
+  }
+
+  function renderPromptDocCard(doc, index) {
+    var category = doc.category || '';
+    var categoryToken = String(category || 'other').replace(/[^a-zA-Z0-9_-]/g, '') || 'other';
+    var categoryClass = 'category-' + categoryToken;
+    var updatedLabel = doc.updated_at && window.AIGV && window.AIGV.formatTime
+      ? window.AIGV.formatTime(doc.updated_at)
+      : '';
+    var actions = '\
+      <button type="button" class="asset-btn primary prompt-doc-view" data-prompt-doc-action="view" data-id="' + escapeHtml(doc.id) + '">详情</button>';
+    if (doc.can_edit) {
+      actions += '\
+        <button type="button" class="asset-btn prompt-doc-edit" data-prompt-doc-action="edit" data-id="' + escapeHtml(doc.id) + '">编辑</button>';
+    }
+    if (doc.can_delete) {
+      actions += '\
+        <button type="button" class="asset-btn prompt-doc-delete" data-prompt-doc-action="delete" data-id="' + escapeHtml(doc.id) + '">删除</button>';
+    }
+    return '\
+      <div class="prompt-doc-card card-enter ' + categoryClass + '" style="animation-delay: ' + (index * 0.05) + 's;">\
+        <div class="doc-header">\
+          <h3 class="doc-title">' + escapeHtml(doc.name || doc.title || '') + '</h3>\
+          <span class="doc-category" data-category="' + escapeHtml(category) + '">' + escapeHtml(getCategoryLabel(category)) + '</span>\
+        </div>\
+        <div class="doc-content">' + escapeHtml(doc.content || doc.description || '暂无内容') + '</div>\
+        ' + (doc.keywords ? '<div class="doc-keywords">' + renderKeywords(doc.keywords) + '</div>' : '') + '\
+        ' + (updatedLabel ? '<div class="asset-created-at">更新于 ' + escapeHtml(updatedLabel) + '</div>' : '') + '\
+        <div class="asset-actions asset-actions-prompt-doc">' + actions + '</div>\
+      </div>';
+  }
+
+  function attachPromptDocHandlers() {
+    document.querySelectorAll('[data-prompt-doc-action]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var id = this.dataset.id;
+        var action = this.dataset.promptDocAction;
+        if (action === 'delete') {
+          deletePromptDoc(id);
+        } else {
+          openPromptDocModal(id, action === 'edit');
+        }
+      });
     });
   }
 
@@ -843,7 +1086,26 @@
             编辑\
           </button>'
       : '';
-    var actionsClass = 'asset-actions' + (asset.can_edit ? ' asset-actions-edit' : '');
+    var downloadButton = asset.download_url
+      ? '<button class="asset-btn primary download" data-id="' + escapeHtml(asset.id) + '" data-tooltip="下载资产">\
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
+            下载\
+          </button>'
+      : '';
+    var deleteButton = asset.can_edit
+      ? '<button class="asset-btn delete" data-id="' + escapeHtml(asset.id) + '" data-tooltip="删除资产">\
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>\
+            删除\
+          </button>'
+      : '';
+    var actionCount = (editButton ? 1 : 0) + (downloadButton ? 1 : 0) + (deleteButton ? 1 : 0);
+    var actionsClass = 'asset-actions' + (actionCount >= 3 ? ' asset-actions-edit' : '');
+    var sourceTag = asset.source_type === 'asset'
+      ? '<span class="meta-tag meta-tag-source">素材文档</span>'
+      : '';
+    var actionsHtml = actionCount
+      ? '<div class="' + actionsClass + '">' + editButton + downloadButton + deleteButton + '</div>'
+      : '';
 
     return '\
       <div class="asset-preview">\
@@ -854,22 +1116,13 @@
         <h3>' + escapeHtml(asset.name) + '</h3>\
         <p>' + escapeHtml(asset.description || '暂无描述') + '</p>\
         <div class="asset-meta-info">\
+          ' + sourceTag + '\
           ' + (venueLabel ? '<span class="meta-tag meta-tag-venue">' + escapeHtml(venueLabel) + '</span>' : '') + '\
           ' + (asset.file_size ? '<span class="meta-tag">' + escapeHtml(formatFileSize(asset.file_size)) + '</span>' : '') + '\
           ' + (asset.asset_kind ? '<span class="meta-tag">' + escapeHtml(asset.asset_kind) + '</span>' : '') + '\
         </div>\
         ' + (createdAtLabel ? '<div class="asset-created-at">上传于 ' + escapeHtml(createdAtLabel) + '</div>' : '') + '\
-        <div class="' + actionsClass + '">\
-          ' + editButton + '\
-          <button class="asset-btn primary download" data-id="' + escapeHtml(asset.id) + '" data-tooltip="下载资产">\
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>\
-            下载\
-          </button>\
-          <button class="asset-btn delete" data-id="' + escapeHtml(asset.id) + '" data-tooltip="删除资产">\
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>\
-            删除\
-          </button>\
-        </div>\
+        ' + actionsHtml + '\
       </div>';
   }
 
@@ -1120,48 +1373,12 @@
     }
   }
 
-  function renderPromptDocuments(documents) {
-    if (!documents.length) {
-      assetGrid.innerHTML = '\
-        <div class="empty-state-container">\
-          <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">\
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>\
-            <polyline points="14 2 14 8 20 8"/>\
-            <line x1="16" y1="13" x2="8" y2="13"/>\
-            <line x1="16" y1="17" x2="8" y2="17"/>\
-          </svg>\
-          <h3 class="empty-title">暂无Prompt文档</h3>\
-          <p class="empty-desc">从知识库导入或手动创建</p>\
-        </div>';
-      return;
-    }
-
-    var html = '';
-    documents.forEach(function(doc, index) {
-      var category = doc.category || '';
-      // Categories are admin-supplied: keep the CSS token strictly alnum and
-      // escape the attribute/label (both are rendered into HTML).
-      var categoryToken = String(category || 'other').replace(/[^a-zA-Z0-9_-]/g, '') || 'other';
-      var categoryClass = 'category-' + categoryToken;
-      html += '\
-        <div class="prompt-doc-card card-enter ' + categoryClass + '" style="animation-delay: ' + (index * 0.05) + 's;">\
-          <div class="doc-header">\
-            <h3 class="doc-title">' + escapeHtml(doc.title) + '</h3>\
-            <span class="doc-category" data-category="' + escapeHtml(category) + '">' + escapeHtml(getCategoryLabel(category)) + '</span>\
-          </div>\
-          <div class="doc-content">' + escapeHtml(doc.content || '') + '</div>\
-          ' + (doc.keywords ? '\
-            <div class="doc-keywords">\
-              ' + renderKeywords(doc.keywords) + '\
-            </div>' : '') + '\
-        </div>';
-    });
-    assetGrid.innerHTML = html;
-  }
-
   function renderKeywords(keywords) {
     if (!keywords) return '';
-    var keywordList = keywords.split(',').map(function(k) { return k.trim(); }).filter(function(k) { return k; });
+    var keywordList = Array.isArray(keywords)
+      ? keywords
+      : String(keywords).split(',');
+    keywordList = keywordList.map(function(k) { return String(k).trim(); }).filter(function(k) { return k; });
     return keywordList.map(function(k) {
       return '<span class="meta-tag meta-tag-keyword">' + escapeHtml(k) + '</span>';
     }).join('');
@@ -1674,6 +1891,170 @@
           uploadZone.classList.remove('is-uploading');
         }
       });
+  }
+
+  function openPromptDocModal(id, editMode) {
+    var cached = currentPromptDocsById[id];
+    if (!cached) {
+      showToast('未找到该文档的最新数据，请刷新后重试', 'warning');
+      return;
+    }
+    window.AIGV.api('/api/prompts/documents/' + encodeURIComponent(id))
+      .then(function(doc) {
+        doc = doc || {};
+        promptDocCurrent = {
+          id: doc.id || cached.id,
+          title: doc.title || cached.name || '',
+          name: doc.title || cached.name || '',
+          category: doc.category || cached.category || '',
+          content: doc.content || '',
+          keywords: doc.keywords || cached.keywords || '',
+          created_at: doc.created_at || cached.created_at,
+          updated_at: doc.updated_at || cached.updated_at,
+          can_edit: !!cached.can_edit,
+          can_delete: !!cached.can_delete
+        };
+        showPromptDocView(promptDocCurrent, editMode && promptDocCurrent.can_edit);
+      })
+      .catch(function(error) {
+        showToast((error && error.message) || '文档详情加载失败', 'error');
+      });
+  }
+
+  function showPromptDocView(doc, startInEdit) {
+    promptDocCurrent = doc;
+    if (promptDocViewTitle) promptDocViewTitle.textContent = doc.title || '未命名文档';
+    if (promptDocViewCategory) {
+      promptDocViewCategory.textContent = getCategoryLabel(doc.category);
+    }
+    if (promptDocViewUpdated) {
+      promptDocViewUpdated.textContent = doc.updated_at && window.AIGV && window.AIGV.formatTime
+        ? window.AIGV.formatTime(doc.updated_at)
+        : '—';
+    }
+    if (promptDocViewKeywords) {
+      promptDocViewKeywords.innerHTML = '';
+      var keywordList = Array.isArray(doc.keywords)
+        ? doc.keywords
+        : String(doc.keywords || '').split(',');
+      keywordList.map(function(k) { return String(k).trim(); })
+        .filter(function(k) { return k; })
+        .forEach(function(keyword) {
+          var chip = document.createElement('span');
+          chip.className = 'meta-tag meta-tag-keyword';
+          chip.textContent = keyword;
+          promptDocViewKeywords.appendChild(chip);
+        });
+    }
+    if (promptDocViewContent) {
+      promptDocViewContent.textContent = doc.content || doc.description || '暂无内容';
+    }
+    if (promptDocView) promptDocView.hidden = false;
+    if (promptDocForm) promptDocForm.hidden = true;
+    if (promptDocEditBtn) promptDocEditBtn.hidden = !doc.can_edit;
+    if (promptDocIdInput) promptDocIdInput.value = doc.id || '';
+    if (promptDocTitleInput) promptDocTitleInput.value = doc.title || '';
+    if (promptDocCategorySelect) promptDocCategorySelect.value = doc.category || '';
+    if (promptDocKeywordsInput) promptDocKeywordsInput.value = doc.keywords || '';
+    if (promptDocContentInput) promptDocContentInput.value = doc.content || '';
+    openPromptDocOverlay();
+    if (startInEdit) showPromptDocEdit(doc);
+  }
+
+  function showPromptDocEdit(doc) {
+    if (!doc || !doc.can_edit) return;
+    if (promptDocView) promptDocView.hidden = true;
+    if (promptDocForm) promptDocForm.hidden = false;
+    if (promptDocEditBtn) promptDocEditBtn.hidden = true;
+    if (promptDocSaveBtn) {
+      promptDocSaveBtn.disabled = false;
+      promptDocSaveBtn.textContent = '保存';
+    }
+    openPromptDocOverlay();
+    setTimeout(function() {
+      if (promptDocTitleInput) {
+        promptDocTitleInput.focus();
+        promptDocTitleInput.select();
+      }
+    }, 100);
+  }
+
+  function openPromptDocOverlay() {
+    if (!promptDocModal) return;
+    promptDocModal.classList.add('active');
+    promptDocModal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closePromptDocModal() {
+    if (promptDocModal) {
+      promptDocModal.classList.remove('active');
+      promptDocModal.setAttribute('aria-hidden', 'true');
+    }
+    document.body.style.overflow = '';
+    promptDocCurrent = null;
+    if (promptDocForm) promptDocForm.reset();
+    if (promptDocViewKeywords) promptDocViewKeywords.innerHTML = '';
+    if (promptDocViewContent) promptDocViewContent.textContent = '';
+    if (promptDocView) promptDocView.hidden = false;
+    if (promptDocForm) promptDocForm.hidden = true;
+    if (promptDocEditBtn) promptDocEditBtn.hidden = true;
+  }
+
+  function handlePromptDocSave(e) {
+    e.preventDefault();
+    var id = promptDocIdInput ? promptDocIdInput.value : '';
+    if (!id) return;
+    var title = promptDocTitleInput ? promptDocTitleInput.value.trim() : '';
+    if (!title) {
+      showToast('请输入文档标题', 'warning');
+      if (promptDocTitleInput) promptDocTitleInput.focus();
+      return;
+    }
+    var payload = {
+      title: title,
+      category: promptDocCategorySelect ? promptDocCategorySelect.value : '',
+      keywords: promptDocKeywordsInput ? promptDocKeywordsInput.value.trim() : '',
+      content: promptDocContentInput ? promptDocContentInput.value : ''
+    };
+    var originalText = promptDocSaveBtn ? promptDocSaveBtn.textContent : '保存';
+    if (promptDocSaveBtn) {
+      promptDocSaveBtn.disabled = true;
+      promptDocSaveBtn.textContent = '保存中...';
+    }
+    window.AIGV.api('/api/prompts/documents/' + encodeURIComponent(id), {
+      method: 'PUT',
+      body: payload
+    }).then(function() {
+      closePromptDocModal();
+      showToast('Prompt 文档已更新', 'success');
+      requestAssets();
+      loadSummary();
+    }).catch(function(error) {
+      showToast((error && error.message) || '保存失败，请重试', 'error');
+    }).finally(function() {
+      if (promptDocSaveBtn) {
+        promptDocSaveBtn.disabled = false;
+        promptDocSaveBtn.textContent = originalText;
+      }
+    });
+  }
+
+  function deletePromptDoc(id) {
+    var doc = currentPromptDocsById[id] || {};
+    var title = doc.name || doc.title || '该文档';
+    showConfirmDialog('删除 Prompt 文档', '确定要删除“' + title + '”吗？此操作无法撤销。', '删除', function() {
+      window.AIGV.api('/api/prompts/documents/' + encodeURIComponent(id), {
+        method: 'DELETE'
+      }).then(function() {
+        if (promptDocCurrent && promptDocCurrent.id === id) closePromptDocModal();
+        showToast('Prompt 文档已删除', 'success');
+        requestAssets();
+        loadSummary();
+      }).catch(function(error) {
+        showToast((error && error.message) || '删除失败，请重试', 'error');
+      });
+    });
   }
 
   function deleteAsset(id) {

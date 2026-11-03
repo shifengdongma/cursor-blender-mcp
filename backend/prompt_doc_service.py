@@ -26,6 +26,22 @@ class PromptDocService(object):
     Service for managing prompt documents.
     """
 
+    SORT_ORDERS = {
+        'newest': 'created_at DESC, id ASC',
+        'oldest': 'created_at ASC, id ASC',
+        'name': 'title COLLATE NOCASE ASC, created_at DESC, id ASC',
+    }
+    _UPDATE_FIELDS = ('title', 'category', 'content', 'keywords')
+    VALID_CATEGORIES = {
+        PromptDocument.CATEGORY_VENUE,
+        PromptDocument.CATEGORY_SHOT,
+        PromptDocument.CATEGORY_LIGHTING,
+        PromptDocument.CATEGORY_STYLE,
+        PromptDocument.CATEGORY_SUBJECT,
+        PromptDocument.CATEGORY_DYNAMICS,
+        PromptDocument.CATEGORY_ENVIRONMENT,
+    }
+
     def __init__(self, data_dir=None):
         """
         Initialize prompt document service.
@@ -41,35 +57,76 @@ class PromptDocService(object):
         if not os.path.exists(self.prompts_dir):
             os.makedirs(self.prompts_dir, exist_ok=True)
 
-    def list_documents(self, category=None, limit=100, offset=0):
+    def filter_conditions(self, category=None, q=None, created_after=None,
+                          created_before=None):
+        """Build the shared WHERE fragment for prompt document queries."""
+        conditions = []
+        params = []
+        if category:
+            conditions.append('category = ?')
+            params.append(category)
+        if q:
+            like = '%{0}%'.format(q.strip())
+            conditions.append('(title LIKE ? OR content LIKE ? OR keywords LIKE ?)')
+            params.extend([like, like, like])
+        if created_after is not None:
+            conditions.append('created_at >= ?')
+            params.append(int(created_after))
+        if created_before is not None:
+            conditions.append('created_at <= ?')
+            params.append(int(created_before))
+        return conditions, params
+
+    def list_documents(self, category=None, limit=100, offset=0, q=None,
+                       created_after=None, created_before=None, sort='newest'):
         """
         List prompt documents with optional filtering.
 
         Args:
             category: Filter by category
-            limit: Maximum number of results
+            limit: Maximum number of results (None returns all matching rows)
             offset: Result offset for pagination
+            q: Case-insensitive substring search across title/content/keywords
+            created_after: Inclusive epoch-seconds lower bound
+            created_before: Inclusive epoch-seconds upper bound
+            sort: ``newest``, ``oldest`` or ``name``
 
         Returns:
             list: List of PromptDocument objects
         """
-        if category:
-            query = '''
-                SELECT * FROM prompt_documents
-                WHERE category = ?
-                ORDER BY created_at DESC
-                LIMIT ? OFFSET ?
-            '''
-            rows = self.db.fetch_all(query, (category, limit, offset))
+        order_clause = self.SORT_ORDERS.get(sort or 'newest')
+        if order_clause is None:
+            raise PromptDocServiceError("Unsupported sort")
+        conditions, params = self.filter_conditions(
+            category=category,
+            q=q,
+            created_after=created_after,
+            created_before=created_before,
+        )
+        where_clause = ' AND '.join(conditions) if conditions else '1=1'
+        sql = 'SELECT * FROM prompt_documents WHERE {0} ORDER BY {1}'.format(
+            where_clause, order_clause
+        )
+        if limit is None:
+            rows = self.db.fetch_all(sql, tuple(params) if params else None)
         else:
-            query = '''
-                SELECT * FROM prompt_documents
-                ORDER BY created_at DESC
-                LIMIT ? OFFSET ?
-            '''
-            rows = self.db.fetch_all(query, (limit, offset))
-
+            rows = self.db.fetch_all(
+                sql + ' LIMIT ? OFFSET ?',
+                tuple(params) + (int(limit), int(offset)),
+            )
         return [PromptDocument.from_row(row) for row in rows]
+
+    def get_documents_by_ids(self, doc_ids):
+        """Fetch many prompt documents in one query (input order preserved)."""
+        ids = [doc_id for doc_id in (doc_ids or []) if doc_id]
+        if not ids:
+            return {}
+        placeholders = ','.join('?' for _ in ids)
+        rows = self.db.fetch_all(
+            'SELECT * FROM prompt_documents WHERE id IN ({0})'.format(placeholders),
+            tuple(ids),
+        )
+        return {row['id']: PromptDocument.from_row(row) for row in rows}
 
     def get_document(self, doc_id):
         """
@@ -129,9 +186,9 @@ class PromptDocService(object):
         if not doc:
             return None
 
-        # Update fields
+        # Only editable business fields; identity/timestamps/source are frozen.
         for key, value in kwargs.items():
-            if hasattr(doc, key):
+            if key in self._UPDATE_FIELDS:
                 setattr(doc, key, value)
 
         doc.updated_at = int(time.time())
@@ -191,19 +248,32 @@ class PromptDocService(object):
         rows = self.db.fetch_all(sql, tuple(params))
         return [PromptDocument.from_row(row) for row in rows]
 
-    def count_documents(self, category=None):
+    def count_documents(self, category=None, q=None, created_after=None,
+                        created_before=None):
         """
         Count prompt documents with optional filtering.
 
         Args:
             category: Filter by category
+            q: Case-insensitive substring search across title/content/keywords
+            created_after: Inclusive epoch-seconds lower bound
+            created_before: Inclusive epoch-seconds upper bound
 
         Returns:
             int: Number of documents
         """
-        if category:
-            return self.db.count(PromptDocument.TABLE_NAME, 'category = ?', (category,))
-        return self.db.count(PromptDocument.TABLE_NAME)
+        conditions, params = self.filter_conditions(
+            category=category,
+            q=q,
+            created_after=created_after,
+            created_before=created_before,
+        )
+        where_clause = ' AND '.join(conditions) if conditions else None
+        return self.db.count(
+            PromptDocument.TABLE_NAME,
+            where_clause,
+            tuple(params) if params else None,
+        )
 
     def get_categories(self):
         """

@@ -33,9 +33,10 @@
       <header class="page-header page-header-curated page-header-library">
         <div class="page-header-text page-header-grid">
           <div class="page-header-copy">
-            <div class="hero-badge">Curated Asset Library</div>
-            <h1 class="page-title">空间资产与 Prompt 内容库</h1>
-            <p class="page-desc">
+            <a class="library-back-link" id="back-to-library" href="/assets" hidden>← 返回素材库</a>
+            <div class="hero-badge" id="hero-badge">Curated Asset Library</div>
+            <h1 class="page-title" id="page-title">空间资产与 Prompt 内容库</h1>
+            <p class="page-desc" id="page-desc">
               统一浏览 3D 模型、图片、视频、音频、文档与压缩包，在高品质内容展示与管理操作之间保持清晰平衡。
             </p>
           </div>
@@ -43,18 +44,24 @@
           <div class="stats-row stats-row-premium" id="stats-row" aria-label="资产库统计">
             <div class="stat-item">
               <div class="stat-label">3D Models</div>
-              <div class="stat-number">—</div>
+              <div class="stat-number" data-stat="models">—</div>
               <div class="content-note-desc">可用于空间锚点与白模预览</div>
             </div>
             <div class="stat-item">
-              <div class="stat-label">Prompt Docs</div>
-              <div class="stat-number">—</div>
-              <div class="content-note-desc">覆盖场馆、镜头、光影与风格语义</div>
+              <div class="stat-label">文档</div>
+              <div class="stat-number" data-stat="documents">—</div>
+              <div class="content-note-desc">实际文档数量，统一管理文档与 Prompt 内容</div>
             </div>
+            <a class="stat-item stat-item-link" href="/assets?view=sensitive" aria-label="进入敏感内容库">
+              <div class="stat-label">敏感内容库</div>
+              <div class="stat-number stat-number-nav" data-stat="sensitive">查看内容</div>
+              <div class="content-note-desc">内容浏览与管理入口</div>
+            </a>
             <div class="stat-item">
-              <div class="stat-label">Venue Presets</div>
-              <div class="stat-number">—</div>
-              <div class="content-note-desc">服务剧院、画廊、博物馆与音乐厅</div>
+              <div class="stat-label">多模态素材库容量</div>
+              <div class="stat-number stat-number-storage" data-stat="storage">— / —</div>
+              <div class="storage-meter" aria-hidden="true"><span class="storage-meter-fill" id="storage-meter-fill"></span></div>
+              <div class="content-note-desc" data-stat="storage-note">已用 / 总容量</div>
             </div>
           </div>
         </div>
@@ -123,15 +130,6 @@
                 <line x1="10" y1="12" x2="14" y2="12"/>
               </svg>
               压缩包
-            </button>
-            <button class="tab-btn" data-tab="prompts" role="tab" aria-selected="false" aria-controls="asset-grid" aria-label="查看Prompt文档">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
-              </svg>
-              Prompt文档
             </button>
             <button class="tab-btn" data-tab="history" role="tab" aria-selected="false" aria-controls="asset-grid" aria-label="查看生成历史">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -262,7 +260,7 @@
             <p class="upload-text"><strong>点击选择文件</strong> 或拖拽到此处</p>
             <p class="upload-support-text">支持 3D 模型、图片、视频、音频、文档、压缩包等格式</p>
             <div class="upload-file-meta" id="upload-file-meta" hidden></div>
-            <input type="file" id="file-input" hidden aria-label="选择上传文件" accept=".glb,.gltf,.obj,.fbx,.stl,.blend,.dae,.3ds,.ply,.png,.jpg,.jpeg,.webp,.gif,.svg,.bmp,.tiff,.tif,.ico,.heic,.avif,.mp4,.mov,.avi,.webm,.mkv,.flv,.m4v,.mpeg,.mpg,.wmv,.mp3,.wav,.ogg,.flac,.aac,.m4a,.wma,.opus,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.rtf,.odt,.json,.xml,.yaml,.yml,.zip,.rar,.7z,.tar,.gz,.bz2,.xz" />
+            <input type="file" id="file-input" hidden aria-label="选择上传文件" accept=".glb,.gltf,.obj,.fbx,.stl,.blend,.dae,.3ds,.ply,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tiff,.tif,.ico,.heic,.avif,.mp4,.mov,.avi,.webm,.mkv,.flv,.m4v,.mpeg,.mpg,.wmv,.mp3,.wav,.ogg,.flac,.aac,.m4a,.wma,.opus,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.rtf,.odt,.json,.xml,.yaml,.yml,.zip,.rar,.7z,.tar,.gz,.bz2,.xz" />
           </div>
           <div class="form-group form-group-spaced">
             <label for="asset-name">资产名称</label>
@@ -352,6 +350,72 @@
           <div class="form-actions form-actions-split form-group-spaced">
             <button type="button" class="btn-outline" id="edit-asset-cancel">取消</button>
             <button type="submit" class="btn-primary" id="edit-asset-save">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="prompt-doc-modal" class="modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="prompt-doc-modal-title">
+      <div class="modal-content asset-edit-modal prompt-doc-modal">
+        <div class="modal-header">
+          <div>
+            <p class="panel-kicker">Prompt Document</p>
+            <h2 id="prompt-doc-modal-title">Prompt 文档</h2>
+            <p class="modal-desc">查看文档内容；管理员可编辑标题、分类、关键词与内容。</p>
+          </div>
+          <button type="button" class="modal-close" id="prompt-doc-close" aria-label="关闭文档窗口">&times;</button>
+        </div>
+
+        <div id="prompt-doc-view">
+          <div class="asset-edit-readonly">
+            <div class="asset-edit-readonly-item">
+              <span>分类</span>
+              <strong id="prompt-doc-view-category">—</strong>
+            </div>
+            <div class="asset-edit-readonly-item">
+              <span>更新时间</span>
+              <strong id="prompt-doc-view-updated">—</strong>
+            </div>
+          </div>
+          <h3 class="prompt-doc-view-title" id="prompt-doc-view-title">—</h3>
+          <div class="doc-keywords" id="prompt-doc-view-keywords"></div>
+          <div class="prompt-doc-view-content" id="prompt-doc-view-content"></div>
+          <div class="form-actions form-actions-split form-group-spaced">
+            <button type="button" class="btn-outline" id="prompt-doc-view-close">关闭</button>
+            <button type="button" class="btn-primary" id="prompt-doc-edit-btn" hidden>编辑</button>
+          </div>
+        </div>
+
+        <form id="prompt-doc-form" hidden>
+          <input type="hidden" id="prompt-doc-id" />
+          <div class="form-group form-group-spaced">
+            <label for="prompt-doc-title">标题 <span class="field-required" aria-hidden="true">*</span></label>
+            <input type="text" id="prompt-doc-title" maxlength="200" required autocomplete="off" />
+          </div>
+          <div class="form-group form-group-spaced">
+            <label for="prompt-doc-category">分类</label>
+            <select id="prompt-doc-category">
+              <option value="">未分类</option>
+              <option value="venue">场馆</option>
+              <option value="shot">镜头</option>
+              <option value="lighting">光影</option>
+              <option value="style">风格</option>
+              <option value="subject">主体</option>
+              <option value="dynamics">动态</option>
+              <option value="environment">环境</option>
+            </select>
+          </div>
+          <div class="form-group form-group-spaced">
+            <label for="prompt-doc-keywords">关键词</label>
+            <input type="text" id="prompt-doc-keywords" autocomplete="off" placeholder="使用逗号分隔" />
+          </div>
+          <div class="form-group form-group-spaced">
+            <label for="prompt-doc-content">内容</label>
+            <textarea id="prompt-doc-content" rows="8"></textarea>
+          </div>
+          <div class="form-actions form-actions-split form-group-spaced">
+            <button type="button" class="btn-outline" id="prompt-doc-cancel">取消</button>
+            <button type="submit" class="btn-primary" id="prompt-doc-save">保存</button>
           </div>
         </form>
       </div>

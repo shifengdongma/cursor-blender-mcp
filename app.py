@@ -20,6 +20,10 @@ from backend.cloud_routes import register_cloud_routes
 from backend.control_plane_routes import register_control_plane_routes
 from backend.creative_routes import register_creative_routes
 from backend.demo_seed_service import seed_demo_data
+from backend.document_library_service import (
+    DocumentLibraryServiceError,
+    get_document_library_service,
+)
 from backend.http_utils import (
     ApiError,
     api_error,
@@ -235,6 +239,7 @@ def _register_main_routes(app, web_root, catalog_service, prompt_orchestrator, j
             "appEnv": cfg.APP_ENV,
             "demoMode": bool(cfg.DEMO_MODE),
             "allowRegistration": bool(cfg.ALLOW_REGISTRATION),
+            "computeShowcase": bool(cfg.COMPUTE_SHOWCASE_MODE),
         }
         body = "window.AIGV_RUNTIME = {0};\n".format(
             json.dumps(payload, ensure_ascii=False)
@@ -364,21 +369,84 @@ def _register_asset_routes(app, web_root, cfg):
             )
 
         db = get_database()
-        prompt_docs = db.count("prompt_documents")
+        document_counts = get_document_library_service(cfg.DATA_DIR).count_documents(
+            viewer=user,
+            is_admin=admin,
+        )
         venue_presets = db.count("venue_presets")
+
+        actual_used_bytes = asset_service.sum_storage_bytes(
+            owner_user_id=owner,
+            include_shared=include_shared,
+            tenant_id=tenant_id,
+        )
+        quota_bytes = int(round(max(0.0, cfg.ASSET_STORAGE_QUOTA_TB) * 1000000000000))
+        display_used_bytes = actual_used_bytes
+        storage_source = "actual"
+        if cfg.ASSET_STORAGE_SHOWCASE_MODE:
+            display_used_bytes = int(round(
+                max(0.0, cfg.ASSET_STORAGE_SHOWCASE_USED_TB) * 1000000000000
+            ))
+            storage_source = "showcase"
+
         return _json_success(
             {
                 "models": count("glb") + count("spatial_anchor"),
                 "images": count("image"),
                 "videos": count("video"),
                 "audio": count("audio"),
-                "documents": count("document"),
+                "documents": document_counts["asset"],
                 "archives": count("archive"),
-                "prompt_documents": prompt_docs,
+                "prompt_documents": document_counts["prompt_document"],
+                "document_total": document_counts["total"],
                 "venue_presets": venue_presets,
                 "total": count(),
+                "storage": {
+                    "used_bytes": display_used_bytes,
+                    "quota_bytes": quota_bytes,
+                    "source": storage_source,
+                    "actual_used_bytes": actual_used_bytes,
+                    "actual_quota_bytes": quota_bytes,
+                    "bytes_per_tb": 1000000000000,
+                    "unit": "TB",
+                },
             }
         )
+
+    @app.route("/api/assets/documents", methods=["GET"])
+    def list_library_documents():
+        pagination = parse_pagination(request)
+        q = request.args.get("q")
+        created_after = _parse_date_param(request.args.get("created_after"))
+        created_before = _parse_date_param(
+            request.args.get("created_before"), end_of_day=True
+        )
+        if (created_after is not None and created_before is not None
+                and created_after > created_before):
+            raise ApiError("invalid_params", "开始时间不能晚于结束时间", status_code=400)
+        sort = request.args.get("sort") or "newest"
+        if sort not in ("newest", "oldest", "name"):
+            raise ApiError("invalid_params", "不支持的排序方式", status_code=400)
+        source_type = request.args.get("source_type") or "all"
+        if source_type not in ("all", "asset", "prompt_document"):
+            raise ApiError("invalid_params", "不支持的文档来源", status_code=400)
+
+        user = g.current_user
+        try:
+            data = get_document_library_service(cfg.DATA_DIR).list_documents(
+                viewer=user,
+                is_admin=is_admin(user),
+                q=q,
+                created_after=created_after,
+                created_before=created_before,
+                sort=sort,
+                source_type=source_type,
+                limit=pagination.limit,
+                offset=pagination.offset,
+            )
+        except DocumentLibraryServiceError as exc:
+            raise ApiError("invalid_params", str(exc), status_code=400)
+        return _json_success(data)
 
     @app.route("/api/assets", methods=["GET"])
     def list_assets():
@@ -734,6 +802,58 @@ def _register_prompt_doc_routes(app, cfg):
     def update_prompt_document(doc_id):
         prompt_service = get_prompt_doc_service(cfg.DATA_DIR)
         data = parse_json_body(request)
+        allowed = {"title", "category", "content", "keywords"}
+        unknown = set(data.keys()) - allowed
+        if unknown:
+            raise ApiError(
+                "invalid_prompt_document_update",
+                "包含不可修改的字段",
+                status_code=400,
+                details={"fields": sorted(unknown)},
+            )
+        if "title" in data:
+            title = data.get("title")
+            if not isinstance(title, str) or not title.strip():
+                raise ApiError(
+                    "invalid_prompt_document_update",
+                    "标题不能为空",
+                    status_code=400,
+                )
+            title = title.strip()
+            if len(title) > 200:
+                raise ApiError(
+                    "invalid_prompt_document_update",
+                    "标题不能超过 200 个字符",
+                    status_code=400,
+                )
+            data["title"] = title
+        if "category" in data:
+            category = data.get("category")
+            if category not in (None, "") and category not in prompt_service.VALID_CATEGORIES:
+                raise ApiError(
+                    "invalid_prompt_document_update",
+                    "不支持的文档分类",
+                    status_code=400,
+                )
+        if "content" in data and data.get("content") is not None:
+            if not isinstance(data.get("content"), str):
+                raise ApiError(
+                    "invalid_prompt_document_update",
+                    "内容必须为文本",
+                    status_code=400,
+                )
+        if "keywords" in data and data.get("keywords") is not None:
+            keywords = data.get("keywords")
+            if isinstance(keywords, list):
+                data["keywords"] = ", ".join(
+                    str(item).strip() for item in keywords if str(item).strip()
+                )
+            elif not isinstance(keywords, str):
+                raise ApiError(
+                    "invalid_prompt_document_update",
+                    "关键词必须为文本或文本列表",
+                    status_code=400,
+                )
         doc = prompt_service.update_document(doc_id, **data)
         if not doc:
             raise ApiError("document_not_found", "Prompt 文档不存在", status_code=404)

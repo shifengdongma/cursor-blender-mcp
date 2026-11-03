@@ -10572,6 +10572,14 @@ a:focus-visible,
   top: auto;
 }
 
+/* The sidebar is an internally scrollable column.  Without disabling flex
+   shrink, a tall audit card compresses the preview panel and its
+   overflow:hidden header/body clips the step summary. */
+.studio-side-column > .studio-preview-panel,
+.studio-side-column > .content-audit-card {
+  flex: 0 0 auto;
+}
+
 .content-audit-card {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);

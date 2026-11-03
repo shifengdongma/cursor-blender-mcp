@@ -100,6 +100,8 @@ def test_audit_sidebar_layout_styles_exist():
     css = _read("web/styles.css")
     assert ".studio-side-column" in css
     assert ".studio-side-column .studio-preview-panel" in css
+    assert ".studio-side-column > .studio-preview-panel" in css
+    assert "flex: 0 0 auto" in css
     assert ".content-audit-card" in css
     assert ".content-audit-status.is-pending" in css
     assert ".content-audit-status.is-passed" in css

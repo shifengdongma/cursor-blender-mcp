@@ -1342,3 +1342,56 @@ Browser → Nginx/HTTPS → Gunicorn (wsgi:app, 多 worker)
 - 定时同步使用独立 `scripts/run_ark_sync.py --loop` 和 `deploy/aigv-ark-sync.service`，不在 Web 请求中同步。
 - 管理 AK/SK 只存在于 `.env`（600），不复用 `ARK_API_KEY`；建议最小权限 IAM 子用户。
 - 真实只读验证（2026-10-31）：Ark 用量、余额、当前月账单概览/明细均成功；当前账号未开通分账账单能力；2026-09 及更早无账单数据。
+
+# 附录 I：素材库与算力展示优化（2026-11-03）
+
+## I.1 新增/扩展模块
+
+- `backend/document_library_service.py`
+  - 统一文档分页：SQL `UNION ALL` 合并 `assets`（`asset_type=document`）与 `prompt_documents`。
+  - 资产部分复用 owner/tenant/共享权限条件；Prompt 文档保持登录可读、管理员可写。
+  - 返回标准化 `source_type: asset|prompt_document`，`can_edit/can_delete` 按权限计算。
+- `backend/asset_service.py`
+  - 新增 `sum_storage_bytes()`：按 `file_path` 去重汇总 `file_size`，无递归磁盘扫描。
+- `backend/prompt_doc_service.py`
+  - 支持搜索、日期、排序和按 ID 批量查询；更新字段白名单收紧为 `title/category/content/keywords`。
+- `web/content-audit-core.js`、`web/content-audit.js`
+  - 纯前端关键词扫描与 DOM 审核卡片；不调用后端审核接口。
+- `web/compute-showcase-data.js`
+  - 算力参考场景：4 资源池、4 在线节点、2 排队任务、固定趋势、拓扑、链路、存储、会话、渲染场景。
+- `web/compute-adapters.js`
+  - 实时监控 API 与 demo 数据的 null-safe 归一化；缺失值保留 `null`。
+- `web/compute-charts.js`
+  - 无依赖 SVG 柱状/折线/环形图，带轴、单位、图例、悬停标题与空状态。
+- `web/compute-scheduling.js`
+  - 硬约束过滤 + 策略评分 + top-3 推荐 + 本地任务状态机；不提交真实调度。
+- `web/assets/showcase/`
+  - 项目自绘 SVG 参考画面与占位图；展示模式优先读取真实素材库图片/GLB。
+
+## I.2 API 扩展
+
+- `GET /api/assets/summary`
+  - 保留 `models/images/videos/audio/documents/archives/prompt_documents/venue_presets/total`。
+  - 新增 `document_total`。
+  - 新增 `storage: {used_bytes, quota_bytes, source, actual_used_bytes, actual_quota_bytes, bytes_per_tb, unit}`。
+- `GET /api/assets/documents`
+  - 参数：`q`、`created_after`、`created_before`、`sort`、`source_type`、`limit`、`offset`。
+  - 返回：`items`、`total`、`limit`、`offset`、`counts`。
+- `GET /api/prompts/documents`：保留原接口；服务层支持更多筛选参数，旧调用兼容。
+
+## I.3 配置与数据边界
+
+- `ASSET_STORAGE_QUOTA_TB`（默认 2.0，十进制 TB）
+- `ASSET_STORAGE_SHOWCASE_MODE`（默认 false）
+- `ASSET_STORAGE_SHOWCASE_USED_TB`（默认 1.94）
+- `COMPUTE_SHOWCASE_MODE`（默认 false；通过 `/web/runtime-config.js` 暴露为 `computeShowcase`）
+- 展示场景来源在内部标记为 `source=showcase` / `data-source=showcase`；页面不显示“展示场景 · 非实时采集”文案。
+- 官方账单、火山方舟用量、AI 模型服务继续使用真实接口；展示场景不写回业务表。
+- 无数据库结构变更；旧 API 字段和 `/api/prompts/documents` 保持兼容。
+
+## I.4 验证
+
+- `python3 -m pytest tests/ -q` → 520 passed。
+- Node 语法检查与 `tests/js/` 纯函数测试全部通过。
+- 本地 jsdom DOM 冒烟覆盖展示模式、实时空态、素材库/敏感视图、审核组件。
+- 未执行线上 gunicorn 重载，未宣称线上部署完成。

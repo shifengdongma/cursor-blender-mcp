@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b1520"/>
+      <stop offset="0.55" stop-color="#0a0a12"/>
+      <stop offset="1" stop-color="#04050a"/>
+    </linearGradient>
+    <linearGradient id="stage" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4b3a2a"/>
+      <stop offset="1" stop-color="#15100c"/>
+    </linearGradient>
+    <radialGradient id="warm" cx="50%" cy="34%" r="55%">
+      <stop offset="0" stop-color="#ffe3a3" stop-opacity="0.5"/>
+      <stop offset="0.5" stop-color="#d7a84f" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#d7a84f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="seat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b1d22"/>
+      <stop offset="1" stop-color="#0a080c"/>
+    </linearGradient>
+    <filter id="blur"><feGaussianBlur stdDeviation="10"/></filter>
+  </defs>
+  <rect width="800" height="450" fill="url(#bg)"/>
+  <ellipse cx="400" cy="180" rx="360" ry="200" fill="url(#warm)"/>
+  <path d="M90 300 Q90 90 400 60 Q710 90 710 300 Z" fill="none" stroke="#3b3543" stroke-width="4"/>
+  <path d="M130 300 Q130 120 400 95 Q670 120 670 300 Z" fill="none" stroke="#5c5366" stroke-width="1.5" opacity="0.6"/>
+  <path d="M180 300 Q180 150 400 130 Q620 150 620 300 Z" fill="#08090e" opacity="0.6"/>
+  <ellipse cx="400" cy="300" rx="310" ry="70" fill="url(#stage)"/>
+  <ellipse cx="400" cy="292" rx="150" ry="26" fill="#d7a84f" opacity="0.14" filter="url(#blur)"/>
+  <g stroke="#e8c97a" stroke-width="1.5" opacity="0.4">
+    <line x1="280" y1="70" x2="330" y2="280"/>
+    <line x1="400" y1="55" x2="400" y2="280"/>
+    <line x1="520" y1="70" x2="470" y2="280"/>
+  </g>
+  <g fill="#140f13">
+    <path d="M0 450 Q30 340 120 340 Q210 340 240 450 Z"/>
+    <path d="M170 450 Q200 355 290 355 Q380 355 410 450 Z"/>
+    <path d="M390 450 Q420 355 510 355 Q600 355 630 450 Z"/>
+    <path d="M560 450 Q590 340 680 340 Q770 340 800 450 Z"/>
+  </g>
+  <g fill="url(#seat)" opacity="0.9">
+    <path d="M60 450 Q90 380 150 380 Q210 380 240 450 Z"/>
+    <path d="M230 450 Q260 390 320 390 Q380 390 410 450 Z"/>
+    <path d="M390 450 Q420 390 480 390 Q540 390 570 450 Z"/>
+    <path d="M550 450 Q580 380 640 380 Q700 380 740 450 Z"/>
+  </g>
+  <g opacity="0.28" stroke="#78bfd2" stroke-width="1">
+    <line x1="0" y1="390" x2="800" y2="390"/>
+    <line x1="400" y1="300" x2="400" y2="450"/>
+  </g>
+  <rect width="800" height="450" fill="none" stroke="#000" stroke-width="28" opacity="0.34"/>
+</svg>

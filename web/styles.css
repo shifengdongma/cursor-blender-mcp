@@ -10883,3 +10883,474 @@ a:focus-visible,
     overflow: visible;
   }
 }
+
+/* ========================================
+   Compute Platform — showcase visuals, charts and network topology
+   ======================================== */
+
+.cp-svg-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.cp-film-showcase,
+.cp-arch-showcase,
+.cp-game-showcase {
+  margin-top: var(--space-lg);
+}
+
+.cp-film-reference,
+.cp-game-showcase-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(220px, 0.65fr);
+  gap: var(--space-lg);
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(8, 14, 22, 0.5);
+}
+
+.cp-film-reference-frame,
+.cp-game-showcase-media {
+  position: relative;
+  overflow: hidden;
+  min-height: 220px;
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.cp-film-reference-frame img,
+.cp-game-showcase-media img,
+.cp-arch-compare img,
+.cp-arch-effect-image,
+.cp-film-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cp-film-reference-frame img {
+  min-height: 220px;
+}
+
+.cp-film-reference-status,
+.cp-game-showcase-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(120, 191, 210, 0.32);
+  background: rgba(8, 14, 22, 0.78);
+  color: var(--accent-cyan);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.cp-film-reference-info,
+.cp-game-showcase-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  justify-content: center;
+}
+
+.cp-film-reference-title {
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.cp-film-reference-desc {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.cp-film-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cp-film-reference-grid > div,
+.cp-arch-showcase-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.cp-film-reference-grid span,
+.cp-arch-showcase-grid span {
+  color: var(--text-soft);
+  font-size: 0.66rem;
+}
+
+.cp-film-reference-grid strong,
+.cp-arch-showcase-grid strong {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.cp-film-thumb {
+  min-width: 118px;
+  overflow: hidden;
+}
+
+.cp-film-thumb img {
+  width: 100%;
+  height: 62px;
+  object-fit: cover;
+  border-radius: var(--radius-xs);
+  margin-bottom: 5px;
+}
+
+.cp-film-thumb.active img {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.cp-arch-showcase-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.cp-arch-showcase-title {
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.cp-arch-showcase-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cp-arch-showcase-thumb {
+  padding: 5px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.cp-arch-showcase-thumb.active,
+.cp-arch-showcase-thumb:hover {
+  border-color: rgba(120, 191, 210, 0.4);
+  color: var(--accent-cyan);
+}
+
+.cp-arch-compare {
+  --compare: 50%;
+  position: relative;
+  overflow: hidden;
+  min-height: 280px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  background: #060a0f;
+}
+
+.cp-arch-compare-before,
+.cp-arch-compare-after {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cp-arch-compare-after-wrap {
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 calc(100% - var(--compare)) 0 0);
+}
+
+.cp-arch-compare-range {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 12px;
+  width: calc(100% - 32px);
+  accent-color: var(--primary);
+  cursor: ew-resize;
+}
+
+.cp-arch-showcase-desc {
+  margin-top: var(--space-sm);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.cp-arch-showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: var(--space-sm);
+}
+
+.cp-arch-effect-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-sm);
+}
+
+.cp-arch-effect-item {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(8, 14, 22, 0.5);
+  cursor: pointer;
+}
+
+.cp-arch-effect-item.active {
+  border-color: rgba(215, 168, 79, 0.42);
+}
+
+.cp-arch-effect-image {
+  height: 100px;
+  object-fit: cover;
+}
+
+.cp-arch-effect-label {
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.cp-game-showcase-media {
+  min-height: 230px;
+}
+
+.cp-game-showcase-info {
+  justify-content: flex-start;
+}
+
+.cp-session-note {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.cp-schedule-hint,
+.cp-schedule-live-note {
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.cp-schedule-live-note {
+  margin-top: var(--space-md);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.cp-schedule-rec {
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.cp-schedule-rec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.cp-schedule-rec-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.cp-schedule-score {
+  color: var(--accent-cyan);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.cp-schedule-rejected {
+  margin-top: var(--space-md);
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
+.cp-schedule-reject-details {
+  margin-top: 8px;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
+.cp-schedule-reject-row {
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.cp-schedule-flow {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.cp-schedule-flow-title {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.cp-schedule-flow-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cp-schedule-flow-step {
+  padding: 4px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  color: var(--text-soft);
+  font-size: 0.68rem;
+}
+
+.cp-schedule-flow-step.active {
+  border-color: rgba(215, 168, 79, 0.4);
+  color: var(--primary);
+  background: rgba(215, 168, 79, 0.08);
+}
+
+.cp-schedule-flow-step.done {
+  border-color: rgba(116, 199, 152, 0.3);
+  color: var(--accent-green);
+}
+
+.cp-schedule-flow-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sd-topology-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.5fr);
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.sd-topology {
+  min-height: 220px;
+}
+
+.sd-topology-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.sd-topo-link {
+  stroke: rgba(120, 191, 210, 0.45);
+  stroke-width: 2;
+}
+
+.sd-topo-link.status-degraded,
+.sd-topo-link.status-congested,
+.sd-topo-link.status-unstable {
+  stroke: var(--primary);
+}
+
+.sd-topo-link.status-down {
+  stroke: var(--accent-red);
+  stroke-dasharray: 6 4;
+}
+
+.sd-topo-node circle {
+  fill: rgba(12, 20, 30, 0.95);
+  stroke: var(--accent-cyan);
+  stroke-width: 1.5;
+}
+
+.sd-topo-node text {
+  fill: rgba(255, 255, 255, 0.65);
+  font-size: 10px;
+}
+
+.sd-topo-node {
+  cursor: pointer;
+}
+
+.sd-topo-node.status-abnormal circle,
+.sd-topo-node.status-offline circle,
+.sd-topo-node.status-switching circle {
+  stroke: var(--accent-red);
+}
+
+.sd-topo-node:focus-visible circle {
+  stroke: var(--primary);
+  stroke-width: 3;
+}
+
+.sd-event-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.sd-event-item {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 9px;
+  border-left: 2px solid rgba(120, 191, 210, 0.35);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.sd-event-item.level-warning {
+  border-left-color: var(--primary);
+}
+
+.sd-event-time {
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+.sd-link-item,
+.sd-node-card,
+.sd-storage-card {
+  cursor: pointer;
+}
+
+@media (max-width: 1024px) {
+  .cp-film-reference,
+  .cp-game-showcase-card,
+  .sd-topology-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cp-arch-showcase-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

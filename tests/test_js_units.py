@@ -14,10 +14,19 @@ NODE_CHECK_FILES = [
     "web/assets.js",
     "web/content-audit-core.js",
     "web/content-audit.js",
+    "web/compute-showcase-data.js",
+    "web/compute-adapters.js",
+    "web/compute-charts.js",
+    "web/compute-scheduling.js",
+    "web/compute-platform.js",
 ]
 
 NODE_TEST_FILES = [
     "tests/js/content_audit.test.js",
+    "tests/js/compute_showcase.test.js",
+    "tests/js/compute_scheduling.test.js",
+    "tests/js/compute_adapters.test.js",
+    "tests/js/compute_charts.test.js",
 ]
 
 

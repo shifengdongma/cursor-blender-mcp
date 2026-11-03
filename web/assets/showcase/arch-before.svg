@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232a31"/>
+      <stop offset="1" stop-color="#070a0e"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0 H0 V40" fill="none" stroke="#8aa0ad" stroke-width="0.6" opacity="0.18"/>
+    </pattern>
+  </defs>
+  <rect width="800" height="450" fill="url(#bg)"/>
+  <rect width="800" height="450" fill="url(#grid)"/>
+  <g fill="none" stroke="#c3d2da" stroke-width="1.4" opacity="0.55">
+    <path d="M80 400 V130 L400 50 L720 130 V400"/>
+    <path d="M140 400 V160 L400 95 L660 160 V400"/>
+    <path d="M80 130 L400 240 L720 130"/>
+    <path d="M80 265 L400 375 L720 265"/>
+    <path d="M140 160 L400 275 L660 160"/>
+    <path d="M400 50 V240"/>
+    <path d="M260 400 V205 L400 165 L540 205 V400"/>
+    <path d="M260 205 L400 260 L540 205"/>
+    <path d="M260 305 L400 360 L540 305"/>
+  </g>
+  <g fill="#0b1117" stroke="#8aa0ad" stroke-width="1" opacity="0.8">
+    <rect x="120" y="200" width="60" height="200"/>
+    <rect x="620" y="200" width="60" height="200"/>
+    <rect x="310" y="275" width="40" height="125"/>
+    <rect x="450" y="275" width="40" height="125"/>
+  </g>
+  <g fill="none" stroke="#78bfd2" stroke-width="0.8" opacity="0.35">
+    <ellipse cx="400" cy="395" rx="270" ry="34"/>
+    <ellipse cx="400" cy="395" rx="180" ry="22"/>
+  </g>
+  <text x="46" y="430" fill="#8aa0ad" font-family="monospace" font-size="11" opacity="0.6">WIREFRAME / MATERIAL PREVIEW</text>
+  <rect width="800" height="450" fill="none" stroke="#000" stroke-width="24" opacity="0.35"/>
+</svg>

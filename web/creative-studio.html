@@ -116,15 +116,67 @@
           <div class="studio-content-panel" id="studio-content-panel">
             <!-- Dynamic module content rendered by JS -->
           </div>
-          <aside class="studio-preview-panel" id="studio-preview-panel">
-            <div class="preview-header">
-              <h3 class="preview-title">步骤概览</h3>
-              <span class="preview-step-label" id="preview-step-label">模块 1</span>
-            </div>
-            <div class="preview-body" id="preview-body">
-              <p class="preview-placeholder-text">这里显示步骤摘要与数量，不是视频预览</p>
-            </div>
-          </aside>
+          <div class="studio-side-column">
+            <aside class="studio-preview-panel" id="studio-preview-panel">
+              <div class="preview-header">
+                <h3 class="preview-title">步骤概览</h3>
+                <span class="preview-step-label" id="preview-step-label">模块 1</span>
+              </div>
+              <div class="preview-body" id="preview-body">
+                <p class="preview-placeholder-text">这里显示步骤摘要与数量，不是视频预览</p>
+              </div>
+            </aside>
+
+            <section class="content-audit-card" id="content-audit-card" aria-labelledby="content-audit-title">
+              <div class="content-audit-header">
+                <h3 class="content-audit-title" id="content-audit-title">敏感内容过滤：关键内容审核</h3>
+                <span class="content-audit-status is-pending" id="audit-status">待审核</span>
+              </div>
+              <p class="content-audit-desc">关键词规则仅用于前端预览，不代表正式合规审核结论。</p>
+
+              <div class="content-audit-block">
+                <div class="content-audit-label-row">
+                  <span class="content-audit-label">关键词规则</span>
+                  <span class="content-audit-hint" id="audit-keyword-count">0 条</span>
+                </div>
+                <div class="audit-keyword-list" id="audit-keyword-list"></div>
+                <div class="audit-keyword-add">
+                  <input type="text" id="audit-keyword-input" maxlength="40" placeholder="添加关键词" autocomplete="off" />
+                  <button type="button" class="btn-outline btn-sm" id="audit-add-keyword">+ 添加</button>
+                </div>
+              </div>
+
+              <div class="content-audit-block">
+                <div class="content-audit-label-row">
+                  <span class="content-audit-label">待审核内容</span>
+                  <span class="content-audit-hint" id="audit-text-count">0 字</span>
+                </div>
+                <div class="audit-fill-row">
+                  <button type="button" class="audit-fill-btn" data-audit-source="requirements">需求描述</button>
+                  <button type="button" class="audit-fill-btn" data-audit-source="shots">分镜文本</button>
+                  <button type="button" class="audit-fill-btn" data-audit-source="prompt">当前 Prompt</button>
+                  <button type="button" class="audit-fill-btn" data-audit-source="narration">视频旁白</button>
+                </div>
+                <textarea id="audit-text" rows="5" placeholder="输入或从当前步骤填入待检查文本..."></textarea>
+              </div>
+
+              <div class="content-audit-actions">
+                <div class="audit-mode-toggle" role="group" aria-label="屏蔽方式">
+                  <label><input type="radio" name="audit-mode" value="mark" /> 标记关键词</label>
+                  <label><input type="radio" name="audit-mode" value="mask" checked /> 星号遮蔽</label>
+                </div>
+                <div class="audit-buttons">
+                  <button type="button" class="btn-primary btn-sm" id="audit-run">开始审核</button>
+                  <button type="button" class="btn-outline btn-sm" id="audit-clear">清空</button>
+                </div>
+              </div>
+
+              <div class="content-audit-result" id="audit-result" aria-live="polite">
+                <div class="audit-result-empty">命中 0 项 / 等待审核</div>
+              </div>
+              <p class="content-audit-disclaimer">当前提供关键词审核预览，正式生成内容的服务端审核尚未接入。</p>
+            </section>
+          </div>
         </div>
 
       </section>
@@ -140,6 +192,8 @@
     <script src="/web/runtime-config.js"></script>
     <script src="/web/api-client.js"></script>
     <script src="/web/creative-studio.js"></script>
+    <script src="/web/content-audit-core.js"></script>
+    <script src="/web/content-audit.js"></script>
     <script src="/web/session-nav.js"></script>
   </body>
 </html>

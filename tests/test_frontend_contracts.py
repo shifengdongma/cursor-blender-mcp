@@ -142,3 +142,5 @@ def test_asset_library_stats_and_unified_documents_contract():
     assert "data-storage-source" in js
     assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in css
     assert "#stats-row.is-hidden" in css
+    assert "#prompt-doc-modal.modal-overlay {" in css
+    assert "#prompt-doc-modal.modal-overlay.active" in css

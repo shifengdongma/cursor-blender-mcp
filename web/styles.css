@@ -11354,3 +11354,17 @@ a:focus-visible,
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Prompt document modal follows the same hidden-until-active contract as
+   #upload-modal and #edit-asset-modal. */
+#prompt-doc-modal.modal-overlay {
+  opacity: 0;
+  visibility: hidden;
+  animation: none;
+}
+
+#prompt-doc-modal.modal-overlay.active {
+  opacity: 1;
+  visibility: visible;
+  animation: fadeIn 0.2s ease;
+}
